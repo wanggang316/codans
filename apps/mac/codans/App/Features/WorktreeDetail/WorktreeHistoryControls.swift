@@ -16,9 +16,8 @@ struct WorktreeHistoryEntry: Identifiable, Equatable {
     case pullRequest(PullRequestState, isDraft: Bool)
   }
 
-  /// Distance from the top of its stack. `0` is the entry a single Back /
-  /// Forward step lands on, which is also the entry's position in the menu
-  /// once unresolvable ones have been dropped.
+  /// Distance from the top of its stack. The first row's offset is the
+  /// entry a single Back / Forward step lands on.
   let offset: Int
   let glyph: Glyph
   /// Row 1: the checked-out branch, as the header shows it.
@@ -39,19 +38,23 @@ extension WorktreeHistoryEntry {
   static let menuLimit = 15
 
   /// Resolves a history stack (oldest first, as the reducer stores it) into
-  /// menu rows ordered nearest first. Entries whose Worktree has left the
-  /// catalog are dropped — they would select nothing — while the offsets of
-  /// the surviving ones stay true to the stack, so a jump still lands where
-  /// the row says it does. `pullRequests` supplies the PR-state glyph, as
-  /// it does for the header and sidebar.
+  /// menu rows ordered nearest first. Entries a step cannot land on
+  /// (`WorktreeHistoryLanding`: removed, archived, or the current
+  /// selection) are dropped, while the offsets of the surviving ones stay
+  /// true to the stack, so a jump still lands where the row says it does.
+  /// `pullRequests` supplies the PR-state glyph, as it does for the header
+  /// and sidebar.
   static func resolve(
     stack: [HierarchySelection],
     catalog: Catalog,
+    current: HierarchySelection,
     pullRequests: [WorktreeID: PullRequestSnapshot] = [:]
   ) -> [WorktreeHistoryEntry] {
+    let landable = WorktreeHistoryLanding.landableWorktreeIDs(in: catalog)
     var entries: [WorktreeHistoryEntry] = []
     for (offset, selection) in stack.reversed().enumerated() {
       guard
+        WorktreeHistoryLanding.isLandable(selection, landable: landable, current: current),
         let worktreeID = selection.worktreeID,
         let project = catalog.projects.first(where: { $0.id == selection.projectID }),
         let worktree = project.worktrees.first(where: { $0.id == worktreeID })
@@ -190,8 +193,8 @@ struct WorktreeHistoryControls: NSViewRepresentable {
     }
   }
 
-  /// The segment's press-and-hold list. Nil for an empty stack, so a segment
-  /// with nowhere to go never opens an empty menu.
+  /// The segment's press-and-hold list. Nil when no entry is landable, so a
+  /// segment with nowhere to go never opens an empty menu.
   private func menu(
     for direction: Direction,
     entries: [WorktreeHistoryEntry],
@@ -208,8 +211,8 @@ struct WorktreeHistoryControls: NSViewRepresentable {
       item.attributedTitle = HistoryMenuRow.title(for: entry)
       item.image = HistoryMenuRow.image(for: entry.glyph)
       item.target = coordinator
-      // Carries the stack offset, not the row index: unresolvable entries
-      // are left out of the menu but still counted by the jump.
+      // Carries the stack offset, not the row index: entries that are not
+      // landable are left out of the menu but still counted by the jump.
       item.representedObject = direction.jump(offset: entry.offset)
       menu.addItem(item)
     }

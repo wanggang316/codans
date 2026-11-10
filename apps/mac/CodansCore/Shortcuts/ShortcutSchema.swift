@@ -160,14 +160,14 @@ extension ShortcutSchema {
       title: "Archive Worktree",
       category: .projectAndWorktree,
       scope: .configurable,
-      defaultBinding: .init(keyCode: UInt16(kVK_Delete), modifiers: .command)
+      defaultBinding: .init(keyCode: UInt16(kVK_Delete), modifiers: [.command, .control])
     ),
     .init(
       id: .deleteCurrentWorktree,
       title: "Delete Worktree",
       category: .projectAndWorktree,
       scope: .configurable,
-      defaultBinding: .init(keyCode: UInt16(kVK_Delete), modifiers: [.command, .shift])
+      defaultBinding: .init(keyCode: UInt16(kVK_Delete), modifiers: [.command, .control, .shift])
     ),
     .init(
       id: .showArchivedWorktrees,
@@ -182,6 +182,13 @@ extension ShortcutSchema {
       category: .projectAndWorktree,
       scope: .configurable,
       defaultBinding: .init(keyCode: UInt16(kVK_ANSI_C), modifiers: [.command, .shift])
+    ),
+    .init(
+      id: .toggleCurrentWorktreePinned,
+      title: "Pin / Unpin Worktree",
+      category: .projectAndWorktree,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_P), modifiers: [.command, .option])
     ),
     .init(
       id: .revealCurrentWorktreeInSidebar,

@@ -1,3 +1,4 @@
+import AppKit
 import CodansCore
 import ComposableArchitecture
 import Foundation
@@ -32,8 +33,8 @@ struct MainWindowCommandsTests {
   /// (TCA's `withDependencies` injection does not scope here), so any client
   /// whose `liveValue` has a `fatalError` stub crashes on first button tap —
   /// the PR-#13 ⌘E regression. The five allowed fields are all inert: a closure
-  /// to the root store, a resolved-shortcut snapshot, the focus observer that
-  /// gates the destructive worktree chords, and two AppState-owned
+  /// to the root store, a resolved-shortcut snapshot, the key-window observer that
+  /// scopes Archive / Delete Worktree to the main window, and two AppState-owned
   /// `@Observable` stores (`settingsStore` / `hierarchyManager`, injected for
   /// the Scripts menu) — none resolve through `@Dependency`, so none carry a
   /// fatalError client.
@@ -55,7 +56,7 @@ struct MainWindowCommandsTests {
     let commands = MainWindowCommands(
       store: { store },
       shortcuts: [:],
-      sidebarFocus: SidebarFocusObserver(),
+      mainWindowKey: MainWindowKeyObserver(),
       settingsStore: settingsStore,
       hierarchyManager: hierarchyManager
     )
@@ -64,9 +65,123 @@ struct MainWindowCommandsTests {
     #expect(mirror.children.count == 5)
     #expect(
       Set(labels) == [
-        "store", "shortcuts", "sidebarFocus", "settingsStore", "hierarchyManager",
+        "store", "shortcuts", "mainWindowKey", "settingsStore", "hierarchyManager",
       ]
     )
+  }
+
+  // MARK: - Archive / Delete Worktree scope (ADR 0010)
+
+  /// Enabled exactly when the main window is key and a Worktree is selected —
+  /// no input about the focused view exists, so the focus location cannot
+  /// change the result.
+  @Test(arguments: [
+    (true, true, true),
+    (true, false, false),
+    (false, true, false),
+    (false, false, false),
+  ])
+  func worktreeRemovalCommandsEnablement(
+    hasSelectedWorktree: Bool, isMainWindowKey: Bool, expected: Bool
+  ) {
+    #expect(
+      MainWindowCommands.worktreeRemovalCommandsEnabled(
+        hasSelectedWorktree: hasSelectedWorktree, isMainWindowKey: isMainWindowKey
+      ) == expected
+    )
+  }
+
+  @Test
+  func plainTopLevelWindowIsTheMainWindow() {
+    let window = Self.makeWindow()
+    #expect(MainWindowKeyObserver.isMainWindow(window))
+  }
+
+  @Test
+  func noKeyWindowIsNotTheMainWindow() {
+    #expect(!MainWindowKeyObserver.isMainWindow(nil))
+  }
+
+  @Test
+  func settingsWindowIsNotTheMainWindow() {
+    let window = Self.makeWindow()
+    SettingsWindowTagger.register(window)
+    #expect(!MainWindowKeyObserver.isMainWindow(window))
+  }
+
+  @Test
+  func diffWindowIsNotTheMainWindow() {
+    let window = Self.makeWindow()
+    window.identifier = DiffWindowManager.windowIdentifier
+    #expect(!MainWindowKeyObserver.isMainWindow(window))
+  }
+
+  /// Popovers come up as child windows of the window they point into.
+  @Test
+  func childWindowIsNotTheMainWindow() {
+    let parent = Self.makeWindow()
+    let child = Self.makeWindow()
+    parent.addChildWindow(child, ordered: .above)
+    defer { parent.removeChildWindow(child) }
+    #expect(!MainWindowKeyObserver.isMainWindow(child))
+    #expect(MainWindowKeyObserver.isMainWindow(parent))
+  }
+
+  @Test
+  func panelIsNotTheMainWindow() {
+    let panel = NSPanel(
+      contentRect: NSRect(x: 0, y: 0, width: 10, height: 10),
+      styleMask: [.titled], backing: .buffered, defer: true
+    )
+    panel.isReleasedWhenClosed = false
+    #expect(!MainWindowKeyObserver.isMainWindow(panel))
+  }
+
+  /// Regression: `NSApp.keyWindow` is still `nil` while `didBecomeKey` is
+  /// delivered, so the observer must take the window from the notification.
+  @Test
+  func observerFollowsTheWindowThatBecameKey() {
+    let observer = MainWindowKeyObserver()
+    let main = Self.makeWindow()
+    let child = Self.makeWindow()
+    main.addChildWindow(child, ordered: .above)
+    defer { main.removeChildWindow(child) }
+
+    observer.windowDidBecomeKey(main)
+    #expect(observer.isMainWindowKey)
+
+    // A popover (child window) takes key: resign of main, then become of child.
+    observer.windowDidResignKey(main)
+    observer.windowDidBecomeKey(child)
+    #expect(!observer.isMainWindowKey)
+
+    // Back to main; a late resign of the popover must not clear it.
+    observer.windowDidBecomeKey(main)
+    observer.windowDidResignKey(child)
+    #expect(observer.isMainWindowKey)
+
+    // The app deactivates: main resigns and nothing becomes key.
+    observer.windowDidResignKey(main)
+    #expect(!observer.isMainWindowKey)
+  }
+
+  @Test
+  func observerPostsFromNotifications() {
+    let observer = MainWindowKeyObserver()
+    let main = Self.makeWindow()
+    NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: main)
+    #expect(observer.isMainWindowKey)
+    NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: main)
+    #expect(!observer.isMainWindowKey)
+  }
+
+  private static func makeWindow() -> NSWindow {
+    let window = NSWindow(
+      contentRect: NSRect(x: 0, y: 0, width: 10, height: 10),
+      styleMask: [.titled], backing: .buffered, defer: true
+    )
+    window.isReleasedWhenClosed = false
+    return window
   }
 
   // MARK: - ⌘O (Open in Default Editor)
@@ -185,4 +300,26 @@ struct MainWindowCommandsTests {
     await store.finish()
   }
 
+  // MARK: - ⌘W (Close Tab routing)
+
+  @Test
+  func closeTabInDiffWindowClosesTheDiffWindow() {
+    let diff = Self.makeWindow()
+    diff.identifier = DiffWindowManager.windowIdentifier
+    #expect(MainWindowCommands.closeTabTarget(keyWindow: diff) == .keyWindow(diff))
+  }
+
+  @Test
+  func closeTabInSettingsWindowClosesSettings() {
+    let settings = Self.makeWindow()
+    SettingsWindowTagger.register(settings)
+    #expect(MainWindowCommands.closeTabTarget(keyWindow: settings) == .keyWindow(settings))
+  }
+
+  @Test
+  func closeTabInMainWindowClosesTheActiveTab() {
+    let main = Self.makeWindow()
+    #expect(MainWindowCommands.closeTabTarget(keyWindow: main) == .activeTab)
+    #expect(MainWindowCommands.closeTabTarget(keyWindow: nil) == .activeTab)
+  }
 }

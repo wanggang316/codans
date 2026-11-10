@@ -61,12 +61,9 @@ struct MainWindowCommands: Commands {
   /// `CodansApp.body` on every render; SwiftUI's `Commands` participates in
   /// observation, so an override rebinds the menu items without a manual refresh.
   let shortcuts: ResolvedShortcutMap
-  /// First-responder tracker for sidebar focus. Drives `.disabled` on the
-  /// destructive worktree chords (`⌘⌫` Archive / `⌘⇧⌫` Delete) so they only fire
-  /// while the sidebar holds focus — when a Ghostty terminal pane is focused the
-  /// menu items are disabled and the chord falls through to the terminal (where
-  /// `⌘⌫` is the standard "delete to start of line" binding).
-  let sidebarFocus: SidebarFocusObserver
+  /// Key-window tracker. Scopes Archive / Delete Worktree to the main window
+  /// (ADR 0010); see `worktreeRemovalCommandsEnabled`.
+  let mainWindowKey: MainWindowKeyObserver
   /// Source for the user-defined command rows merged into the **Worktree** menu.
   /// Read in the menu body so an add / edit / delete / reorder in Settings
   /// reflects without restart (`@Observable`; `Commands` participates in
@@ -172,6 +169,14 @@ struct MainWindowCommands: Commands {
       .appKeyboardShortcut(.copyCurrentWorktreePath, in: shortcuts)
       .disabled(!hasActiveWorktree)
 
+      // No sidebar-focus gate, unlike Archive / Delete: ⌘⌥P has no terminal
+      // meaning worth keeping, so the chord fires over a focused pane too.
+      Button(pinnableWorktree?.isPinned == true ? "Unpin Worktree" : "Pin Worktree") {
+        store()?.send(.toggleCurrentWorktreePinnedRequested)
+      }
+      .appKeyboardShortcut(.toggleCurrentWorktreePinned, in: shortcuts)
+      .disabled(pinnableWorktree == nil)
+
       Divider()
 
       // Git Viewer moved here from View — it operates on the current Worktree's
@@ -227,22 +232,20 @@ struct MainWindowCommands: Commands {
 
       Divider()
 
-      // Archive / Delete are gated on `sidebarFocus.isSidebarFocused` so the
-      // chord (`⌘⌫` / `⌘⇧⌫`) only fires while the sidebar holds first-responder.
-      // When a Ghostty pane is focused the menu item is disabled, the menu's
-      // chord matcher skips it, and the keystroke reaches the terminal —
-      // preserving the standard `⌘⌫` "delete to start of line" binding.
+      // Archive / Delete act on the selected Worktree from any focus location in
+      // the main window (ADR 0010). Their default chords (`⌃⌘⌫` / `⌃⌘⇧⌫`) leave
+      // `⌘⌫` / `⌘⇧⌫` to the focused terminal Pane or text field.
       Button("Archive Worktree") {
         store()?.send(.archiveCurrentWorktreeRequested)
       }
       .appKeyboardShortcut(.archiveCurrentWorktree, in: shortcuts)
-      .disabled(!hasActiveWorktree || !sidebarFocus.isSidebarFocused)
+      .disabled(!worktreeRemovalCommandsEnabled)
 
       Button("Delete Worktree") {
         store()?.send(.deleteCurrentWorktreeRequested)
       }
       .appKeyboardShortcut(.deleteCurrentWorktree, in: shortcuts)
-      .disabled(!hasActiveWorktree || !sidebarFocus.isSidebarFocused)
+      .disabled(!worktreeRemovalCommandsEnabled)
 
       Button("Show Archived Worktrees") {
         store()?.send(.showArchivedWorktreesForCurrentProjectRequested)
@@ -266,17 +269,12 @@ struct MainWindowCommands: Commands {
       .disabled(!hasActiveWorktree)
 
       Button("Close Tab") {
-        // ⌘W is a global menu chord; SwiftUI Commands aren't scene-scoped, so the
-        // same accelerator fires regardless of which window is key. Route on the
-        // current key window: Diff, Settings (or any future SwiftUI utility window
-        // tagged via `SettingsWindowTagger`) closes itself; the main `codans`
-        // window forwards to TabFeature. Without this dispatch the chord pressed
-        // inside Settings would close the foreground worktree's tab.
-        if let key = NSApp.keyWindow,
-          SettingsWindowTagger.matches(key) || key.identifier?.rawValue.hasPrefix("diff-") == true
-        {
-          key.performClose(nil)
-        } else {
+        // SwiftUI Commands aren't scene-scoped, so Close Tab fires whichever window
+        // is key. See `closeTabTarget(keyWindow:)`.
+        switch Self.closeTabTarget(keyWindow: NSApp.keyWindow) {
+        case .keyWindow(let window):
+          window.performClose(nil)
+        case .activeTab:
           store()?.send(.closeActiveTabForCurrentWorktree)
         }
       }
@@ -466,8 +464,50 @@ struct MainWindowCommands: Commands {
       forProject: state.selection.projectID, worktreeID: state.selection.worktreeID)
   }
 
+  /// Reads the `@Observable` catalog, not a reducer snapshot, so the title
+  /// flips as soon as the pin state changes.
+  private var pinnableWorktree: Worktree? {
+    guard let selection = store()?.state.selection else { return nil }
+    return RootFeature.pinnableCurrentWorktree(selection: selection, catalog: hierarchyManager.catalog)
+  }
+
   private var hasActiveWorktree: Bool {
     store()?.state.selection.worktreeID != nil
+  }
+
+  private var worktreeRemovalCommandsEnabled: Bool {
+    Self.worktreeRemovalCommandsEnabled(
+      hasSelectedWorktree: hasActiveWorktree,
+      isMainWindowKey: mainWindowKey.isMainWindowKey
+    )
+  }
+
+  /// Enablement rule for Archive / Delete Worktree (ADR 0010): the main window is
+  /// key and a Worktree is selected. The focus location in the main window does
+  /// not matter. The reducer still rejects the root Worktree and Workspace rows.
+  static func worktreeRemovalCommandsEnabled(
+    hasSelectedWorktree: Bool, isMainWindowKey: Bool
+  ) -> Bool {
+    hasSelectedWorktree && isMainWindowKey
+  }
+
+  enum CloseTabTarget: Equatable {
+    /// Close this window itself (Settings, the Diff window).
+    case keyWindow(NSWindow)
+    /// Close the active Tab of the selected Worktree in the main window.
+    case activeTab
+  }
+
+  /// Routing rule for Close Tab. Settings and the Diff window close themselves;
+  /// any other key window (the main window) closes the active Tab. Without this
+  /// rule, Close Tab in Settings or the Diff window closes a main-window Tab.
+  static func closeTabTarget(keyWindow: NSWindow?) -> CloseTabTarget {
+    if let keyWindow,
+      SettingsWindowTagger.matches(keyWindow) || DiffWindowManager.isDiffWindow(keyWindow)
+    {
+      return .keyWindow(keyWindow)
+    }
+    return .activeTab
   }
 
   /// `true` when the current Worktree has a PR snapshot in the GitHub feature's
@@ -483,13 +523,13 @@ struct MainWindowCommands: Commands {
   }
 
   /// Drive `.disabled` on Back/Forward so the chord is a hard no-op (and dims
-  /// the menu item) when there's no entry to navigate to.
+  /// the menu item) when there's no landable entry to navigate to.
   private var hasHistoryBack: Bool {
-    !(store()?.state.navigationHistoryBack.isEmpty ?? true)
+    store()?.state.canNavigateHistoryBack ?? false
   }
 
   private var hasHistoryForward: Bool {
-    !(store()?.state.navigationHistoryForward.isEmpty ?? true)
+    store()?.state.canNavigateHistoryForward ?? false
   }
 
   /// `true` when there is a selected Project. Drives `.disabled` for

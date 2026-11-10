@@ -75,12 +75,11 @@ struct NewAgentFeature {
       } else {
         recent = []
       }
-      guard catalog.sidebarHostLevel != nil else {
+      guard let groups = catalog.unfilteredSidebarHostGroups else {
         sections = [Section(id: "projects", title: "Projects", projects: projects.map(ProjectOption.init))]
         return
       }
-      let level = SidebarHostLevel(records: catalog.hosts, collapsed: [])
-      sections = level.groups(projects).map { group in
+      sections = groups.map { group in
         Section(
           id: SidebarOutlineModel.hostNodeID(group.host), title: group.displayName,
           projects: group.projects.map(ProjectOption.init))

@@ -36,10 +36,22 @@ struct CommandPaletteItemsTests {
     #expect(ids.contains("app.open-settings"))
     #expect(ids.contains("app.check-for-updates"))
     #expect(ids.contains("app.quit"))
+    #expect(ids.contains("app.refresh-all-projects"))
     #expect(!ids.contains("git.toggle-viewer"))
     #expect(!ids.contains("editor.open-default"))
     #expect(!ids.contains { $0.hasPrefix("pane.") })
     #expect(!ids.contains { $0.hasPrefix("window.") })
+  }
+
+  @Test
+  func refreshAllProjectsItemIsListedWithoutASelection() throws {
+    let items = Self.withEmptySettings {
+      CommandPaletteItems.build(selection: Self.emptySelection, catalog: Self.emptyCatalog)
+    }
+    let item = try #require(items.first { $0.id == "app.refresh-all-projects" })
+    #expect(item.title == "Refresh All Projects")
+    #expect(item.kind == .refreshAllProjects)
+    #expect(!item.hiddenWhenQueryEmpty)
   }
 
   // MARK: - Worktree context
@@ -234,6 +246,37 @@ struct CommandPaletteItemsTests {
     #expect(order(pinned) == .init(project: 0, worktree: 1))
     #expect(order(rest) == .init(project: 0, worktree: 2))
     #expect(order(remoteMain) == .init(project: 1, worktree: 0))
+  }
+
+  // MARK: - Pin / Unpin
+
+  @Test
+  func pinItemCarriesTheRegistryCommand() {
+    var project = Project(name: "P", rootPath: "/tmp/p", gitRoot: "/tmp/p")
+    let worktree = Worktree(name: "wt", path: "/tmp/p-wt", branch: "wt", isPinned: true)
+    project.worktrees = [worktree]
+    let items = Self.withEmptySettings {
+      CommandPaletteItems.build(
+        selection: HierarchySelection(projectID: project.id, worktreeID: worktree.id),
+        catalog: Catalog(projects: [project]))
+    }
+    let item = items.first { $0.id == "worktree.toggle-pin" }
+    #expect(item?.title == "Unpin Worktree")
+    #expect(item?.commandID == .toggleCurrentWorktreePinned)
+  }
+
+  /// The main checkout cannot be pinned from the sidebar, so the palette omits the item.
+  @Test
+  func mainCheckoutHasNoPinItem() {
+    var project = Project(name: "P", rootPath: "/tmp/p", gitRoot: "/tmp/p")
+    let main = Worktree(name: "main", path: "/tmp/p", branch: "main")
+    project.worktrees = [main]
+    let items = Self.withEmptySettings {
+      CommandPaletteItems.build(
+        selection: HierarchySelection(projectID: project.id, worktreeID: main.id),
+        catalog: Catalog(projects: [project]))
+    }
+    #expect(!items.contains { $0.id == "worktree.toggle-pin" })
   }
 
   // MARK: - Focused pane resolution

@@ -172,6 +172,13 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
       ?? worktrees.first { !$0.archived }
   }
 
+  /// `true` when the user may pin or unpin `worktree`. The main checkout of a
+  /// repository Project always leads the sidebar, so it has no pinned state; a
+  /// workspace's rows are all pinnable.
+  public func canPin(_ worktree: Worktree) -> Bool {
+    isWorkspace || !isMainCheckout(worktree)
+  }
+
   /// True for a Remote Project — its `rootPath` / `gitRoot` / worktree paths are
   /// remote, and terminals / git run over SSH. Local-filesystem operations
   /// (`FileManager`, `URL(fileURLWithPath:)`, symlink resolution, reveal-in-Finder)

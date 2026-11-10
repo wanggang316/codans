@@ -1,12 +1,16 @@
 import Foundation
 
 /// The help links shown by the sidebar footer's help menu and the menubar
-/// Help menu. Both menus render `allCases` through `HelpMenuItems`, so the
-/// two entry points cannot drift apart. Case order is menu order.
+/// Help menu. Both menus render `groups` through `HelpMenuItems`, so the
+/// two entry points cannot drift apart.
 enum HelpMenuLink: CaseIterable, Hashable {
   case website
-  case reportIssue
   case changelog
+  case reportIssue
+
+  /// Menu order. A separator divides the groups: links to the site first,
+  /// then the link that reports a problem.
+  static let groups: [[HelpMenuLink]] = [[.website, .changelog], [.reportIssue]]
 
   var title: String {
     switch self {
