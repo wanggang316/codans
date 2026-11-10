@@ -37,6 +37,14 @@ struct SkillInstallerTests {
   }
 
   @Test
+  func targetFoldersComeFromTheSkillLocationTable() {
+    #expect(SkillInstaller.Target.claude.skillsFolder == ".claude/skills")
+    #expect(SkillInstaller.Target.codex.skillsFolder == ".codex/skills")
+    #expect(SkillInstaller.Target.agents.skillsFolder == ".agents/skills")
+    #expect(SkillInstaller.Target.allCases.map(\.homeFolder) == [".claude", ".codex", ".agents"])
+  }
+
+  @Test
   func discoversBundledSkillsAndDetectedTargets() throws {
     let sandbox = try Sandbox()
     #expect(try sandbox.installer.bundledSkills().map(\.id) == ["codans-cli", "codans-review"])

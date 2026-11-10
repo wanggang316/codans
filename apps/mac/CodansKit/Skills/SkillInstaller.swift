@@ -1,3 +1,4 @@
+import CodansCore
 import Foundation
 
 /// Links the skills an app bundle ships (`Contents/Resources/skills/<id>`)
@@ -21,13 +22,24 @@ public struct SkillInstaller {
       }
     }
 
+    /// The skills folder, relative to the home (user scope) or the
+    /// repository root (project scope), as the Skill Location table names
+    /// it: Claude Code's and Codex's own folder under their config root,
+    /// and the folder Codex shares with other agents for `agents`.
+    public var skillsFolder: String {
+      let folder =
+        switch self {
+        case .claude: SkillLocation.claudeCode.configRootUserDirectory
+        case .codex: SkillLocation.codex.configRootUserDirectory
+        case .agents: SkillLocation.codex.sharedUserDirectories.first
+        }
+      guard let folder else { preconditionFailure("the Skill Location table has no \(rawValue) skills folder") }
+      return folder
+    }
+
     /// The agent-owned directory the skills folder lives under.
     public var homeFolder: String {
-      switch self {
-      case .claude: return ".claude"
-      case .codex: return ".codex"
-      case .agents: return ".agents"
-      }
+      (skillsFolder as NSString).deletingLastPathComponent
     }
   }
 
@@ -116,8 +128,7 @@ public struct SkillInstaller {
   /// `<root>/.claude/skills` for project scope.
   public func skillsDirectory(for target: Target, scope: Scope, projectRoot: URL?) -> URL {
     let base = scope == .project ? (projectRoot ?? homeDirectory) : homeDirectory
-    return base.appendingPathComponent(target.homeFolder, isDirectory: true)
-      .appendingPathComponent("skills", isDirectory: true)
+    return base.appendingPathComponent(target.skillsFolder, isDirectory: true)
   }
 
   /// A file-system path without a trailing slash, so links, reports, and
