@@ -69,6 +69,24 @@ struct WorkspaceSettingsAddProjectMenuTests {
   }
 
   @Test
+  func matchesAListedProjectThroughASymlinkedPath() throws {
+    // A Workspace can record a source as `/var/...` while the project's git
+    // root is `/private/var/...`: the same repository.
+    let real = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
+      .appendingPathComponent("sv-516-\(UUID().uuidString)")
+    let link = real.deletingLastPathComponent().appendingPathComponent("link-\(real.lastPathComponent)")
+    try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+    defer {
+      try? FileManager.default.removeItem(at: link)
+      try? FileManager.default.removeItem(at: real)
+    }
+    let project = Project(name: "api", rootPath: real.path, gitRoot: real.path)
+    let menu = Self.menu([project, Self.project("other")], listed: [link.path])
+    #expect(menu.sections.first?.projects.map(\.name) == ["other"])
+  }
+
+  @Test
   func rowsCarryTheProjectIconAndColor() {
     var project = Self.project("app")
     project.icon = .symbol("hammer")
