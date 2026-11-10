@@ -62,7 +62,7 @@ public nonisolated final class SkillFileSnapshot: SkillFileSystem, @unchecked Se
   public func setDirectory(_ path: String, _ children: [Child]?) {
     let path = Self.key(path)
     lock.withLock {
-      directories[path] = children.map { $0.map(\.name) }
+      directories[path] = .some(children.map { $0.map(\.name) })
       for child in children ?? [] {
         files[Self.child(path, child.name) + "/SKILL.md"] = child.skill.map(FileAnswer.data) ?? .missing
       }
@@ -83,6 +83,22 @@ public nonisolated final class SkillFileSnapshot: SkillFileSystem, @unchecked Se
       }
       return misses
     }
+  }
+
+  /// Runs `body` against this snapshot until a run reads nothing new, and
+  /// returns that run's result. After each other run `fetch` answers its
+  /// reads. `nil` when reads are still missing after `maxRounds` fetches.
+  public func settle<T>(
+    maxRounds: Int, _ body: () -> T, fetch: ([Request]) async throws -> Void
+  ) async rethrows -> T? {
+    for round in 0...maxRounds {
+      let result = body()
+      let missing = takeMisses()
+      guard !missing.isEmpty else { return result }
+      guard round < maxRounds else { break }
+      try await fetch(missing)
+    }
+    return nil
   }
 
   // MARK: - SkillFileSystem
