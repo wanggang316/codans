@@ -54,6 +54,22 @@ struct CatalogSidebarHostTests {
     #expect(Catalog(projects: [local]).sidebarOrderedProjects.map(\.name) == ["notes"])
   }
 
+  /// The unfiltered groups list every Project under its Host, with no filter
+  /// and no Host collapsed, and drop an empty This Mac.
+  @Test
+  func unfilteredGroupsIgnoreCollapseAndFilterAndDropAnEmptyThisMac() throws {
+    var catalog = self.catalog
+    catalog.collapsedSidebarHosts = [.thisMac, .host(box.id)]
+    catalog.sidebarFilter = .workspace
+    let groups = try #require(catalog.unfilteredSidebarHostGroups)
+    #expect(groups.map(\.host) == [.thisMac, .host(box.id), .host(mini.id)])
+    #expect(groups.map { $0.projects.map(\.name) } == [["notes"], ["api"], ["web"]])
+
+    let remoteOnly = Catalog(projects: [remote("api", on: box, root: boxRoot)], hosts: [mini, box])
+    #expect(try #require(remoteOnly.unfilteredSidebarHostGroups).map(\.host) == [.host(box.id)])
+    #expect(Catalog(projects: [local], hosts: [box]).unfilteredSidebarHostGroups == nil)
+  }
+
   @Test
   func aHostWithoutProjectsHasNoGroup() throws {
     let catalog = Catalog(projects: [local, remote("api", on: box, root: boxRoot)], hosts: [box, mini])
