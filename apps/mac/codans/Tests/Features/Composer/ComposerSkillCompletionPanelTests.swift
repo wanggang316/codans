@@ -50,6 +50,20 @@ struct ComposerSkillCompletionPanelTests {
   }
 
   @Test
+  func widthHasRoomForTheMeasuredNameAndALegacyScroller() {
+    let name = "agent-pages:use-agent-pages"
+    let text = ceil((name as NSString).size(withAttributes: [.font: Layout.rowFont]).width)
+    let rowPadding =
+      Layout.iconWidth + Layout.iconSpacing + 2 * Layout.rowHorizontalPadding + 2 * Layout.horizontalPadding
+    let overlay = Layout.width(names: [name], maxWidth: 1000, scrollerStyle: .overlay)
+    #expect(overlay - rowPadding > text)
+    let many = [name] + (0..<Layout.maxVisibleRows).map { "s\($0)" }
+    let legacy = Layout.width(names: many, maxWidth: 1000, scrollerStyle: .legacy)
+    #expect(legacy == overlay + NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy))
+    #expect(Layout.width(names: [name], maxWidth: 1000, scrollerStyle: .legacy) == overlay)
+  }
+
+  @Test
   func tooltipSitsRightOfThePanelTopAlignedWithTheRow() {
     let panel = CGRect(x: 300, y: 500, width: 200, height: 226)
     let row = CGRect(x: 305, y: 650, width: 190, height: 24)
