@@ -158,7 +158,7 @@ ProjectReconciler.reconcile
 | Header | 组行：组名 + 「Group · <Workspace>」，不打开分支 popover；成员行与普通 worktree 相同 |
 | 分支切换器 | `blockedBranches` 按 `repoRoot(for:)` 分组，只统计同仓库的兄弟行 |
 | 侧栏筛选 | 分类与 PR 筛选作用于成员行；有匹配成员的组行保持可见，并在筛选视图中展开 |
-| Settings | Workspace 的 Projects 一节列出源项目（名称、实时分支、路径），Add Project 菜单、Add Folder…、每行 Remove…（确认框附在表单上，列出该引用行的运行中终端） |
+| Settings | Workspace 的 Projects 一节列出源项目（名称、实时分支、路径），Add Project 菜单（与 New Workspace sheet 的 Add Project 菜单内容相同：共用 `ProjectMenuContent`，Recent + Projects，行带项目图标和颜色，动作菜单无勾选）、Add Folder…、每行 Remove…（确认框附在表单上，列出该引用行的运行中终端） |
 | IPC / CLI | `hierarchy.createWorktree` / `removeWorktree` 对 workspace 行返回 `invalidParams` / `conflict`；`codans tree` 按组嵌套，`--json` 带 `kind` 与 `workspaceGroup` |
 
 ### 组件边界
