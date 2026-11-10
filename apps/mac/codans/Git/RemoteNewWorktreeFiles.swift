@@ -75,6 +75,8 @@ nonisolated struct RemoteNewWorktreeFiles: Sendable {
     fi
     # Check the files out of the ref through a private index, as
     # `git worktree add` does: `git archive` would apply export-ignore.
+    # The view is the work tree, so attributes come from the ref, not from
+    # a .gitattributes only the main checkout has.
     index=$view.index
     fail() { rm -rf -- "$view" "$index"; none g 0; exit 0; }
     if [ ! -f "$index" ]; then
@@ -82,7 +84,7 @@ nonisolated struct RemoteNewWorktreeFiles: Sendable {
     fi
     if [ "$#" -gt 0 ]; then
       GIT_INDEX_FILE=$index git -C "$root" --literal-pathspecs ls-files -z -- "$@" \
-        | GIT_INDEX_FILE=$index git -C "$root" checkout-index -f -z --stdin --prefix="$view/" || fail
+        | GIT_INDEX_FILE=$index git -C "$root" --work-tree="$view" checkout-index -f -z --stdin || fail
     fi
     str v 0 "$view"
     find "$view" -type l | while IFS= read -r link; do

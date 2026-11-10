@@ -61,14 +61,16 @@ nonisolated enum NewWorktreeFiles {
       if !files.isEmpty {
         // Check the files out of the ref through a private index, as
         // `git worktree add` does. `git archive` would apply the
-        // `export-ignore` and `export-subst` attributes.
+        // `export-ignore` and `export-subst` attributes. The view is the
+        // work tree, so attributes come from the ref (the index) and the
+        // view, never from a `.gitattributes` only the main checkout has.
         let index = view.deletingLastPathComponent()
           .appending(path: "\(view.lastPathComponent).index", directoryHint: .notDirectory)
         defer { try? FileManager.default.removeItem(at: index) }
         let indexEnvironment = "GIT_INDEX_FILE=\(index.path(percentEncoded: false))"
         guard await git(["read-tree", ref], environment: indexEnvironment) != nil,
           await git(
-            ["checkout-index", "-f", "--prefix=\(view.path(percentEncoded: false))/", "--"] + files.sorted(),
+            ["--work-tree=\(view.path(percentEncoded: false))", "checkout-index", "-f", "--"] + files.sorted(),
             environment: indexEnvironment) != nil
         else { return false }
       }
