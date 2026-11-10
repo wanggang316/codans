@@ -1,0 +1,19 @@
+app: /Users/wanggang/Library/Developer/Xcode/DerivedData/codans-comrigrlijeuecaomjxegybkzaqn/Build/Products/Debug/Codans.app
+commit: 1acf95b0 fix(git): bound GitWorktreeCLI and keep GIT_* keys out of worktree git
+instance pid: 86058
+parent: 1 (/sbin/launchd)
+app PATH: PATH=/usr/bin:/bin:/usr/sbin:/sbin
+repo credential.helper (local): |!glab auth git-credential|
+global credential.helper: <none>
+project: 45676338-0B6E-4B03-B0E2-9369876F0E64
+$ codans-dev worktree new sv-515-after-r3-11379 --project 45676338-0B6E-4B03-B0E2-9369876F0E64 --json   (fetchRemoteOnCreate=true -> git fetch origin)
+exit: 0  (1 s)
+{
+  "data": {
+    "created": true,
+    "id": "57FEC879-B929-48EE-9553-F9E431C4D9CE",
+    "name": "sv-515-after-r3-11379",
+    "path": "/var/folders/24/xybqlpf54c11r2nnntcsv3140000gn/T/codans-self-verify-501-a9317ff4/worktrees/app-e2e/sv-515-after-r3-11379"
+  },
+  "schemaVersion": "codans.cli.worktree.new.v1"
+}
