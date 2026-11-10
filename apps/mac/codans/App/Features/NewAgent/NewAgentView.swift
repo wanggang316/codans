@@ -350,32 +350,27 @@ struct NewAgentView: View {
   }
 
   private var editor: some View {
-    ComposerTextEditor(text: $store.prompt.sending(\.promptChanged), selection: promptSelection)
-      .font(.body)
-      .scrollContentBackground(.hidden)
-      .focusEffectDisabled()
-      .frame(height: Self.editorHeight)
-      .overlay(alignment: .topLeading) {
-        if store.prompt.isEmpty {
-          // `TextEditor` has no placeholder of its own; this sits where the
-          // first line of text will, matching the text container's inset.
-          Text("What should the agent do? (⇧↩ for a new line)")
-            .foregroundStyle(.tertiary)
-            .padding(.leading, 5)
-            .allowsHitTesting(false)
-        }
-      }
-      .focused($focus, equals: .prompt)
-      // Owns Return and Escape too, so an open skill list gets them before
-      // they send or close the dialog. ⇧Return and ⌥Return break a line, as
-      // in the Command Queue composer.
-      .composerSkillCompletion(
-        skillCompletion, text: store.prompt, selection: promptSelection,
-        onInsert: { store.send(.promptChanged($0)) },
-        onSubmit: { if store.canSend { store.send(.sendTapped) } },
-        onCancel: { store.send(.cancelTapped) }
-      )
-      .accessibilityLabel("Prompt")
+    ComposerTextEditor(
+      text: $store.prompt.sending(\.promptChanged),
+      selection: promptSelection,
+      placeholder: "What should the agent do? (⇧↩ for a new line)"
+    )
+    .font(.body)
+    .scrollContentBackground(.hidden)
+    .focusEffectDisabled()
+    .frame(height: Self.editorHeight)
+    .focused($focus, equals: .prompt)
+    // Owns Return and Escape too, so an open skill list gets them before
+    // they send or close the dialog. ⇧Return and ⌥Return break a line, as
+    // in the Command Queue composer; during composition the keys belong to
+    // the input method.
+    .composerSkillCompletion(
+      skillCompletion, text: store.prompt, selection: promptSelection,
+      onInsert: { store.send(.promptChanged($0)) },
+      onSubmit: { if store.canSend { store.send(.sendTapped) } },
+      onCancel: { store.send(.cancelTapped) }
+    )
+    .accessibilityLabel("Prompt")
   }
 
   /// The agent to send to, as the small borderless menu a chat composer

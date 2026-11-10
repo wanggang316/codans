@@ -125,10 +125,12 @@ final class AppearanceApplyingView: NSView {
         // / `background-blur` (frosted glass) consistently with the
         // color-scheme path. Fall back to a plain opaque stain when the runtime
         // isn't up yet (tests / pre-bringUp), matching the prior behavior.
-        if let runtime = GhosttyRuntime.shared {
-          runtime.applyTerminalWindowBackground(window)
-        } else {
-          window.backgroundColor = ghosttyBackground
+        if window.takesTerminalBackground {
+          if let runtime = GhosttyRuntime.shared {
+            runtime.applyTerminalWindowBackground(window)
+          } else {
+            window.backgroundColor = ghosttyBackground
+          }
         }
       }
       window.contentView?.needsLayout = true

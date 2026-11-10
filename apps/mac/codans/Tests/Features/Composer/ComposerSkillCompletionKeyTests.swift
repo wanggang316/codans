@@ -27,7 +27,7 @@ struct ComposerSkillCompletionKeyTests {
     let completion: ComposerSkillCompletion
 
     var body: some View {
-      ComposerTextEditor(text: $owner.text, selection: selection)
+      ComposerTextEditor(text: $owner.text, selection: selection, placeholder: "")
         .composerSkillCompletion(
           completion, text: owner.text, selection: selection,
           onInsert: { owner.text = $0 },
@@ -164,5 +164,30 @@ struct ComposerSkillCompletionKeyTests {
     press(Self.returnKey.0, Self.returnKey.1, modifiers: .shift)
     #expect(owner.sent == 0)
     #expect(owner.text == "fix\n")
+  }
+
+  /// While an input method composes, Return and Escape confirm or cancel
+  /// its text: neither the list nor the owner takes them.
+  @Test
+  func composingTextKeepsReturnAndEscapeForTheInputMethod() throws {
+    let textView = try show()
+    defer { window.close() }
+    type("/", in: textView)
+    #expect(completion.isOpen)
+    func compose() {
+      textView.setMarkedText(
+        "c", selectedRange: NSRange(location: 1, length: 0),
+        replacementRange: NSRange(location: NSNotFound, length: 0))
+      settle()
+    }
+    compose()
+    #expect(selection.hasMarkedText)
+    // Return confirms the composition, so compose again for Escape.
+    press(Self.returnKey.0, Self.returnKey.1)
+    #expect(owner.sent == 0)
+    #expect(!owner.text.contains("code-review"))
+    compose()
+    press(Self.escapeKey.0, Self.escapeKey.1)
+    #expect(owner.closed == 0)
   }
 }

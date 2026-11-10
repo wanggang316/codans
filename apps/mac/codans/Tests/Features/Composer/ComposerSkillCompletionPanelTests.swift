@@ -95,7 +95,7 @@ struct ComposerSkillCompletionPanelTests {
     let completion: ComposerSkillCompletion
 
     var body: some View {
-      ComposerTextEditor(text: $owner.text, selection: selection)
+      ComposerTextEditor(text: $owner.text, selection: selection, placeholder: "")
         .composerSkillCompletion(
           completion, text: owner.text, selection: selection,
           onInsert: { owner.text = $0 }, onSubmit: {}, onCancel: {}

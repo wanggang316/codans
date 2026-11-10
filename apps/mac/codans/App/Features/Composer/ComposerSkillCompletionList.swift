@@ -175,7 +175,8 @@ extension View {
   /// Drives `completion` from a composer editor and owns the editor's
   /// Return and Escape. The open list takes Return, Tab, the arrows, and
   /// Escape. With it closed, Return calls `onSubmit` (⇧Return and ⌥Return
-  /// break a line) and Escape calls `onCancel`.
+  /// break a line) and Escape calls `onCancel`. While an input method
+  /// composes, all of them go to the input method.
   ///
   /// The owner's Return and Escape live here, not in its own `onKeyPress`
   /// handlers: SwiftUI offers a key press to the outermost handler first,
@@ -227,6 +228,9 @@ private struct ComposerSkillCompletionKeys: ViewModifier {
         completion.update(text: input.text, caret: selection.completionCaret(in: input.text))
       }
       .onKeyPress(keys: [.return, .tab, .upArrow, .downArrow, .escape], phases: .down) { press in
+        // While an input method composes, these keys confirm, cancel, or
+        // pick its text.
+        if selection.hasMarkedText { return .ignored }
         if let key = Self.listKey(for: press),
           selection.apply(completion.handle(key, text: text), onInsert: onInsert) == .handled
         {
