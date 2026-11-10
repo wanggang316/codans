@@ -39,6 +39,67 @@ struct HierarchyManagerWorktreeMgmtTests {
     #expect(worktree?.archived == true)
   }
 
+  // MARK: - selectWorktree guard
+
+  @Test
+  func selectingAnUnknownWorktreeThrowsNotFoundAndKeepsSelection() throws {
+    let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
+    let featureID = try manager.createWorktree(
+      in: projectID, name: "feature", path: "/repo/feat", branch: "feature"
+    )
+    try manager.selectWorktree(featureID, in: projectID)
+    let unknownID = WorktreeID()
+
+    #expect(throws: HierarchyError.notFound("Worktree \(unknownID)")) {
+      try manager.selectWorktree(unknownID, in: projectID)
+    }
+    #expect(manager.catalog.projects[0].selectedWorktreeID == featureID)
+  }
+
+  @Test
+  func selectingAnArchivedWorktreeThrowsInvariantViolationAndKeepsSelection() throws {
+    let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
+    let mainID = try manager.createWorktree(in: projectID, name: "main", path: "/repo", branch: "main")
+    let featureID = try manager.createWorktree(
+      in: projectID, name: "feature", path: "/repo/feat", branch: "feature"
+    )
+    try manager.selectWorktree(mainID, in: projectID)
+    try manager.setWorktreeArchived(worktreeID: featureID, archived: true)
+
+    #expect(throws: HierarchyError.invariantViolation("Cannot select archived Worktree \(featureID)")) {
+      try manager.selectWorktree(featureID, in: projectID)
+    }
+    #expect(manager.catalog.projects[0].selectedWorktreeID == mainID)
+  }
+
+  @Test
+  func activatingAnArchivedWorktreeThrowsInvariantViolation() throws {
+    let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
+    let mainID = try manager.createWorktree(in: projectID, name: "main", path: "/repo", branch: "main")
+    let featureID = try manager.createWorktree(
+      in: projectID, name: "feature", path: "/repo/feat", branch: "feature"
+    )
+    try manager.selectWorktree(mainID, in: projectID)
+    try manager.setWorktreeArchived(worktreeID: featureID, archived: true)
+
+    #expect(throws: HierarchyError.invariantViolation("Cannot select archived Worktree \(featureID)")) {
+      try manager.activateWorktree(featureID)
+    }
+    #expect(manager.catalog.projects[0].selectedWorktreeID == mainID)
+  }
+
+  @Test
+  func clearingTheWorktreeSelectionSucceeds() throws {
+    let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
+    let featureID = try manager.createWorktree(
+      in: projectID, name: "feature", path: "/repo/feat", branch: "feature"
+    )
+    try manager.selectWorktree(featureID, in: projectID)
+
+    try manager.selectWorktree(nil, in: projectID)
+    #expect(manager.catalog.projects[0].selectedWorktreeID == nil)
+  }
+
   // MARK: - archivedAt + auto-delete due (Cleanup)
 
   @Test

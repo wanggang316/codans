@@ -853,6 +853,17 @@ final class HierarchyManager {
     guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == projectID }) else {
       throw HierarchyError.notFound("Project \(projectID)")
     }
+    // An ID the detail cannot show (unknown, or archived and so hidden from
+    // the sidebar) would leave a blank detail and no selected row. Nil
+    // clears the selection and stays valid.
+    if let id {
+      guard let worktree = catalog.projects[projectIndex].worktrees.first(where: { $0.id == id }) else {
+        throw HierarchyError.notFound("Worktree \(id)")
+      }
+      if worktree.archived {
+        throw HierarchyError.invariantViolation("Cannot select archived Worktree \(id)")
+      }
+    }
     catalog.projects[projectIndex].selectedWorktreeID = id
     store.scheduleSave(catalog)
   }
@@ -3043,13 +3054,10 @@ final class HierarchyManager {
   // MARK: - Worktree / Tab activation
 
   func activateWorktree(_ id: WorktreeID) throws {
-    for (pi, project) in catalog.projects.enumerated()
-    where project.worktrees.contains(where: { $0.id == id }) {
-      catalog.projects[pi].selectedWorktreeID = id
-      store.scheduleSave(catalog)
-      return
+    guard let project = catalog.projects.first(where: { $0.worktrees.contains { $0.id == id } }) else {
+      throw HierarchyError.notFound("Worktree \(id)")
     }
-    throw HierarchyError.notFound("Worktree \(id)")
+    try selectWorktree(id, in: project.id)
   }
 
   func activateTab(_ id: TabID) throws {
