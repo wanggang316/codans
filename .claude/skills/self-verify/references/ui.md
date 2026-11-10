@@ -90,8 +90,9 @@ real agent or editor.
   worktree with `codans_debug pane focus <pane>`, not with AX: text in a row has no press. (`worktree switch`
   only records the selection; it does not move the sidebar.)
 - A Workspace header row offers its hover-only `+` and `⋯` entries as custom actions ("New Group", "Add Project",
-  "Workspace Settings", "Remove Workspace"); a group row offers "Expand Group" or "Collapse Group". Find the row
-  with `sv_find any <workspace name>`, then run, for example, `sv_action <role> <workspace name> "Add Project"`.
+  "Workspace Settings", "Remove Workspace"); a group row offers "Expand Group" or "Collapse Group". The header is
+  an `AXButton` labelled with the workspace name: `sv_action AXButton "<workspace>" "Add Project"` opens the
+  add-project sheet (an `AXSheet` with the heading "Add Project"); close it with `sv_press AXButton Cancel`.
 - The Agents View toggle is `#agentState.sidebarToggle`. Its label flips between "Hide agents view" and "Show agents
   view"; assert the flip.
 
