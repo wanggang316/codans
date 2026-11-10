@@ -20,18 +20,17 @@ public nonisolated struct SkillLaunch: Equatable, Sendable {
   /// An agent of `kind` that runs now: `arguments` are its argv after the
   /// executable and `environment` its environment, as the kernel reports
   /// them. Only `HOME` and the agent's config-root variable are kept.
-  /// `nil` when `HOME` is not an absolute path: the user-level skills
-  /// would then depend on a directory codans cannot place.
+  /// `nil` when `HOME` is missing or not an absolute path: the user-level
+  /// skills would then depend on a directory codans cannot place (an agent
+  /// without `HOME` may fall back to the password database, or fail).
   ///
   /// The shell has already expanded the arguments, so they need no plain
   /// word rule. A word that still starts with `~` was quoted: whether the
   /// agent expands it is not known, so such arguments cannot be read.
   public init?(kind: AgentKind, arguments: [String], environment: [String: String]) {
     var envVars: [String: String] = [:]
-    if let home = environment["HOME"] {
-      guard home.hasPrefix("/") else { return nil }
-      envVars["HOME"] = home
-    }
+    guard let home = environment["HOME"], home.hasPrefix("/") else { return nil }
+    envVars["HOME"] = home
     if let variable = AgentCatalog.descriptor(for: kind).skillLocation.configRoot?.environmentVariable,
       let value = environment[variable]
     {

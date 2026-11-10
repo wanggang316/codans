@@ -37,12 +37,16 @@ struct SkillLaunchTests {
   @Test
   func relativeHomeCannotBePlaced() {
     #expect(SkillLaunch(kind: .codex, arguments: [], environment: ["HOME": "home"]) == nil)
+    // Without `HOME` the agent's home is not known either.
+    #expect(SkillLaunch(kind: .codex, arguments: [], environment: ["PATH": "/usr/bin"]) == nil)
+    #expect(SkillLaunch(kind: .codex, arguments: [], environment: ["CODEX_HOME": "/srv/codex"]) == nil)
   }
 
   @Test
   func quotedTildeMakesTheArgumentsUnreadable() throws {
     let launch = try #require(
-      SkillLaunch(kind: .claudeCode, arguments: ["--settings", "~/s.json"], environment: [:]))
+      SkillLaunch(
+        kind: .claudeCode, arguments: ["--settings", "~/s.json"], environment: ["HOME": "/srv/agent-home"]))
     #expect(launch.arguments == nil)
   }
 

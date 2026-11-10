@@ -149,7 +149,7 @@ Command Queue（⌘L）的输入框用同一个组件、同一个修饰符和 Sk
 - **agent 与启动方式**：读目标 pane 的 `Pane.agentKind`（由前台进程识别），再从 pane 的前台进程组中找到该 agent 的进程（`AgentKindPatterns.agentLaunch`：进程名即 agent 的优先于 `node` 等包装进程，同类中先启动的优先），用 `KERN_PROCARGS2` 读它的 argv 与环境（`ForegroundJobReader`），得到 `SkillLaunch`：只保留 `HOME` 与该 agent 的配置根变量（`CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`PI_CODING_AGENT_DIR`），参数为可执行文件之后的原样 argv。不论这些值来自 profile、项目环境变量、shell 还是手动启动，解析的都是 agent 实际的 HOME、配置根和启动参数（ADR 0010）。
   - argv 已由 shell 展开，按词读，不需要 `PlainShellWords` 规则；首条 prompt 是一个词，不影响参数解析。仍以 `~` 开头的词说明它被引号括住，agent 是否展开未知，此时参数视为读不准（与 profile 的额外参数读不准时相同：不列插件 Skill，Pi 不列任何 Skill）。
   - macOS 对另一个进程只在它不是 Apple 平台二进制且属于同一用户时给出环境（实测 2026-11-10：自编译的进程可读；`/bin/sleep`、`zsh`、`/usr/bin/jq` 只有 argv）。agent 不是平台二进制，可读；环境为空时与“未给出”无法区分，按读不到处理。
-  - 找不到该 agent 的进程、读不到其 argv 或环境、或 `HOME` 不是绝对路径时，不列任何 Skill。
+  - 找不到该 agent 的进程、读不到其 argv 或环境、或环境中没有 `HOME`、`HOME` 不是绝对路径时，不列任何 Skill（没有 `HOME` 时 agent 可能改读用户数据库或失败，codans 无法确定其主目录）。
 - **目录**：项目起点为该 agent 进程的当前目录（`proc_pidinfo`），读不到时用 pane 的 `workingDirectory`；无新 worktree 视图。
 - **跟随 pane**：面板打开期间订阅该 pane（`HierarchyClient.paneChanges`：pane 或其前台进程组采样变化时发出；同类 agent 被另一个进程替换时 pane 不变而进程变化，同样发出）。每次都重新读取 agent 进程；扫描范围（agent 进程 pid、`SkillLaunch`、项目起点）变化时先清空旧结果再扫描，扫描结果按范围对应，旧范围的结果丢弃。agent 退出时列表关闭。
 - **不可用**：pane 中没有识别到 agent 时为 "Skill suggestions need an agent running in this pane"；读不到 agent 进程或其环境时为 "Skill suggestions are not available: codans cannot read how this agent was started"；远程项目与不支持的 agent 同 New Agent。此时不弹出，Skills 按钮置灰。

@@ -122,7 +122,7 @@ struct CommandQueueSkillTests {
     let loads = LockIsolated<[Load]>([])
     let catalog = Self.catalog(paneID: paneID, agent: .codex)
     let codex = RunningAgent(
-      pid: 7, launch: SkillLaunch(kind: .codex, arguments: [], environment: ["PATH": "/usr/bin"]),
+      pid: 7, launch: SkillLaunch(kind: .codex, arguments: [], environment: ["HOME": "/srv/agent-home"]),
       workingDirectory: nil)
     let store = Self.makeStore(catalog: catalog, paneID: paneID, loads: loads, running: LockIsolated(codex))
     store.exhaustivity = .off
@@ -186,6 +186,12 @@ struct CommandQueueSkillTests {
       $0.skillsUnavailableReason = CommandQueueFeature.State.unreadableLaunchReason
     }
     running.setValue(RunningAgent(pid: 9, launch: nil, workingDirectory: nil))
+    await store.send(.paneChanged(catalog.pane(paneID)))
+    // An environment without `HOME` does not place the agent's home.
+    running.setValue(
+      RunningAgent(
+        pid: 10, launch: SkillLaunch(kind: .claudeCode, arguments: [], environment: ["PATH": "/usr/bin"]),
+        workingDirectory: nil))
     await store.send(.paneChanged(catalog.pane(paneID)))
     #expect(store.state.skillLocation == .none)
     #expect(loads.value.isEmpty)
