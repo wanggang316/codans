@@ -454,7 +454,9 @@ final class GhosttyRuntime {
         window.backgroundColor = .windowBackgroundColor
         continue
       }
-      applyTerminalWindowBackground(window, color: color, opacity: opacity)
+      if window.takesTerminalBackground {
+        applyTerminalWindowBackground(window, color: color, opacity: opacity)
+      }
       if window.appearance != nil, let inferred {
         window.appearance = inferred
       }
