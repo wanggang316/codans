@@ -131,10 +131,7 @@ extension TerminalClient {
           let agent = AgentKindPatterns.agentLaunch(of: kind, in: job)
         else { return nil }
         return RunningAgent(
-          pid: agent.pid,
-          launch: ForegroundJobReader.processEnvironment(pid: agent.pid).flatMap {
-            SkillLaunch(kind: kind, arguments: agent.arguments, environment: $0)
-          },
+          pid: agent.pid, arguments: agent.arguments,
           workingDirectory: ForegroundJobReader.processWorkingDirectory(pid: agent.pid).map {
             URL(fileURLWithPath: $0, isDirectory: true)
           })

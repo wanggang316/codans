@@ -363,6 +363,16 @@ public nonisolated enum SkillLocationResolver {
     }
   }
 
+  /// `true` when `profile` starts its agent with another home or config
+  /// root than the user's (a dedicated home, `HOME`, or the agent's
+  /// config-root variable), so its agent reads other user-level skills and
+  /// plugins.
+  public static func movesSkillRoots(_ profile: AgentProfile) -> Bool {
+    if profile.usesDedicatedHome || profile.envVars["HOME"] != nil { return true }
+    guard let variable = profile.descriptor.skillLocation.configRoot?.environmentVariable else { return false }
+    return profile.envVars[variable] != nil
+  }
+
   /// `HOME` of the launched agent, by the same rule as the `env` prefix of
   /// `AgentLaunchCommand`: a dedicated home wins over a `HOME` in the
   /// profile's variables, which wins over the user's home.

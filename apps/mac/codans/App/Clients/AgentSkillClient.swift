@@ -16,9 +16,9 @@ nonisolated struct NewWorktreeSource: Equatable, Sendable {
 /// The agent that runs in a pane now, as skill completion reads it.
 nonisolated struct RunningAgent: Equatable, Sendable {
   var pid: Int32
-  /// How it started: its argv and the environment that place its skills.
-  /// `nil` when the kernel does not give its environment.
-  var launch: SkillLaunch?
+  /// Its argv after the executable (or after the agent script of a
+  /// wrapper such as `node`).
+  var arguments: [String]
   /// Its current directory, `nil` when it cannot be read.
   var workingDirectory: URL?
 }

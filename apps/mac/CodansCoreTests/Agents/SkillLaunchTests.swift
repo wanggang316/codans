@@ -3,79 +3,51 @@ import Testing
 
 @testable import CodansCore
 
-/// Skills of an agent that runs now: its argv and environment, read from
-/// the kernel, decide what it resolves (ADR 0010).
+/// Skills of an agent that runs now: its argv, read from the kernel,
+/// decides which launch flags it resolves with (ADR 0010).
 struct SkillLaunchTests {
   private let home = URL(fileURLWithPath: "/tmp/skill-launch/home", isDirectory: true)
   private let state = URL(fileURLWithPath: "/tmp/skill-launch/state", isDirectory: true)
 
-  private func paths(_ directories: [SkillDirectory]) -> [String] {
-    directories.map { $0.url.path(percentEncoded: false) }
-  }
-
   // MARK: - Running agent
 
   @Test
-  func runningAgentKeepsHomeAndConfigRootOnly() throws {
-    let launch = try #require(
-      SkillLaunch(
-        kind: .claudeCode, arguments: ["--model", "opus"],
-        environment: [
-          "HOME": "/srv/agent-home", "CLAUDE_CONFIG_DIR": "/srv/claude", "API_TOKEN": "secret",
-          "CODEX_HOME": "/srv/codex",
-        ]))
-    #expect(launch.profile.envVars == ["HOME": "/srv/agent-home", "CLAUDE_CONFIG_DIR": "/srv/claude"])
-    #expect(launch.arguments == ["--model", "opus"])
+  func runningAgentUsesTheUserRootsAndItsExactArguments() {
+    let launch = SkillLaunch(kind: .claudeCode, arguments: ["--settings", "/a b/s.json"])
+    #expect(launch.profile.envVars.isEmpty)
+    #expect(!launch.profile.usesDedicatedHome)
+    #expect(launch.arguments == ["--settings", "/a b/s.json"])
     // Two reads of one agent compare equal.
-    #expect(
-      launch
-        == SkillLaunch(
-          kind: .claudeCode, arguments: ["--model", "opus"],
-          environment: ["HOME": "/srv/agent-home", "CLAUDE_CONFIG_DIR": "/srv/claude"]))
+    #expect(launch == SkillLaunch(kind: .claudeCode, arguments: ["--settings", "/a b/s.json"]))
   }
 
   @Test
-  func relativeHomeCannotBePlaced() {
-    #expect(SkillLaunch(kind: .codex, arguments: [], environment: ["HOME": "home"]) == nil)
+  func quotedTildeMakesTheArgumentsUnreadable() {
+    #expect(SkillLaunch(kind: .claudeCode, arguments: ["--settings", "~/s.json"]).arguments == nil)
   }
 
   @Test
-  func quotedTildeMakesTheArgumentsUnreadable() throws {
-    let launch = try #require(
-      SkillLaunch(kind: .claudeCode, arguments: ["--settings", "~/s.json"], environment: [:]))
-    #expect(launch.arguments == nil)
-  }
-
-  @Test
-  func runningAgentResolvesAgainstItsOwnHomeAndConfigRoot() throws {
-    let launch = try #require(
-      SkillLaunch(
-        kind: .claudeCode, arguments: [],
-        environment: ["HOME": "/srv/agent-home"]))
+  func profilesThatMoveTheHomeOrConfigRoot() {
+    #expect(!SkillLocationResolver.movesSkillRoots(AgentProfile(kind: .claudeCode)))
     #expect(
-      paths(SkillLocationResolver.userDirectories(for: launch.profile, userHome: home, stateDirectory: state))
-        == ["/srv/agent-home/.claude/skills/"])
-    let moved = try #require(
-      SkillLaunch(
-        kind: .claudeCode, arguments: [],
-        environment: ["HOME": "/srv/agent-home", "CLAUDE_CONFIG_DIR": "/srv/claude"]))
+      !SkillLocationResolver.movesSkillRoots(AgentProfile(kind: .claudeCode, envVars: ["CODEX_HOME": "/x"])))
+    #expect(SkillLocationResolver.movesSkillRoots(AgentProfile(kind: .claudeCode, usesDedicatedHome: true)))
+    #expect(SkillLocationResolver.movesSkillRoots(AgentProfile(kind: .codex, envVars: ["HOME": "/x"])))
     #expect(
-      paths(SkillLocationResolver.userDirectories(for: moved.profile, userHome: home, stateDirectory: state))
-        == ["/srv/claude/skills/"])
+      SkillLocationResolver.movesSkillRoots(AgentProfile(kind: .claudeCode, envVars: ["CLAUDE_CONFIG_DIR": "/x"])))
+    #expect(SkillLocationResolver.movesSkillRoots(AgentProfile(kind: .codex, envVars: ["CODEX_HOME": "/x"])))
   }
 
   /// The prompt a launch passes is one exact word, so it does not hide the
   /// flags the way a quoted shell fragment does.
   @Test
-  func exactArgumentsWithAPromptStayReadable() throws {
-    let prompted = try #require(
-      SkillLaunch(kind: .pi, arguments: ["fix the bug"], environment: ["HOME": home.path]))
+  func exactArgumentsWithAPromptStayReadable() {
+    let prompted = SkillLaunch(kind: .pi, arguments: ["fix the bug"])
     #expect(
       !SkillLocationResolver.directories(
         for: prompted, projectStart: nil, userHome: home, stateDirectory: state
       ).isEmpty)
-    let noSkills = try #require(
-      SkillLaunch(kind: .pi, arguments: ["--no-skills", "fix the bug"], environment: ["HOME": home.path]))
+    let noSkills = SkillLaunch(kind: .pi, arguments: ["--no-skills", "fix the bug"])
     #expect(
       SkillLocationResolver.directories(
         for: noSkills, projectStart: nil, userHome: home, stateDirectory: state
