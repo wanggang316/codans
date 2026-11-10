@@ -175,11 +175,12 @@ main → pinned → pending → unpinned
 
 ### 各段语义
 
-**main 段**：只装 `worktree.path == project.rootPath` 一条——git 仓库根 checkout，每 Project 唯一。它由 reconcile 在 add Project 时写入（自然存在，非用户创建），用户预期它永远置顶（如 Finder 的"Macintosh HD"）。故独立于 pinned 之外，`isPinned` 对它无意义（UI 裁掉 Pin/Unpin）。main checkout 受归档与删除守卫保护。
+**main 段**：只装 `worktree.path == project.rootPath` 一条——git 仓库根 checkout，每 Project 唯一。它由 reconcile 在 add Project 时写入（自然存在，非用户创建），用户预期它永远置顶（如 Finder 的"Macintosh HD"）。故独立于 pinned 之外，`isPinned` 对它无意义（UI 裁掉 Pin/Unpin，⌘⌥P 与主菜单项对它禁用，见 keyboard-shortcuts 设计）。main checkout 受归档与删除守卫保护。
 
 **pinned 段**：`isPinned && path != rootPath && !archived`，段内取 catalog 数组相对位置。
 - **Pin**（unpinned 行右键）→ 移到 pinned 段**末尾**：主动 pin 表达"长期可见"而非"最上面"，放末尾让现有 pinned 顺序稳定（least surprise）。
 - **Unpin**（pinned 行右键）→ 移到 unpinned 段**顶部**：unpin 通常意味"不再高优先级但还在用"，放顶部符合"仍新鲜"的预期。
+- 当前 Worktree 也可用 ⌘⌥P、主菜单 Worktree → Pin / Unpin Worktree 或 Command Palette 切换，效果同右键菜单。
 - **拖拽**：`ForEach.onMove` 段内有效。
 
 **pending 段**：用户在 Create sheet 点 Create 之后、`wt sw` 流式完成之前的占位。数据来自 `HierarchySidebarFeature.State.pendingWorktrees: IdentifiedArrayOf<PendingWorktree>`，按 project 过滤渲染。`PendingWorktree` 持 `PendingWorktreeID`（独立于 `WorktreeID`，避免命名混淆）、创建用的 `CreateWorktreeSpec`、`status: .running / .failed(GitWorktreeError)`、`startedAt`。段内按插入顺序（`startedAt` 升序），无拖拽（临时占位，重排无意义）。
