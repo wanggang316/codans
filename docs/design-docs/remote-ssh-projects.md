@@ -193,6 +193,16 @@ the same `remoteHostResolver` seam, so the worktree-management surface
 (listing, create-sheet options, removal, prune) routes per call exactly like
 `LiveGitService` does for status.
 
+Both live clients (`GitServiceClient.liveValue`, `GitWorktreeClient.liveValue`)
+take their resolver from one source, `GitRemoteRoute.shared`, which app
+bring-up binds to the catalog. So every reader gets the routed transport: the
+main window store, the Settings window store, and a view that reads the
+dependency directly (the Project Settings "Base ref" picker). The local
+runners (`FoundationCommandRunner`, the streaming `wt` runner) refuse a
+non-file working directory with `.spawnFailed`: a Host-form location that is
+not resolved gives an error, not an `NSInvalidArgumentException` from
+`Process`.
+
 A reconciler sweep (launch, window focus, Refresh All) keeps a failed Project
 `.failed` while it checks it again; only a request for one Project (Retry, a
 new Project) shows it as `.loading`. A loading Project shows as a healthy
