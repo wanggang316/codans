@@ -15,9 +15,25 @@ struct HelpMenuLinkTests {
   )
 
   @Test
-  func linksAreOrderedWebsiteReportIssueChangelog() {
-    #expect(HelpMenuLink.allCases == [.website, .reportIssue, .changelog])
-    #expect(HelpMenuLink.allCases.map(\.title) == ["Website", "Report issue", "Changelog"])
+  func linksAreGroupedSiteLinksThenReportIssue() {
+    #expect(HelpMenuLink.groups == [[.website, .changelog], [.reportIssue]])
+    #expect(
+      HelpMenuLink.groups.map { $0.map(\.title) }
+        == [["Website", "Changelog"], ["Report issue"]])
+  }
+
+  @Test
+  func groupsListEveryLinkOnce() {
+    let flattened = HelpMenuLink.groups.flatMap { $0 }
+    #expect(flattened.count == HelpMenuLink.allCases.count)
+    #expect(Set(flattened) == Set(HelpMenuLink.allCases))
+  }
+
+  @Test
+  func everyLinkHasAnIcon() {
+    #expect(HelpMenuLink.website.systemImage == "globe")
+    #expect(HelpMenuLink.changelog.systemImage == "list.bullet.rectangle")
+    #expect(HelpMenuLink.reportIssue.systemImage == "exclamationmark.bubble")
   }
 
   @Test

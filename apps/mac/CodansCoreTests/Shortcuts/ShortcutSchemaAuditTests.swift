@@ -44,6 +44,28 @@ struct ShortcutSchemaAuditTests {
     #expect(ShortcutSchema.app.entry(for: .toggleSidebar)?.category == .general)
   }
 
+  /// ADR 0010: the window-wide Archive / Delete Worktree chords must not take the
+  /// text-editing `⌘⌫` / `⌘⇧⌫` from a terminal Pane or a text field, and must not
+  /// clash with another default.
+  @Test
+  func worktreeArchiveAndDeleteDefaultsLeaveTextEditingChordsFree() throws {
+    let deleteKey: UInt16 = 0x33
+    let textEditing: [ModifierMask] = [[.command], [.command, .shift]]
+    for entry in ShortcutSchema.app.entries {
+      guard let binding = entry.defaultBinding, binding.keyCode == deleteKey else { continue }
+      #expect(!textEditing.contains(binding.modifiers), "\(entry.id) default takes a text-editing chord.")
+    }
+    for id in [CommandID.archiveCurrentWorktree, .deleteCurrentWorktree] {
+      let binding = try #require(ShortcutSchema.app.entry(for: id)?.defaultBinding)
+      let clashes = ShortcutSchema.app.entries.filter {
+        $0.id != id && $0.defaultBinding?.keyCode == binding.keyCode
+          && $0.defaultBinding?.modifiers == binding.modifiers
+      }
+      #expect(clashes.isEmpty, "\(id) default clashes with \(clashes.map(\.id)).")
+      #expect(!AppKitReservedDetector.isReserved(keyCode: binding.keyCode, modifiers: binding.modifiers))
+    }
+  }
+
   /// ⌘/ must stay free: no other default claims it, and AppKit reserves only ⌘⇧/ (Help).
   @Test
   func toggleSidebarDefaultClashesWithNothing() throws {
@@ -112,8 +134,8 @@ struct ShortcutSchemaAuditTests {
     (.focusSplitUp, (0x7E, [.command, .option])),  // ⌘⌥↑
     (.focusSplitDown, (0x7D, [.command, .option])),  // ⌘⌥↓
     (.revealCurrentWorktreeInFinder, (0x1F, [.command, .option])),  // ⌥O
-    (.archiveCurrentWorktree, (0x33, [.command])),  // ⌘⌫
-    (.deleteCurrentWorktree, (0x33, [.command, .shift])),  // ⌘⇧⌫
+    (.archiveCurrentWorktree, (0x33, [.command, .control])),  // ⌃⌘⌫
+    (.deleteCurrentWorktree, (0x33, [.command, .control, .shift])),  // ⌃⌘⇧⌫
     (.showArchivedWorktrees, (0x00, [.command, .control])),  // ⌃A
     (.copyCurrentWorktreePath, (0x08, [.command, .shift])),  // ⌘⇧C
     (.revealCurrentWorktreeInSidebar, (0x26, [.command, .shift])),  // ⌘⇧J

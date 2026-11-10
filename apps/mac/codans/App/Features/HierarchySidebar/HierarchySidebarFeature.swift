@@ -145,12 +145,11 @@ struct HierarchySidebarFeature {
     /// Pending "Remove All Merged Worktrees" batch awaiting its confirm
     /// dialog. Non-nil → dialog visible. Destructive, so always gated.
     var pendingRemoveAllMerged: PendingMergedBatch?
-    /// Session-scoped "seen it" flag for the first-archive explainer.
-    /// Lives on this reducer (sidebar is the sole archive entry point
-    /// for the main list; Archived sheet handles its own flow).
-    var hasShownArchiveExplainer: Bool = false
-    /// Pending archive awaiting the first-archive explainer dialog.
-    var pendingArchiveExplainer: PendingArchiveExplainer?
+    /// Pending archive awaiting its confirmation dialog. Non-nil → dialog
+    /// visible. Every interactive archive asks (ADR 0010): archive stops the
+    /// Worktree's Pane sessions, and the window-wide chord is easy to press
+    /// by accident.
+    var pendingWorktreeArchive: PendingWorktreeArchive?
     /// Transient toast after Prune completes.
     var pruneToast: String?
     /// Transient toast surfacing an archive / delete lifecycle failure.
@@ -180,10 +179,10 @@ struct HierarchySidebarFeature {
     var gitEnvironment: GitEnvironmentStatus?
   }
 
-  /// Payload for the first-archive explainer dialog. Carries the
+  /// Payload for the archive confirmation dialog. Carries the
   /// originating `(projectID, name)` so the post-confirm path
   /// can run the archive-script wrapper without re-walking the catalog.
-  struct PendingArchiveExplainer: Equatable {
+  struct PendingWorktreeArchive: Equatable {
     var worktreeID: WorktreeID
     var projectID: ProjectID
     var name: String
@@ -1086,24 +1085,20 @@ struct HierarchySidebarFeature {
       {
         return .none
       }
-      if state.hasShownArchiveExplainer {
-        return runArchiveWithLifecycle(wid: wid, pid: pid)
-      }
-      state.pendingArchiveExplainer = PendingArchiveExplainer(
+      state.pendingWorktreeArchive = PendingWorktreeArchive(
         worktreeID: wid, projectID: pid, name: name
       )
       return .none
 
     case .worktreeArchiveConfirmed:
-      guard let pending = state.pendingArchiveExplainer else { return .none }
-      state.hasShownArchiveExplainer = true
-      state.pendingArchiveExplainer = nil
+      guard let pending = state.pendingWorktreeArchive else { return .none }
+      state.pendingWorktreeArchive = nil
       return runArchiveWithLifecycle(
         wid: pending.worktreeID, pid: pending.projectID
       )
 
     case .worktreeArchiveCancelled:
-      state.pendingArchiveExplainer = nil
+      state.pendingWorktreeArchive = nil
       return .none
 
     case .worktreeUnarchiveTapped(let wid, _):
@@ -1184,9 +1179,6 @@ struct HierarchySidebarFeature {
     case .projectArchiveAllMergedConfirmed:
       guard let pending = state.pendingArchiveAllMerged else { return .none }
       state.pendingArchiveAllMerged = nil
-      // The batch dialog stands in for the per-worktree first-archive
-      // explainer, so suppress it for any later single archive this session.
-      state.hasShownArchiveExplainer = true
       return .merge(
         pending.worktreeIDs.map {
           runArchiveWithLifecycle(wid: $0, pid: pending.projectID)

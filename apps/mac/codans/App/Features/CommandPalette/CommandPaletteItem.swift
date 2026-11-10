@@ -96,6 +96,7 @@ struct CommandPaletteItem: Equatable, Identifiable {
     case showUnreadNotifications
     case toggleSidebar
     case openGhosttyConfig
+    case refreshAllProjects
 
     // Worktree
     case selectWorktree(ProjectID, WorktreeID)

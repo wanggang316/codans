@@ -3064,6 +3064,13 @@ final class HierarchyManager {
     for (pi, project) in catalog.projects.enumerated() {
       for (wi, worktree) in project.worktrees.enumerated()
       where worktree.tabs.contains(where: { $0.id == id }) {
+        // An archived Worktree is hidden from the sidebar, so a change to its
+        // selected Tab would report success with no visible result.
+        if worktree.archived {
+          throw HierarchyError.invariantViolation(
+            "Cannot activate Tab \(id) in archived Worktree \(worktree.id)"
+          )
+        }
         catalog.projects[pi].worktrees[wi].selectedTabID = id
         store.scheduleSave(catalog)
         return

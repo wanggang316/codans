@@ -160,14 +160,14 @@ extension ShortcutSchema {
       title: "Archive Worktree",
       category: .projectAndWorktree,
       scope: .configurable,
-      defaultBinding: .init(keyCode: UInt16(kVK_Delete), modifiers: .command)
+      defaultBinding: .init(keyCode: UInt16(kVK_Delete), modifiers: [.command, .control])
     ),
     .init(
       id: .deleteCurrentWorktree,
       title: "Delete Worktree",
       category: .projectAndWorktree,
       scope: .configurable,
-      defaultBinding: .init(keyCode: UInt16(kVK_Delete), modifiers: [.command, .shift])
+      defaultBinding: .init(keyCode: UInt16(kVK_Delete), modifiers: [.command, .control, .shift])
     ),
     .init(
       id: .showArchivedWorktrees,

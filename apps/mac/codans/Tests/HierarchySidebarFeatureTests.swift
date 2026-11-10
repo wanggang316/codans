@@ -748,10 +748,7 @@ struct HierarchySidebarFeatureTests {
     )
     let snapshot = settings
 
-    var initial = HierarchySidebarFeature.State()
-    initial.hasShownArchiveExplainer = true
-
-    let store = TestStore(initialState: initial) {
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
       HierarchySidebarFeature()
     } withDependencies: {
       $0.hierarchyClient.snapshot = {
@@ -773,7 +770,13 @@ struct HierarchySidebarFeatureTests {
 
     await store.send(
       .worktreeArchiveTapped(worktreeID: worktreeID, inProject: projectID, name: "feature")
-    )
+    ) {
+      $0.pendingWorktreeArchive = HierarchySidebarFeature.PendingWorktreeArchive(
+        worktreeID: worktreeID, projectID: projectID, name: "feature")
+    }
+    await store.send(.worktreeArchiveConfirmed) {
+      $0.pendingWorktreeArchive = nil
+    }
     await store.receive(
       .lifecycleStarted(
         worktreeID: worktreeID,
@@ -806,10 +809,7 @@ struct HierarchySidebarFeatureTests {
     let worktreeID = WorktreeID()
     let scriptCalls = LockIsolated<Int>(0)
 
-    var initial = HierarchySidebarFeature.State()
-    initial.hasShownArchiveExplainer = true
-
-    let store = TestStore(initialState: initial) {
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
       HierarchySidebarFeature()
     } withDependencies: {
       $0.hierarchyClient.snapshot = {
@@ -825,7 +825,13 @@ struct HierarchySidebarFeatureTests {
 
     await store.send(
       .worktreeArchiveTapped(worktreeID: worktreeID, inProject: projectID, name: "feature")
-    )
+    ) {
+      $0.pendingWorktreeArchive = HierarchySidebarFeature.PendingWorktreeArchive(
+        worktreeID: worktreeID, projectID: projectID, name: "feature")
+    }
+    await store.send(.worktreeArchiveConfirmed) {
+      $0.pendingWorktreeArchive = nil
+    }
     await store.receive(
       .lifecycleStarted(
         worktreeID: worktreeID,
@@ -840,6 +846,67 @@ struct HierarchySidebarFeatureTests {
       $0.lifecycleProgress = [:]
     }
     #expect(scriptCalls.value == 0)
+  }
+
+  /// ADR 0010: archive asks for confirmation every time, not once per session.
+  /// A confirmed archive must not suppress the dialog for the next one, and
+  /// Cancel must leave the Worktree untouched.
+  @Test
+  func archiveAsksForConfirmationOnEveryArchiveInOneSession() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let secondID = WorktreeID()
+    let archived = LockIsolated<[WorktreeID]>([])
+    var catalog = Self.makeLifecycleCatalog(projectID: projectID, worktreeID: worktreeID)
+    catalog.projects[0].worktrees.append(
+      Worktree(id: secondID, name: "second", path: "/p-wts/second"))
+    let snapshot = catalog
+
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { snapshot }
+      $0.hierarchyClient.setWorktreeArchived = { wid, _ in
+        archived.withValue { $0.append(wid) }
+      }
+      $0.hierarchyClient.stopAllScripts = { _ in }
+      $0[SettingsWriter.self].readSnapshotSync = { Settings() }
+    }
+
+    await store.send(
+      .worktreeArchiveTapped(worktreeID: worktreeID, inProject: projectID, name: "feature")
+    ) {
+      $0.pendingWorktreeArchive = HierarchySidebarFeature.PendingWorktreeArchive(
+        worktreeID: worktreeID, projectID: projectID, name: "feature")
+    }
+    await store.send(.worktreeArchiveConfirmed) {
+      $0.pendingWorktreeArchive = nil
+    }
+    await store.receive(
+      .lifecycleStarted(
+        worktreeID: worktreeID,
+        progress: WorktreeLifecycleProgress(kind: .archive, phase: .finalizing)
+      )
+    ) {
+      $0.lifecycleProgress[worktreeID] = WorktreeLifecycleProgress(
+        kind: .archive, phase: .finalizing
+      )
+    }
+    await store.receive(.lifecycleEnded(worktreeID: worktreeID)) {
+      $0.lifecycleProgress = [:]
+    }
+
+    // Second archive in the same session: the dialog shows again.
+    await store.send(
+      .worktreeArchiveTapped(worktreeID: secondID, inProject: projectID, name: "second")
+    ) {
+      $0.pendingWorktreeArchive = HierarchySidebarFeature.PendingWorktreeArchive(
+        worktreeID: secondID, projectID: projectID, name: "second")
+    }
+    await store.send(.worktreeArchiveCancelled) {
+      $0.pendingWorktreeArchive = nil
+    }
+    #expect(archived.value == [worktreeID])
   }
 
   /// Remove with a configured delete script: same narration shape as
@@ -995,7 +1062,7 @@ struct HierarchySidebarFeatureTests {
   }
 
   @Test
-  func archiveAllMergedConfirmedFansOutAndSuppressesExplainer() async {
+  func archiveAllMergedConfirmedFansOutToEveryTarget() async {
     let f = mergedBatchFixture()
     let archived = LockIsolated<[WorktreeID]>([])
     let store = TestStore(
@@ -1020,8 +1087,6 @@ struct HierarchySidebarFeatureTests {
 
     await store.send(.projectArchiveAllMergedConfirmed) {
       $0.pendingArchiveAllMerged = nil
-      // The batch dialog stands in for the per-worktree explainer.
-      $0.hasShownArchiveExplainer = true
     }
     await store.finish()
     #expect(Set(archived.value) == [f.wtA, f.wtB])
@@ -1203,9 +1268,7 @@ extension HierarchySidebarFeatureTests {
   @Test
   func archiveAndRemoveRejectEveryWorkspaceRow() async {
     let f = WorkspaceFixture()
-    var initial = HierarchySidebarFeature.State()
-    initial.hasShownArchiveExplainer = true
-    let store = TestStore(initialState: initial) {
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
       HierarchySidebarFeature()
     } withDependencies: {
       $0.hierarchyClient.snapshot = { Catalog(projects: [f.project]) }

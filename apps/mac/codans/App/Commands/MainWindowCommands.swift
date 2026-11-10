@@ -61,12 +61,9 @@ struct MainWindowCommands: Commands {
   /// `CodansApp.body` on every render; SwiftUI's `Commands` participates in
   /// observation, so an override rebinds the menu items without a manual refresh.
   let shortcuts: ResolvedShortcutMap
-  /// First-responder tracker for sidebar focus. Drives `.disabled` on the
-  /// destructive worktree chords (`⌘⌫` Archive / `⌘⇧⌫` Delete) so they only fire
-  /// while the sidebar holds focus — when a Ghostty terminal pane is focused the
-  /// menu items are disabled and the chord falls through to the terminal (where
-  /// `⌘⌫` is the standard "delete to start of line" binding).
-  let sidebarFocus: SidebarFocusObserver
+  /// Key-window tracker. Scopes Archive / Delete Worktree to the main window
+  /// (ADR 0010); see `worktreeRemovalCommandsEnabled`.
+  let mainWindowKey: MainWindowKeyObserver
   /// Source for the user-defined command rows merged into the **Worktree** menu.
   /// Read in the menu body so an add / edit / delete / reorder in Settings
   /// reflects without restart (`@Observable`; `Commands` participates in
@@ -227,22 +224,20 @@ struct MainWindowCommands: Commands {
 
       Divider()
 
-      // Archive / Delete are gated on `sidebarFocus.isSidebarFocused` so the
-      // chord (`⌘⌫` / `⌘⇧⌫`) only fires while the sidebar holds first-responder.
-      // When a Ghostty pane is focused the menu item is disabled, the menu's
-      // chord matcher skips it, and the keystroke reaches the terminal —
-      // preserving the standard `⌘⌫` "delete to start of line" binding.
+      // Archive / Delete act on the selected Worktree from any focus location in
+      // the main window (ADR 0010). Their default chords (`⌃⌘⌫` / `⌃⌘⇧⌫`) leave
+      // `⌘⌫` / `⌘⇧⌫` to the focused terminal Pane or text field.
       Button("Archive Worktree") {
         store()?.send(.archiveCurrentWorktreeRequested)
       }
       .appKeyboardShortcut(.archiveCurrentWorktree, in: shortcuts)
-      .disabled(!hasActiveWorktree || !sidebarFocus.isSidebarFocused)
+      .disabled(!worktreeRemovalCommandsEnabled)
 
       Button("Delete Worktree") {
         store()?.send(.deleteCurrentWorktreeRequested)
       }
       .appKeyboardShortcut(.deleteCurrentWorktree, in: shortcuts)
-      .disabled(!hasActiveWorktree || !sidebarFocus.isSidebarFocused)
+      .disabled(!worktreeRemovalCommandsEnabled)
 
       Button("Show Archived Worktrees") {
         store()?.send(.showArchivedWorktreesForCurrentProjectRequested)
@@ -463,6 +458,22 @@ struct MainWindowCommands: Commands {
 
   private var hasActiveWorktree: Bool {
     store()?.state.selection.worktreeID != nil
+  }
+
+  private var worktreeRemovalCommandsEnabled: Bool {
+    Self.worktreeRemovalCommandsEnabled(
+      hasSelectedWorktree: hasActiveWorktree,
+      isMainWindowKey: mainWindowKey.isMainWindowKey
+    )
+  }
+
+  /// Enablement rule for Archive / Delete Worktree (ADR 0010): the main window is
+  /// key and a Worktree is selected. The focus location in the main window does
+  /// not matter. The reducer still rejects the root Worktree and Workspace rows.
+  static func worktreeRemovalCommandsEnabled(
+    hasSelectedWorktree: Bool, isMainWindowKey: Bool
+  ) -> Bool {
+    hasSelectedWorktree && isMainWindowKey
   }
 
   enum CloseTabTarget: Equatable {

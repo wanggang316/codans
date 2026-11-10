@@ -117,6 +117,8 @@ Codable 模式（与 `isPinned` 同形）：`decodeIfPresent ?? false` 保读兼
 
 ### 删除流程与终端安全
 
+交互式归档（快捷键、主菜单、行右键菜单、Command Palette）每次都弹确认框：归档会停止该 Worktree 所有 Pane 的会话。CLI 归档与已合并 Worktree 的自动归档不弹（ADR 0010）。
+
 安全 vs 强制不是 `git-wt` flag，而是调用层的两步：
 
 1. **安全删除**：先 `changedFiles(worktreeRoot)`。非空 → 抛/呈现 `uncommittedChanges(files:)`，渲染"3 files have uncommitted changes in `<path>`: a.swift, b.swift, …"，给主按钮"Force Remove" + 次按钮"Cancel"。

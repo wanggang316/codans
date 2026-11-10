@@ -2,11 +2,11 @@ import SwiftUI
 import CodansCore
 
 /// Compact footer mounted at the sidebar's `.safeAreaInset(edge: .bottom)`.
-/// A leading help button opens the help menu (Website / Report issue /
-/// Changelog). Trailing buttons toggle the Agents View panel and re-run the
-/// project reconciler manually, so the user can pick up out-of-band changes
-/// (e.g. a folder that just got `git init`) without waiting for the
-/// focus-driven cadence. The tag-filter button, whose popover lists the tag
+/// A leading help button opens the help menu (Website / Changelog, then
+/// Report issue). Trailing buttons toggle the Agents View panel and open the
+/// Settings window. All three share `SidebarFooterButtonStyle`. A manual
+/// reconcile of every Project is the "Refresh All Projects" Command Palette
+/// item. The tag-filter button, whose popover lists the tag
 /// filters (`[All]`, one row per Tag, an optional `[Untagged]`, and an
 /// `Edit Tags…` shortcut), is hidden.
 ///
@@ -24,9 +24,8 @@ struct TagFilterPopoverFooter: View {
   /// Trailing "Edit Tags…" entry — opens the TagManager sheet.
   /// Optional so previews / tests without manager wiring can omit it.
   var onEditTagsTapped: (() -> Void)?
-  /// Right-side refresh glyph. Optional so previews / tests without a
-  /// reconciler wired can drop it.
-  var onRefreshTapped: (() -> Void)?
+  /// Trailing Settings button. nil = hide the button (previews / tests).
+  var onSettingsTapped: (() -> Void)?
   /// Sidebar-relocated AgentState toggle. nil = hide the button
   /// entirely (used in previews / contexts without a registry wired).
   var onAgentStateTapped: (() -> Void)?
@@ -46,7 +45,7 @@ struct TagFilterPopoverFooter: View {
       if let onAgentStateTapped {
         Button(action: onAgentStateTapped) {
           // Glyph alone communicates open/closed via outline vs fill;
-          // no color shift, no badge dot — keeps the footer button
+          // no state color, no badge dot — keeps the footer button
           // chrome visually quiet so the actual panel content does
           // the signalling.
           Image(
@@ -54,29 +53,22 @@ struct TagFilterPopoverFooter: View {
               ? "sparkles.rectangle.stack.fill"
               : "sparkles.rectangle.stack"
           )
-          .font(.system(size: 13, weight: .regular))
-          .foregroundStyle(.secondary)
-          .frame(width: 22, height: 22)
-          .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.sidebarFooter)
         .help(agentStatePanelOpen ? "Hide agents view" : "Show agents view")
         .accessibilityLabel(
           agentStatePanelOpen ? "Hide agents view" : "Show agents view"
         )
         .accessibilityIdentifier("agentState.sidebarToggle")
       }
-      if let onRefreshTapped {
-        Button(action: onRefreshTapped) {
-          Image(systemName: "arrow.clockwise")
-            .font(.system(size: 13, weight: .regular))
-            .foregroundStyle(.secondary)
-            .frame(width: 22, height: 22)
-            .contentShape(Rectangle())
+      if let onSettingsTapped {
+        Button(action: onSettingsTapped) {
+          Image(systemName: "gearshape")
         }
-        .buttonStyle(.plain)
-        .help("Refresh all projects")
-        .accessibilityLabel("Refresh all projects")
+        .buttonStyle(.sidebarFooter)
+        .help("Settings")
+        .accessibilityLabel("Settings")
+        .accessibilityIdentifier("sidebar.settingsButton")
       }
     }
     // Same insets as the Agents View card. The gap below the buttons equals
