@@ -7,13 +7,18 @@ import SwiftUI
 /// but stay disabled while Settings, the Diff window, a sheet, or a popover is key.
 ///
 /// Key-window changes post `NSWindow.didBecomeKeyNotification` /
-/// `didResignKeyNotification`, so no event monitor is needed. Recomputes are synchronous on
-/// the main thread so the new value reaches SwiftUI's `Commands` re-render — and the bridged
-/// `NSMenuItem.isEnabled` — before AppKit matches the next key equivalent.
+/// `didResignKeyNotification`, so no event monitor is needed. The window is taken from the
+/// notification: `NSApp.keyWindow` is still `nil` while `didBecomeKey` is delivered. Updates
+/// are synchronous on the main thread so the new value reaches SwiftUI's `Commands`
+/// re-render — and the bridged `NSMenuItem.isEnabled` — before AppKit matches the next key
+/// equivalent.
 @Observable
 @MainActor
 final class MainWindowKeyObserver {
   private(set) var isMainWindowKey: Bool = false
+
+  @ObservationIgnored
+  private weak var keyWindow: NSWindow?
 
   @ObservationIgnored
   private let storage = ObserverStorage()
@@ -23,8 +28,9 @@ final class MainWindowKeyObserver {
       forName: NSWindow.didBecomeKeyNotification,
       object: nil,
       queue: .main
-    ) { [weak self] _ in
-      MainActor.assumeIsolated { self?.recompute(resigning: nil) }
+    ) { [weak self] note in
+      let window = note.object as? NSWindow
+      MainActor.assumeIsolated { self?.windowDidBecomeKey(window) }
     }
     storage.resignKeyToken = NotificationCenter.default.addObserver(
       forName: NSWindow.didResignKeyNotification,
@@ -32,24 +38,28 @@ final class MainWindowKeyObserver {
       queue: .main
     ) { [weak self] note in
       let window = note.object as? NSWindow
-      MainActor.assumeIsolated { self?.recompute(resigning: window) }
+      MainActor.assumeIsolated { self?.windowDidResignKey(window) }
     }
-    // No initial recompute(): this initializer runs inside `CodansApp.init()`, before
-    // `NSApplicationMain` has installed `NSApplication.shared`, so the implicitly-unwrapped
-    // `NSApp` global is still nil. The default `false` is the correct launch-time answer (no
-    // key window yet); `didBecomeKeyNotification` fires the first real recompute.
   }
 
   deinit {
     storage.teardown()
   }
 
-  /// `resigning` is the window that posted `didResignKey`. `NSApp.keyWindow` can still
-  /// return it during the notification, so it is not taken as the key window.
-  private func recompute(resigning: NSWindow?) {
-    var key = NSApp.keyWindow
-    if let resigning, key === resigning { key = nil }
-    let next = Self.isMainWindow(key)
+  func windowDidBecomeKey(_ window: NSWindow?) {
+    keyWindow = window
+    update(Self.isMainWindow(window))
+  }
+
+  /// Only the window recorded as key can clear the state, so a late resign of an older
+  /// window does not undo a newer `didBecomeKey`.
+  func windowDidResignKey(_ window: NSWindow?) {
+    guard let window, window === keyWindow else { return }
+    keyWindow = nil
+    update(false)
+  }
+
+  private func update(_ next: Bool) {
     if next != isMainWindowKey {
       isMainWindowKey = next
     }
