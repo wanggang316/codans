@@ -101,6 +101,8 @@ case openInEditor = "openInDefaultEditor"
 
 主窗口工具栏 不提供 View Changes 入口；Worktree 右键菜单的 **Show Changes** 直接打开所点击 Worktree 的内置 Diff 窗口，不读取 Default Git Viewer，也不改变此快捷键的持久化标识。
 
+「Archive Worktree」与「Delete Worktree」的默认和弦为 **⌃⌘⌫** 与 **⌃⌘⇧⌫**（`CommandID.archiveCurrentWorktree` / `.deleteCurrentWorktree`），作用于当前选中的 Worktree。主窗口为 key window 且有选中 Worktree 时，两个菜单项启用，与焦点在侧栏、终端 Pane、diff、编辑器或 composer 无关；Settings、Diff 窗口、sheet、popover 为 key window 时禁用（`MainWindowKeyObserver` 只跟踪 key window，`MainWindowCommands.worktreeRemovalCommandsEnabled` 是启用规则）。`⌘⌫` / `⌘⇧⌫` 不作默认，始终交给获得焦点的终端 Pane 或文本框（行首删除）；用户覆盖原样保留，Settings 中 Reset 得到新默认。行右键菜单、Command Palette 与 Settings → Shortcuts 显示同一和弦。每次交互式归档（和弦、主菜单、行右键菜单、Command Palette）都弹确认框；CLI 与已合并 Worktree 的自动归档不弹。决策见 [ADR 0010](../adr/0010-worktree-archive-and-delete-chords-are-window-wide.md)。
+
 ### `ShortcutBinding` 与三态模型
 
 ```swift
@@ -210,6 +212,7 @@ Settings → Shortcuts 面板：按 `ShortcutSchema` 分类分组、可搜索（
 ## 与既有系统的交互（耐久不变量）
 
 - **`⌘T` / `⌘W` 在响应链上压过 Ghostty 内部绑定。** 这是菜单绑定优先级——SwiftUI 菜单项在 responder chain 上先于内嵌终端的键绑定，故 New Tab / Close Tab 胜出。这是**预期行为，不是 bug**；不要试图"修复"成让 Ghostty 抢先。
+- **窗口级和弦不占用文本编辑键。** 在整个主窗口生效的菜单和弦（如 Archive / Delete Worktree）不得使用终端或文本框已有含义的键（`⌘⌫`、`⌘⇧⌫` 等）：菜单 key equivalent 先于 responder chain 匹配，会抢走该键。不要再按焦点位置启用或禁用菜单项来"让出"按键——同一和弦在同一窗口内会有两种行为（ADR 0010）。
 - **`selectAdjacentTab` 必经 `selectTab`。** 相邻 tab 切换（`previousTab` / `nextTab` / 编号切换）的路由必须走 `selectTab`；直接写 `selectedTabID` 会**绕过焦点恢复**，使键盘 tab 切换跳过该 tab 记住的 pane。这是路由不变量，非性能优化。
 
 ## 风险
