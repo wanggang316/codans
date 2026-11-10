@@ -1,0 +1,4 @@
+# nanops-monitor health probes: <name> <url> [<expected-status>]
+# Read on the VM from /opt/codans-relay/current/deploy/healthcheck. Expected status defaults to 200.
+relay          http://127.0.0.1:3050/healthz
+relay-public   https://relay.codans.dev/healthz

@@ -72,6 +72,29 @@ struct InMemoryIPCServerTests {
   }
 
   @Test
+  func unknownMethodIsAnsweredUnderTheCallersID() async throws {
+    let server = Self.makeHarness()
+    defer { server.stop() }
+
+    try Self.sendHello(server)
+    _ = try await server.awaitResponse()
+
+    // A method from a newer client: the frame does not decode as a
+    // Request, but its id and method name still can.
+    let body = Data(#"{"id":"future-1","method":"pane.teleport","params":{}}"#.utf8)
+    server._test_feedRaw(try Framing.encode(body))
+    let response = try await server.awaitResponse()
+    #expect(response.id == "future-1")
+    #expect(response.error == .unknownMethod("pane.teleport"))
+
+    // The connection stays usable.
+    try server.send(IPC.Request(id: "ping-2", method: .systemPing))
+    let ping = try await server.awaitResponse()
+    #expect(ping.id == "ping-2")
+    #expect(ping.error == nil)
+  }
+
+  @Test
   func oversizeFrameClosesConnection() async throws {
     let server = Self.makeHarness()
     defer { server.stop() }

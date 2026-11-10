@@ -1,7 +1,7 @@
 import AppKit
-import Foundation
 import CodansCore
 import CodansIPC
+import Foundation
 
 /// Handlers for the `system.*` method namespace. Construct once and inject
 /// into `MethodRouter`.
@@ -18,7 +18,11 @@ public final class SystemHandlers {
       server: String,
       appBundle: String,
       protocolMajor: Int = 1,
-      protocolMinor: Int = 0,
+      // Minor 1 added `events.subscribe`; minor 2 added `pane.attachStream`;
+      // minor 3 added the relay coordinates in `system.hello`; minor 4
+      // added terminal seats (`pane.setStreamSize`, `pane.claimSize`,
+      // `pane.input`).
+      protocolMinor: Int = 4,
       deprecatedMethods: [String] = []
     ) {
       self.server = server
@@ -34,6 +38,9 @@ public final class SystemHandlers {
   private let clock: @Sendable () -> Date
   private let connectionCount: @MainActor () -> Int
   private let quitHandler: @MainActor () -> Void
+  /// The relay address `system.hello` hands gateway callers; set once the
+  /// gateway exists.
+  public var relayCoordinates: @MainActor () -> RemoteRelayCoordinates? = { nil }
 
   public init(
     versions: Versions,
@@ -53,7 +60,10 @@ public final class SystemHandlers {
   /// `system.hello` — connection handshake. Returns the server's version
   /// info. Major-version skew surfaces as `.versionMismatch`; clients that
   /// send a malformed `clientVersion` get `.invalidParams`.
-  public func hello(_ params: JSONValue) async -> RouterOutcome {
+  public func hello(
+    _ params: JSONValue,
+    remotePermission: IPC.RemotePermission? = nil
+  ) async -> RouterOutcome {
     await Task.yield()
     let request: HelloRequest
     do {
@@ -73,7 +83,10 @@ public final class SystemHandlers {
       appBundleVersion: versions.appBundle,
       protocolMajor: versions.protocolMajor,
       protocolMinor: versions.protocolMinor,
-      deprecatedMethods: versions.deprecatedMethods
+      deprecatedMethods: versions.deprecatedMethods,
+      remotePermission: remotePermission,
+      // Only gateway callers need it; local CLI callers never do.
+      relay: remotePermission == nil ? nil : relayCoordinates()
     )
     do {
       return .unary(try JSONValue.encoded(response))

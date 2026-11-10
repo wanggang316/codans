@@ -159,6 +159,16 @@ final class SettingsStore {
     scheduleSave()
   }
 
+  func setRemoteAccessEnabled(_ enabled: Bool) {
+    settings.remoteAccess.enabled = enabled
+    scheduleSave()
+  }
+
+  func setRemoteRelayAllowed(_ allowed: Bool) {
+    settings.remoteAccess.allowsRelay = allowed
+    scheduleSave()
+  }
+
   /// Workflow bindings / trust / enablement. Written by the workflow
   /// engine (remembered bindings), the Settings pane, and the trust prompt.
   func mutateWorkflows(_ transform: (inout WorkflowSettings) -> Void) {

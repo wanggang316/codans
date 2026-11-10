@@ -16,6 +16,8 @@ public enum SettingsSection: Hashable, Sendable {
   case worktree
   case terminal
   case notifications
+  /// The LAN gateway for paired iOS devices.
+  case remoteAccess
   case developer
   case shortcuts
   case updates
@@ -35,7 +37,7 @@ public enum SettingsSection: Hashable, Sendable {
       .updates, .about,
     ],
     [.agents, .developer, .workflows],
-    [.hosts],
+    [.hosts, .remoteAccess],
   ]
 
   /// Display name for global sidebar rows. Project-scoped cases return `nil` because
@@ -49,6 +51,7 @@ public enum SettingsSection: Hashable, Sendable {
     case .workflows: return "Workflows"
     case .gitPlatforms: return "Git Platforms"
     case .hosts: return "Remote Hosts"
+    case .remoteAccess: return "Remote Access"
     case .worktree: return "Worktrees"
     case .terminal: return "Terminal"
     case .notifications: return "Notifications"

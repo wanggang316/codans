@@ -77,7 +77,7 @@ struct ZmxPassiveWatcherDaemonTests {
 
     /// Connect like `zmx attach`: a client that sends `.Init`.
     func attachTerminal() throws -> Int32 {
-      let fd = try ZmxControlClient.openConnection(socketPath: socketPath)
+      let fd = try ZmxSocket.openConnection(socketPath: socketPath)
       let frame = ZmxFraming.encode(
         ZmxFrame(tag: .`init`, payload: ZmxResizePayload(cols: 80, rows: 24).encode()))
       _ = frame.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
@@ -85,7 +85,7 @@ struct ZmxPassiveWatcherDaemonTests {
     }
 
     func isListening() -> Bool {
-      guard let fd = try? ZmxControlClient.openConnection(socketPath: socketPath) else {
+      guard let fd = try? ZmxSocket.openConnection(socketPath: socketPath) else {
         return false
       }
       Darwin.close(fd)

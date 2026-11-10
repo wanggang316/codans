@@ -42,7 +42,7 @@ public nonisolated enum AppDirectories {
 
   /// `~/.codans[-dev]/state` — files only the app writes: `catalog.json`,
   /// `sessions.json`, `notifications.json`, the remote-host sidecars,
-  /// `project-icons/`, `agent-homes/`, and `backups/`.
+  /// `remote-devices.json`, `project-icons/`, `agent-homes/`, and `backups/`.
   ///
   /// `$CODANS_CONFIG_DIR` alone still relocates *every* store (config and
   /// state land flat in that one directory), so an isolated smoke run that

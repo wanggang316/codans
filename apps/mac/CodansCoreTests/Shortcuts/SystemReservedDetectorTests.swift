@@ -26,10 +26,8 @@ private struct DefaultsSuite: ~Copyable {
   }
 }
 
-/// `kVK_ANSI_Space` from `Carbon.HIToolbox` — duplicated here to keep the test target
-/// AppKit/Carbon-free and aligned with the layout-independent storage convention.
-private let kVKSpace: UInt16 = 49
-private let kVKReturn: UInt16 = 36
+private let kVKSpace = KeyCode.space
+private let kVKReturn = KeyCode.return
 
 private let cmdBit: Int = 1 << 20
 private let optBit: Int = 1 << 19

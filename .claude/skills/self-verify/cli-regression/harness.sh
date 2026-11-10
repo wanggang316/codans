@@ -136,7 +136,7 @@ launch_app() {
     echo "REFUSING: $SOCK is held by another process"; exit 1
   fi
   rm -f "$SOCK"
-  nohup "$APP/Contents/MacOS/Codans" >"$SCRATCH/app.log" 2>&1 &
+  nohup "$APP/Contents/MacOS/Codans" -ApplePersistenceIgnoreState YES >"$SCRATCH/app.log" 2>&1 &
   APP_PID=$!
   echo "$APP_PID" >"$APP_PID_FILE"
   echo "launched test app pid=$APP_PID"

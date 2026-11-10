@@ -163,6 +163,7 @@ struct SettingsSidebarView: View {
       return .init(.symbol("puzzlepiece.extension.fill", size: 14, nudge: .init(width: 0.5, height: 0)), .magenta)
     case .workflows: return .init(.symbol("app.connected.to.app.below.fill", size: 12), .teal)
     case .hosts: return .init(.symbol("globe", size: 12), .purple)
+    case .remoteAccess: return .init(.symbol("iphone.radiowaves.left.and.right", size: 14), .blue)
     case .project: return .init(.symbol("questionmark", size: 12), .gray)
     }
   }

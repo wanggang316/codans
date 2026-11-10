@@ -1,6 +1,7 @@
-.PHONY: help bootstrap mac-bootstrap mac-build-ghostty mac-build-zmx mac-generate mac-build mac-build-cli mac-run-app mac-archive mac-release mac-bump-version mac-format mac-lint mac-check mac-test mac-clean web-install web-dev web-build web-preview web-typecheck
+.PHONY: help bootstrap ios-generate ios-build ios-build-iphone ios-build-ipad ios-test ios-lint ios-clean mac-bootstrap mac-build-ghostty mac-build-zmx mac-generate mac-build mac-build-cli mac-run-app mac-archive mac-release mac-bump-version mac-format mac-lint mac-check mac-test mac-clean web-install web-dev web-build web-preview web-typecheck
 
 MAC_APP_DIR := apps/mac
+IOS_APP_DIR := apps/ios
 WEB_DIR     := apps/website
 
 help:
@@ -21,6 +22,15 @@ help:
 	@echo "  mac-test          - Run Swift unit tests (xcodebuild test, non-zero on failure)"
 	@echo "  mac-clean         - Remove workspace + project + Package.resolved"
 	@echo ""
+	@echo "iOS companion ($(IOS_APP_DIR)):"
+	@echo "  ios-generate      - Generate CodansMobile.xcworkspace from Tuist (loads $(MAC_APP_DIR) shared targets)"
+	@echo "  ios-build         - Build CodansMobile for the iPhone and iPad simulators"
+	@echo "  ios-build-iphone  - Build for the iPhone simulator only"
+	@echo "  ios-build-ipad    - Build for the iPad simulator only"
+	@echo "  ios-test          - Run CodansMobileTests on the iPhone simulator"
+	@echo "  ios-lint          - swiftlint"
+	@echo "  ios-clean         - Remove workspace + project + Tuist build dir"
+	@echo ""
 	@echo "website ($(WEB_DIR)):"
 	@echo "  web-install       - pnpm install"
 	@echo "  web-dev           - pnpm dev   (Vite at http://localhost:5173)"
@@ -34,6 +44,9 @@ bootstrap:
 
 mac-bootstrap mac-build-ghostty mac-build-zmx mac-generate mac-build mac-build-cli mac-run-app mac-archive mac-release mac-format mac-lint mac-check mac-test mac-clean:
 	$(MAKE) -C $(MAC_APP_DIR) $(subst mac-,,$@)
+
+ios-generate ios-build ios-build-iphone ios-build-ipad ios-test ios-lint ios-clean:
+	$(MAKE) -C $(IOS_APP_DIR) $(subst ios-,,$@)
 
 mac-bump-version:
 	$(MAKE) -C $(MAC_APP_DIR) bump-version VERSION=$(VERSION)

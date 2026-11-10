@@ -116,8 +116,8 @@ nonisolated final class ZmxPassiveWatcher: DetachedPaneWatching, @unchecked Send
     guard !stopped else { return }
     let fd: Int32
     do {
-      fd = try ZmxControlClient.openConnection(socketPath: socketPath)
-    } catch ZmxControlClient.ControlError.connectFailed(let code) where code == ENOENT || code == ECONNREFUSED {
+      fd = try ZmxSocket.openConnection(socketPath: socketPath)
+    } catch ZmxSocket.SocketError.connectFailed(let code) where code == ENOENT || code == ECONNREFUSED {
       refusals += 1
       if refusals >= backoff.refusalsUntilGone {
         stopped = true

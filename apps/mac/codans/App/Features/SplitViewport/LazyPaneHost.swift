@@ -72,6 +72,10 @@ struct LazyPaneHost: View {
           .overlay {
             PaneLinkHoverBanner(surface: surface)
           }
+          // A paired device has the pane at its size.
+          .overlay {
+            RemoteSizingOverlay(paneID: store.paneID)
+          }
           // Right-click menu. Attached only on `.ready` so loading / failure
           // placeholders do not get a stale menu; placed before `.animation`
           // so the animation envelope wraps the menu modifier too.

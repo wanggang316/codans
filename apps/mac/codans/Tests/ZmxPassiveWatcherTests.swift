@@ -5,9 +5,9 @@ import Testing
 
 @testable import Codans
 
-/// A stand-in zmx daemon: a listening socket that records the clients it
+/// A stand-in zmx daemon for many watchers: a listening socket that records the clients it
 /// accepts and can broadcast frames to them.
-private final class FakeZmxDaemon: @unchecked Sendable {
+private final class BroadcastingZmxDaemon: @unchecked Sendable {
   let path: String
   private var listener: Int32
   private let lock = NSLock()
@@ -134,7 +134,7 @@ struct ZmxPassiveWatcherTests {
 
   @Test
   func readsOutputFramesAndNeverWrites() async throws {
-    let daemon = FakeZmxDaemon()
+    let daemon = BroadcastingZmxDaemon()
     defer { daemon.exit() }
     let log = EventLog()
     let watcher = ZmxPassiveWatcher(socketPath: daemon.path, backoff: fastBackoff) {
@@ -159,7 +159,7 @@ struct ZmxPassiveWatcherTests {
 
   @Test
   func reconnectsAfterTheDaemonDropsAllClients() async throws {
-    let daemon = FakeZmxDaemon()
+    let daemon = BroadcastingZmxDaemon()
     defer { daemon.exit() }
     let log = EventLog()
     let watcher = ZmxPassiveWatcher(socketPath: daemon.path, backoff: fastBackoff) {
@@ -181,7 +181,7 @@ struct ZmxPassiveWatcherTests {
 
   @Test
   func reportsDaemonGoneWhenTheSocketDisappears() async throws {
-    let daemon = FakeZmxDaemon()
+    let daemon = BroadcastingZmxDaemon()
     let log = EventLog()
     let watcher = ZmxPassiveWatcher(socketPath: daemon.path, backoff: fastBackoff) {
       log.append($0)
@@ -210,7 +210,7 @@ struct ZmxPassiveWatcherTests {
 
   @Test
   func stopClosesTheSocketAndSilencesTheWatcher() async throws {
-    let daemon = FakeZmxDaemon()
+    let daemon = BroadcastingZmxDaemon()
     let log = EventLog()
     let watcher = ZmxPassiveWatcher(socketPath: daemon.path, backoff: fastBackoff) {
       log.append($0)
@@ -231,7 +231,7 @@ struct ZmxPassiveWatcherTests {
   /// the shared queue (or a main-actor `stop()`) for its whole backlog.
   @Test
   func drainsALargeBacklogInBoundedBatches() async throws {
-    let daemon = FakeZmxDaemon()
+    let daemon = BroadcastingZmxDaemon()
     defer { daemon.exit() }
     let log = EventLog()
     let queue = DispatchQueue(label: "test.watcher")
@@ -258,7 +258,7 @@ struct ZmxPassiveWatcherTests {
   /// Cost check: many watchers share one queue and need no thread each.
   @Test
   func manyWatchersShareOneQueue() async throws {
-    let daemon = FakeZmxDaemon()
+    let daemon = BroadcastingZmxDaemon()
     defer { daemon.exit() }
     let log = EventLog()
     let watchers = (0..<100).map { _ in
