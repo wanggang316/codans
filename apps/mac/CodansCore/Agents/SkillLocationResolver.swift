@@ -54,8 +54,10 @@ public nonisolated enum SkillLocationResolver {
     userHome: URL,
     stateDirectory: URL,
     managedSettings: URL = ClaudePluginRegistry.managedSettings,
-    isRepositoryRoot: (URL) -> Bool = hasGitEntry
+    fileSystem: any SkillFileSystem = LocalSkillFileSystem(),
+    isRepositoryRoot: ((URL) -> Bool)? = nil
   ) -> [SkillDirectory] {
+    let isRepositoryRoot = isRepositoryRoot ?? fileSystem.hasGitEntry
     let location = profile.descriptor.skillLocation
     guard location.supportsCompletion, let plugins = location.plugins,
       let root = configRootDirectory(for: profile, userHome: userHome, stateDirectory: stateDirectory)
@@ -81,11 +83,12 @@ public nonisolated enum SkillLocationResolver {
       let home = effectiveHome(for: profile, userHome: userHome, stateDirectory: stateDirectory)
       return ClaudePluginRegistry.skillDirectories(
         configRoot: root, home: home, projectStart: projectStart,
-        launchSettings: launchSettings, managedSettings: managedSettings)
+        launchSettings: launchSettings, managedSettings: managedSettings, fileSystem: fileSystem)
     case .codex:
       let searched = projectStart.map { searchedDirectories(from: $0, isRepositoryRoot: isRepositoryRoot) } ?? []
       return CodexPluginRegistry.skillDirectories(
-        configRoot: root, extraArguments: profile.extraArguments, projectDirectories: searched)
+        configRoot: root, extraArguments: profile.extraArguments, projectDirectories: searched,
+        fileSystem: fileSystem)
     }
   }
 
@@ -142,22 +145,27 @@ public nonisolated enum SkillLocationResolver {
     projectStartExists: Bool = true,
     userHome: URL = FileManager.default.homeDirectoryForCurrentUser,
     stateDirectory: URL = AppDirectories.stateDirectory(),
-    isRepositoryRoot: (URL) -> Bool = hasGitEntry
+    managedSettings: URL? = nil,
+    fileSystem: any SkillFileSystem = LocalSkillFileSystem(),
+    isRepositoryRoot: ((URL) -> Bool)? = nil
   ) -> [SkillDirectory] {
+    let isRepositoryRoot = isRepositoryRoot ?? fileSystem.hasGitEntry
+    let managedSettings = managedSettings ?? ClaudePluginRegistry.managedSettings
     guard loadsSkills(profile) else { return [] }
     let project: [SkillDirectory] =
       projectStart.map { start in
         guard
           trustsProject(
             profile, start: start, startExists: projectStartExists, userHome: userHome,
-            stateDirectory: stateDirectory)
+            stateDirectory: stateDirectory, fileSystem: fileSystem)
         else { return [] }
         return projectDirectories(for: profile, startDirectory: start, isRepositoryRoot: isRepositoryRoot)
       } ?? []
     return project + userDirectories(for: profile, userHome: userHome, stateDirectory: stateDirectory)
       + pluginDirectories(
         for: profile, projectStart: projectStart, projectStartExists: projectStartExists, userHome: userHome,
-        stateDirectory: stateDirectory, isRepositoryRoot: isRepositoryRoot)
+        stateDirectory: stateDirectory, managedSettings: managedSettings, fileSystem: fileSystem,
+        isRepositoryRoot: isRepositoryRoot)
   }
 
   /// `false` when the profile's launch flags turn skills off: Pi's
@@ -176,7 +184,8 @@ public nonisolated enum SkillLocationResolver {
   /// `true` when the agent of `profile` reads project skills in `start`.
   /// `startExists` is `false` when `start` stands in for a new worktree.
   static func trustsProject(
-    _ profile: AgentProfile, start: URL, startExists: Bool, userHome: URL, stateDirectory: URL
+    _ profile: AgentProfile, start: URL, startExists: Bool, userHome: URL, stateDirectory: URL,
+    fileSystem: any SkillFileSystem = LocalSkillFileSystem()
   ) -> Bool {
     switch profile.descriptor.skillLocation.projectTrust {
     case nil: return true
@@ -187,7 +196,7 @@ public nonisolated enum SkillLocationResolver {
       else { return false }
       return PiProjectTrust.trusts(
         agentDirectory: agentDirectory, extraArguments: profile.extraArguments, start: start,
-        startExists: startExists)
+        startExists: startExists, fileSystem: fileSystem)
     }
   }
 
@@ -306,12 +315,17 @@ public nonisolated enum SkillLocationResolver {
     return walkUp(from: start, isRepositoryRoot: isRepositoryRoot) ?? [start]
   }
 
+  /// Claude Code's managed settings file on a host whose kernel
+  /// (`uname -s`) is `kernel`: the macOS path on `Darwin`, else the Linux
+  /// path.
+  public static func claudeManagedSettings(kernel: String) -> URL {
+    kernel == "Darwin" ? ClaudePluginRegistry.managedSettings : ClaudePluginRegistry.linuxManagedSettings
+  }
+
   /// `true` when `directory` holds a `.git` folder or a worktree's `.git`
   /// file.
   public static func hasGitEntry(_ directory: URL) -> Bool {
-    FileManager.default.fileExists(
-      atPath: directory.appending(path: ".git", directoryHint: .notDirectory).path(
-        percentEncoded: false))
+    LocalSkillFileSystem().hasGitEntry(directory)
   }
 
   /// `start` and its parents up to the first repository root, or `nil`

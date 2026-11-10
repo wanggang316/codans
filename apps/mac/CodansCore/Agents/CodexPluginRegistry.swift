@@ -67,8 +67,10 @@ nonisolated enum CodexPluginRegistry {
   /// called as `<plugin>:<skill>`. Each cached version is listed, newest
   /// first, so the newest copy keeps a name.
   static func skillDirectories(
-    configRoot: URL, extraArguments: String, projectDirectories: [URL]
+    configRoot: URL, extraArguments: String, projectDirectories: [URL],
+    fileSystem: any SkillFileSystem = LocalSkillFileSystem()
   ) -> [SkillDirectory] {
+    let read = { (url: URL) in fileSystem.contents(of: url).flatMap { String(data: $0, encoding: .utf8) } }
     guard case .known(let profile, let launchPlugins) = launchConfig(extraArguments: extraArguments),
       launchPlugins != false
     else { return [] }
@@ -92,7 +94,7 @@ nonisolated enum CodexPluginRegistry {
     return plugins.flatMap { plugin in
       let root = cache.appending(path: plugin.marketplace, directoryHint: .isDirectory)
         .appending(path: plugin.name, directoryHint: .isDirectory)
-      return versions(in: root).map { version in
+      return versions(in: root, fileSystem: fileSystem).map { version in
         SkillDirectory(
           url: version.appending(path: "skills", directoryHint: .isDirectory),
           source: .plugin, namespace: plugin.name)
@@ -198,24 +200,16 @@ nonisolated enum CodexPluginRegistry {
     }
   }
 
-  private static func read(_ url: URL) -> String? {
-    FileManager.default.contents(atPath: url.path(percentEncoded: false)).flatMap {
-      String(data: $0, encoding: .utf8)
-    }
-  }
-
   /// A name that stays one directory below its parent.
   private static func isPathComponent(_ name: String) -> Bool {
     !name.isEmpty && name != "." && name != ".." && !name.contains("/")
   }
 
-  private static func versions(in plugin: URL) -> [URL] {
-    let children =
-      (try? FileManager.default.contentsOfDirectory(
-        at: plugin, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
-    return children.sorted {
-      $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedDescending
-    }
+  private static func versions(in plugin: URL, fileSystem: any SkillFileSystem) -> [URL] {
+    let names = fileSystem.contentsOfDirectory(atPath: plugin.path(percentEncoded: false)) ?? []
+    return names.filter { !$0.hasPrefix(".") }
+      .sorted { $0.localizedStandardCompare($1) == .orderedDescending }
+      .map { plugin.appending(path: $0, directoryHint: .isDirectory) }
   }
 }
 
