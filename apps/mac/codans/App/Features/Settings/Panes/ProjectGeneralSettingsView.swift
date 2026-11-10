@@ -412,23 +412,30 @@ struct ProjectGeneralSettingsView: View {
   /// Add Project lists the open local repositories that are not in the
   /// workspace yet; Add Folder… takes any repository folder on this Mac.
   private var workspaceAddSourceButtons: some View {
-    let candidates = workspaceSourceCandidates
+    let catalog = hierarchyManager.catalog
+    let menu = Self.workspaceAddProjectMenu(
+      catalog: catalog, listedGitRoots: Set(workspaceSources.map { $0.sourceGitRoot ?? $0.path }))
+    let isEmpty = menu.sections.allSatisfy(\.projects.isEmpty)
     return HStack(spacing: 8) {
       Menu {
-        ForEach(candidates, id: \.id) { candidate in
-          Button(candidate.name) {
-            if let gitRoot = candidate.gitRoot {
+        // An action menu: a chosen project joins the workspace and leaves
+        // the menu, so rows carry no checkmark.
+        ProjectMenuContent(menu: menu) { project, marksRemote in
+          Button {
+            if let gitRoot = catalog.projects.first(where: { $0.id == project.id })?.gitRoot {
               store.send(.workspaceAddSourceTapped(path: gitRoot))
             }
+          } label: {
+            ProjectMenuRowLabel(project: project, marksRemote: marksRemote)
           }
         }
       } label: {
         Text("Add Project")
       }
       .fixedSize()
-      .disabled(candidates.isEmpty)
+      .disabled(isEmpty)
       .help(
-        candidates.isEmpty
+        isEmpty
           ? "Every local repository open in codans is already in the workspace"
           : "Add a project that is open in codans")
       Button("Add Folder…") {
@@ -457,14 +464,15 @@ struct ProjectGeneralSettingsView: View {
     workspaceProject?.unavailableWorkspaceRows.contains(reference.id) ?? false
   }
 
-  /// Local repositories a workspace can take as sources: not remote, not a
-  /// workspace, and not listed already.
-  private var workspaceSourceCandidates: [Project] {
-    let listed = Set(workspaceSources.map { $0.sourceGitRoot ?? $0.path })
-    return hierarchyManager.catalog.projects.filter { project in
+  /// The Add Project menu over the local repositories a workspace can take
+  /// as sources: not remote, not a workspace, and not listed already.
+  /// Recent is computed over these candidates only.
+  static func workspaceAddProjectMenu(catalog: Catalog, listedGitRoots: Set<String>) -> ProjectMenu {
+    let candidates = catalog.projects.filter { project in
       guard project.isOnThisMac, !project.isWorkspace, let gitRoot = project.gitRoot else { return false }
-      return !listed.contains(gitRoot)
+      return !listedGitRoots.contains(gitRoot)
     }
+    return ProjectMenu(projects: candidates.map(ProjectMenuOption.init))
   }
 
   // MARK: - Editor
