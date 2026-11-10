@@ -49,12 +49,15 @@ struct WorktreeHistoryTests {
     back: [Int] = [0, 1, 2],
     forward: [Int] = [],
     backTop: HierarchySelection? = nil,
+    backEntries: [HierarchySelection]? = nil,
+    current: Int = 3,
     catalog: Catalog? = nil,
     filters: LockIsolated<[SidebarFilter]> = LockIsolated([])
   ) -> (TestStoreOf<RootFeature>, LockIsolated<WorktreeID?>) {
     var initial = RootFeature.State()
-    initial.selection = fixture.selection(3)
-    initial.navigationHistoryBack = back.map { fixture.selection($0) } + [backTop].compactMap { $0 }
+    initial.selection = fixture.selection(current)
+    initial.navigationHistoryBack =
+      backEntries ?? (back.map { fixture.selection($0) } + [backTop].compactMap { $0 })
     initial.navigationHistoryForward = forward.map { fixture.selection($0) }
 
     let selected = LockIsolated<WorktreeID?>(nil)
@@ -101,7 +104,9 @@ struct WorktreeHistoryTests {
     await store.send(.worktreeHistoryJumpRequested(.forward(offset: 0)))
     await store.receive(\.sidebar.worktreeRowTapped)
 
-    #expect(selected.value == fixture.ids[3])
+    // No selection stream echoes the Back here, so `d` is still current and
+    // the Forward step passes it to land on `a`.
+    #expect(selected.value == fixture.ids[0])
     #expect(!store.state.sidebarVisible)
   }
 
@@ -133,12 +138,13 @@ struct WorktreeHistoryTests {
   @Test
   func backJumpIsEquivalentToRepeatedBackSteps() {
     let fixture = Fixture()
+    let landable = WorktreeHistoryLanding.landableWorktreeIDs(in: fixture.catalog)
     var stepwise = RootFeature.State()
     stepwise.selection = fixture.selection(3)
     stepwise.navigationHistoryBack = [0, 1, 2].map(fixture.selection)
     for _ in 0..<3 {
       let target = stepwise.navigationHistoryBack.last
-      _ = RootFeature.navigateHistory(&stepwise, jump: .back(offset: 0))
+      _ = RootFeature.navigateHistory(&stepwise, jump: .back(offset: 0), landable: landable)
       // Stand in for the selection stream echoing the landing back.
       stepwise.selection = target ?? .empty
     }
@@ -146,7 +152,7 @@ struct WorktreeHistoryTests {
     var jumping = RootFeature.State()
     jumping.selection = fixture.selection(3)
     jumping.navigationHistoryBack = [0, 1, 2].map(fixture.selection)
-    _ = RootFeature.navigateHistory(&jumping, jump: .back(offset: 2))
+    _ = RootFeature.navigateHistory(&jumping, jump: .back(offset: 2), landable: landable)
 
     #expect(stepwise.navigationHistoryBack == jumping.navigationHistoryBack)
     #expect(stepwise.navigationHistoryForward == jumping.navigationHistoryForward)
@@ -237,14 +243,175 @@ struct WorktreeHistoryTests {
     #expect(store.state.navigationHistoryForward.isEmpty)
   }
 
+  // MARK: - Landable entries
+
+  /// The fixture catalog with `b` archived.
+  private static func catalogArchivingB(_ fixture: Fixture) -> Catalog {
+    var catalog = fixture.catalog
+    catalog.projects[0].worktrees[1].archived = true
+    return catalog
+  }
+
+  @Test
+  func landableRuleRejectsRemovedArchivedAndCurrentEntries() {
+    let fixture = Fixture()
+    let landable = WorktreeHistoryLanding.landableWorktreeIDs(in: Self.catalogArchivingB(fixture))
+    let current = fixture.selection(3)
+    let removed = HierarchySelection(projectID: fixture.projectID, worktreeID: WorktreeID())
+
+    #expect(WorktreeHistoryLanding.isLandable(fixture.selection(0), landable: landable, current: current))
+    #expect(!WorktreeHistoryLanding.isLandable(removed, landable: landable, current: current))
+    #expect(!WorktreeHistoryLanding.isLandable(fixture.selection(1), landable: landable, current: current))
+    #expect(!WorktreeHistoryLanding.isLandable(fixture.selection(3), landable: landable, current: current))
+    #expect(!WorktreeHistoryLanding.isLandable(.empty, landable: landable, current: current))
+  }
+
+  @Test
+  func backPassesARemovedWorktreeAndForwardRetracesIt() async {
+    // History a → X → d with X removed: Back from d lands on a.
+    let fixture = Fixture()
+    let removed = HierarchySelection(projectID: fixture.projectID, worktreeID: WorktreeID())
+    let (store, selected) = Self.makeStore(fixture, backEntries: [fixture.selection(0), removed])
+
+    #expect(store.state.navigationHistoryBack.count == 2)
+    await store.send(.worktreeHistoryBackRequested)
+    await store.receive(\.sidebar.worktreeRowTapped)
+
+    #expect(selected.value == fixture.ids[0])
+    #expect(store.state.navigationHistoryBack.isEmpty)
+    // The passed entry stays in history, nearest last, above the left selection.
+    #expect(store.state.navigationHistoryForward == [fixture.selection(3), removed])
+
+    // Forward from a passes X again and returns to d.
+    var state = store.state
+    state.selection = fixture.selection(0)
+    let landable = WorktreeHistoryLanding.landableWorktreeIDs(in: fixture.catalog)
+    let target = RootFeature.navigateHistory(&state, jump: .forward(offset: 0), landable: landable)
+    #expect(target == fixture.selection(3))
+    #expect(state.navigationHistoryBack == [fixture.selection(0), removed])
+    #expect(state.navigationHistoryForward.isEmpty)
+  }
+
+  @Test
+  func backPassesAnArchivedWorktree() async {
+    let fixture = Fixture()
+    let (store, selected) = Self.makeStore(
+      fixture, back: [0, 1], catalog: Self.catalogArchivingB(fixture)
+    )
+
+    await store.send(.worktreeHistoryBackRequested)
+    await store.receive(\.sidebar.worktreeRowTapped)
+
+    #expect(selected.value == fixture.ids[0])
+    #expect(store.state.navigationHistoryForward == [fixture.selection(3), fixture.selection(1)])
+  }
+
+  @Test
+  func anUnarchivedWorktreeIsLandableAgain() async {
+    let fixture = Fixture()
+    // `b` was archived while in history, then unarchived: the fixture catalog.
+    let (store, selected) = Self.makeStore(fixture, back: [0, 1])
+
+    await store.send(.worktreeHistoryBackRequested)
+    await store.receive(\.sidebar.worktreeRowTapped)
+
+    #expect(selected.value == fixture.ids[1])
+  }
+
+  @Test
+  func backPassesTheCurrentWorktreeToTheNextDifferentOne() async {
+    // History c → a → X → a with X removed: Back passes X and a, lands on c.
+    let fixture = Fixture()
+    let removed = HierarchySelection(projectID: fixture.projectID, worktreeID: WorktreeID())
+    let (store, selected) = Self.makeStore(
+      fixture,
+      backEntries: [fixture.selection(2), fixture.selection(0), removed],
+      current: 0
+    )
+
+    await store.send(.worktreeHistoryBackRequested)
+    await store.receive(\.sidebar.worktreeRowTapped)
+
+    #expect(selected.value == fixture.ids[2])
+    #expect(store.state.navigationHistoryBack.isEmpty)
+    #expect(
+      store.state.navigationHistoryForward == [fixture.selection(0), removed, fixture.selection(0)])
+  }
+
+  @Test
+  func backWithNoLandableEntryIsDisabledAndANoOp() async {
+    // History a → X → a with X removed: nothing different to go back to.
+    let fixture = Fixture()
+    let removed = HierarchySelection(projectID: fixture.projectID, worktreeID: WorktreeID())
+    let (store, selected) = Self.makeStore(
+      fixture, backEntries: [fixture.selection(0), removed], current: 0
+    )
+
+    var gate = store.state
+    gate.historyLandableWorktreeIDs = WorktreeHistoryLanding.landableWorktreeIDs(in: fixture.catalog)
+    #expect(!gate.canNavigateHistoryBack)
+    #expect(!gate.canNavigateHistoryForward)
+
+    await store.send(.worktreeHistoryBackRequested)
+    await store.finish()
+
+    #expect(selected.value == nil)
+    #expect(store.state.navigationHistoryBack == [fixture.selection(0), removed])
+    #expect(store.state.navigationHistoryForward.isEmpty)
+    #expect(!store.state.suppressHistoryPush)
+  }
+
+  @Test
+  func canNavigateFollowsTheLandableRule() {
+    let fixture = Fixture()
+    var state = RootFeature.State()
+    state.selection = fixture.selection(3)
+    state.navigationHistoryBack = [fixture.selection(1)]
+    state.navigationHistoryForward = [fixture.selection(0)]
+    state.historyLandableWorktreeIDs = WorktreeHistoryLanding.landableWorktreeIDs(
+      in: Self.catalogArchivingB(fixture))
+
+    #expect(!state.canNavigateHistoryBack)
+    #expect(state.canNavigateHistoryForward)
+  }
+
+  @Test
+  func menuJumpToANowStaleEntryLandsOnTheNextLandableOne() async {
+    // A menu row picked after its Worktree was archived must not blank the
+    // detail: the jump moves on to the next landable entry past it.
+    let fixture = Fixture()
+    let (store, selected) = Self.makeStore(
+      fixture, back: [0, 1, 2], catalog: Self.catalogArchivingB(fixture)
+    )
+
+    await store.send(.worktreeHistoryJumpRequested(.back(offset: 1)))
+    await store.receive(\.sidebar.worktreeRowTapped)
+
+    #expect(selected.value == fixture.ids[0])
+  }
+
   // MARK: - Menu rows
+
+  @Test
+  func entriesDropArchivedAndCurrentWorktrees() {
+    let fixture = Fixture()
+    // Stack, oldest first: a, b (archived), d (current), c.
+    let stack = [fixture.selection(0), fixture.selection(1), fixture.selection(3), fixture.selection(2)]
+
+    let entries = WorktreeHistoryEntry.resolve(
+      stack: stack, catalog: Self.catalogArchivingB(fixture), current: fixture.selection(3)
+    )
+
+    #expect(entries.map(\.branchTitle) == ["c", "a"])
+    #expect(entries.map(\.offset) == [0, 3])
+  }
 
   @Test
   func entriesResolveNearestFirstWithTrueOffsets() {
     let fixture = Fixture()
     let stack = [fixture.selection(0), fixture.selection(1), fixture.selection(2)]
 
-    let entries = WorktreeHistoryEntry.resolve(stack: stack, catalog: fixture.catalog)
+    let entries = WorktreeHistoryEntry.resolve(stack: stack, catalog: fixture.catalog, current: fixture.selection(3))
 
     #expect(entries.map(\.branchTitle) == ["c", "b", "a"])
     #expect(entries.map(\.offset) == [0, 1, 2])
@@ -280,7 +447,7 @@ struct WorktreeHistoryTests {
     )
 
     let entries = WorktreeHistoryEntry.resolve(
-      stack: stack, catalog: catalog, pullRequests: [reviewed.id: pullRequest]
+      stack: stack, catalog: catalog, current: .empty, pullRequests: [reviewed.id: pullRequest]
     )
 
     #expect(
@@ -301,7 +468,7 @@ struct WorktreeHistoryTests {
     let stack = [fixture.selection(0), deleted, fixture.selection(2)]
 
     let entries = WorktreeHistoryEntry.resolve(
-      stack: stack, catalog: fixture.catalog
+      stack: stack, catalog: fixture.catalog, current: .empty
     )
 
     #expect(entries.map(\.branchTitle) == ["c", "a"])
@@ -316,7 +483,7 @@ struct WorktreeHistoryTests {
     let stack = (0..<40).map { fixture.selection($0 % 4) }
 
     let entries = WorktreeHistoryEntry.resolve(
-      stack: stack, catalog: fixture.catalog
+      stack: stack, catalog: fixture.catalog, current: .empty
     )
 
     #expect(entries.count == WorktreeHistoryEntry.menuLimit)

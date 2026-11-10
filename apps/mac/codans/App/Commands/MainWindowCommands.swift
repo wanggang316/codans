@@ -483,13 +483,13 @@ struct MainWindowCommands: Commands {
   }
 
   /// Drive `.disabled` on Back/Forward so the chord is a hard no-op (and dims
-  /// the menu item) when there's no entry to navigate to.
+  /// the menu item) when there's no landable entry to navigate to.
   private var hasHistoryBack: Bool {
-    !(store()?.state.navigationHistoryBack.isEmpty ?? true)
+    store()?.state.canNavigateHistoryBack ?? false
   }
 
   private var hasHistoryForward: Bool {
-    !(store()?.state.navigationHistoryForward.isEmpty ?? true)
+    store()?.state.canNavigateHistoryForward ?? false
   }
 
   /// `true` when there is a selected Project. Drives `.disabled` for
