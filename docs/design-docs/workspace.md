@@ -205,7 +205,7 @@ WorkspaceHandlers (workspace.*) ─┘
 
 - `createWorkspace`：校验根目录（D10/D12），把源解析为主工作区（已注册 Project、本地路径、远程 clone），写只有 `default` 的 manifest，同步链接，注册并 reconcile。不建分支、不切分支；回滚只删本次创建的根目录与 clone。
 - `addSource` / `removeSource`：只改 `projects`、同步链接、增删引用行；命名组不变，源目录不动。
-- GUI：Add 菜单「New Workspace…」打开 `CreateWorkspaceFeature`（`.addWorkspace`）：Title、Location、Projects（Add Project 菜单 / Add Folder… / Add Remote…）。Workspace 行的 Add Project… 打开 `.addSource`。样式与 Settings 一致：`Form` + `.formStyle(.grouped)`，按钮栏在表单下方。新加入的引用行被选中并展开 `default`。
+- GUI：Add 菜单「New Workspace…」打开 `CreateWorkspaceFeature`（`.addWorkspace`）：Title、Location、Projects（Add Project 菜单 / Add Folder… / Add Remote…）。Workspace 行的 Add Project… 打开 `.addSource`。Add Project 菜单与 New Agent 的 Project 菜单共用 `ProjectMenuContent`：候选为本机、git、非 workspace、且未在 sheet 或 Workspace 中列出的项目；过滤后候选多于 3 个时显示 Recent（`lastActiveAt` 最新的 3 个，新的在前），下方是一个 Projects 分组，不按 Host 分组，没有搜索框。行显示项目在侧栏中的图标和颜色（含自定义图标）。它是动作菜单：没有勾选，选中的项目加入列表后从菜单中消失。样式与 Settings 一致：`Form` + `.formStyle(.grouped)`，按钮栏在表单下方。新加入的引用行被选中并展开 `default`。
 
 ### 新建组
 
