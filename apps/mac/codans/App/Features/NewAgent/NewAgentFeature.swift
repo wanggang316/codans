@@ -141,13 +141,8 @@ struct NewAgentFeature {
     var skillsUnavailableReason: String? {
       guard selectedProject != nil else { return "Add a project to see its skills" }
       guard let agent = selectedAgent else { return "Choose an agent to see its skills" }
-      if selectedProject?.isRemote == true {
-        return "Skill suggestions are not available for remote projects"
-      }
-      guard agent.descriptor.skillLocation.supportsCompletion else {
-        return "Skill suggestions are not available for \(agent.descriptor.displayName)"
-      }
-      return nil
+      return ComposerSkillCompletion.unavailableReason(
+        for: agent.descriptor, isRemote: selectedProject?.isRemote == true)
     }
 
     /// The branch-name field and the worktree options apply.

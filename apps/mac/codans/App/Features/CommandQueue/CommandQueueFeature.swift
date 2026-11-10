@@ -24,6 +24,16 @@ struct CommandQueueFeature {
     var repeatEnabled: Bool = false
     var repeatAmount: Int = 30
     var repeatUnit: IntervalUnit = .minutes
+    /// How the draft calls the skills of the agent running in the pane.
+    /// `none` until `onAppear` reads the pane, and while it offers no skills.
+    var skillLocation: SkillLocation = .none
+    /// Agent Skills the pane's agent can call, for draft completion.
+    var skills: [AgentSkillEntry] = []
+    /// Why the draft offers no skills, for the Skills button's tooltip.
+    /// `nil` when typing the call prefix opens the list.
+    var skillsUnavailableReason: String? = Self.noAgentReason
+
+    static let noAgentReason = "Skill suggestions need an agent running in this pane"
 
     init(paneID: PaneID, now: Date = Date()) {
       self.paneID = paneID
@@ -97,6 +107,8 @@ struct CommandQueueFeature {
   }
 
   enum Action: Equatable {
+    /// Reads the agent in the pane and loads its skills.
+    case onAppear
     case draftChanged(String)
     /// Picked files, and the editor's caret or selection as UTF-16 offsets
     /// (`nil` appends to the end).
@@ -108,6 +120,10 @@ struct CommandQueueFeature {
     case repeatUnitChanged(IntervalUnit)
     /// Commit the draft under the selected mode.
     case submitted
+    case skillsLoaded([AgentSkillEntry])
+    /// The Skills button: put the call prefix at the draft's caret or
+    /// selection (UTF-16 offsets, `nil` appends to the end).
+    case skillsButtonTapped(selection: Range<Int>?)
     case delegate(Delegate)
     case removeTapped(QueuedCommand.ID)
     case clearAllTapped
@@ -119,11 +135,28 @@ struct CommandQueueFeature {
 
   @Dependency(HierarchyClient.self) private var hierarchyClient
   @Dependency(TerminalClient.self) private var terminalClient
+  @Dependency(AgentSkillClient.self) private var agentSkillClient
   @Dependency(\.date) private var date
 
   var body: some Reducer<State, Action> {
     Reduce { state, action in
       switch action {
+      case .onAppear:
+        return loadSkills(state: &state)
+
+      case .skillsLoaded(let skills):
+        state.skills = skills
+        return .none
+
+      case .skillsButtonTapped(let selection):
+        let location = state.skillLocation
+        guard state.skillsUnavailableReason == nil, let prefix = location.invocationStyle.prefix,
+          let result = ComposerSkillCompletion.insertingPrefix(
+            prefix, into: state.draft, selection: selection, position: location.invocationPosition)
+        else { return .none }
+        state.draft = result.text
+        return .none
+
       case .draftChanged(let text):
         state.draft = text
         return .none
@@ -198,6 +231,37 @@ struct CommandQueueFeature {
         hierarchyClient.setCommandQueue(state.paneID, [])
         return .none
       }
+    }
+  }
+
+  /// Reads the skills of the agent running in the pane, as it would resolve
+  /// them in the pane's working directory. A pane does not record the
+  /// profile that started its agent, so the scan uses the agent's defaults:
+  /// the user's home and no profile environment or arguments.
+  private func loadSkills(state: inout State) -> Effect<Action> {
+    let catalog = hierarchyClient.snapshot()
+    guard let pane = catalog.pane(state.paneID), let kind = pane.agentKind else {
+      state.skillLocation = .none
+      state.skillsUnavailableReason = State.noAgentReason
+      return .none
+    }
+    let profile = AgentProfile(kind: kind)
+    let isRemote =
+      catalog.projectID(forPane: state.paneID)
+      .flatMap { id in catalog.projects.first { $0.id == id } }?.isRemote ?? false
+    state.skillsUnavailableReason = ComposerSkillCompletion.unavailableReason(
+      for: profile.descriptor, isRemote: isRemote)
+    guard state.skillsUnavailableReason == nil else {
+      state.skillLocation = .none
+      return .none
+    }
+    state.skillLocation = profile.descriptor.skillLocation
+    let projectStart =
+      pane.workingDirectory.isEmpty
+      ? nil : URL(fileURLWithPath: pane.workingDirectory, isDirectory: true)
+    let client = agentSkillClient
+    return .run { send in
+      await send(.skillsLoaded(client.load(profile, projectStart, nil)))
     }
   }
 

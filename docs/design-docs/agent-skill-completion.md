@@ -1,8 +1,8 @@
-# 设计文档：Agent Skill Completion（New Agent 对话框的 Skill 补全）
+# 设计文档：Agent Skill Completion（New Agent 对话框与 Command Queue 的 Skill 补全）
 
-**Availability:** Available: New Agent completion of user-level and project-level skills for Claude Code, Codex, and Pi, of enabled Claude Code and Codex plugin skills, and the Skills button. Other agents and remote projects get no completion; the Skills button is disabled with the reason (see "探针实测").
+**Availability:** Available: New Agent completion of user-level and project-level skills for Claude Code, Codex, and Pi, of enabled Claude Code and Codex plugin skills, and the Skills button; the Command Queue composer offers the same completion for the agent running in the target pane. Other agents and remote projects get no completion; the Skills button is disabled with the reason (see "探针实测").
 **Author:** Gump（与 Claude）
-**Implementation:** Entry points: [NewAgentView](../../apps/mac/codans/App/Features/NewAgent/NewAgentView.swift) (Skills button, prompt editor), [NewAgentFeature](../../apps/mac/codans/App/Features/NewAgent/NewAgentFeature.swift) (scan scope, `skillsUnavailableReason`), [ComposerTextEditor](../../apps/mac/codans/App/Features/Composer/ComposerTextEditor.swift) (prefix and keys), [AgentSkillClient](../../apps/mac/codans/App/Clients/AgentSkillClient.swift) (scan). Supporting: [ComposerSkillCompletion](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletion.swift), [ComposerSkillCompletionList](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletionList.swift), [ComposerSkillCompletionPanel](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletionPanel.swift) (list and description panels), [SkillLocation](../../apps/mac/CodansCore/Agents/SkillLocation.swift), [SkillLocationResolver](../../apps/mac/CodansCore/Agents/SkillLocationResolver.swift), [SkillScanner](../../apps/mac/CodansCore/Agents/SkillScanner.swift), [ClaudePluginRegistry](../../apps/mac/CodansCore/Agents/ClaudePluginRegistry.swift), [CodexPluginRegistry](../../apps/mac/CodansCore/Agents/CodexPluginRegistry.swift), [PiProjectTrust](../../apps/mac/CodansCore/Agents/PiProjectTrust.swift), [NewWorktreeFiles](../../apps/mac/codans/Git/NewWorktreeFiles.swift)
+**Implementation:** Entry points: [NewAgentView](../../apps/mac/codans/App/Features/NewAgent/NewAgentView.swift) (Skills button, prompt editor), [NewAgentFeature](../../apps/mac/codans/App/Features/NewAgent/NewAgentFeature.swift) (scan scope, `skillsUnavailableReason`), [CommandQueueView](../../apps/mac/codans/App/Features/CommandQueue/CommandQueueView.swift) and [CommandQueueFeature](../../apps/mac/codans/App/Features/CommandQueue/CommandQueueFeature.swift) (target pane's agent and working directory), [ComposerTextEditor](../../apps/mac/codans/App/Features/Composer/ComposerTextEditor.swift) (prefix and keys), [AgentSkillClient](../../apps/mac/codans/App/Clients/AgentSkillClient.swift) (scan). Supporting: [ComposerSkillCompletion](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletion.swift), [ComposerSkillCompletionList](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletionList.swift), [ComposerSkillCompletionPanel](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletionPanel.swift) (list and description panels), [SkillLocation](../../apps/mac/CodansCore/Agents/SkillLocation.swift), [SkillLocationResolver](../../apps/mac/CodansCore/Agents/SkillLocationResolver.swift), [SkillScanner](../../apps/mac/CodansCore/Agents/SkillScanner.swift), [ClaudePluginRegistry](../../apps/mac/CodansCore/Agents/ClaudePluginRegistry.swift), [CodexPluginRegistry](../../apps/mac/CodansCore/Agents/CodexPluginRegistry.swift), [PiProjectTrust](../../apps/mac/CodansCore/Agents/PiProjectTrust.swift), [NewWorktreeFiles](../../apps/mac/codans/Git/NewWorktreeFiles.swift)
 
 ## 背景与范围
 
@@ -26,7 +26,6 @@ New Agent 对话框（⌘⇧N，`NewAgentFeature` / `NewAgentView`）让用户�
 非目标（v1）：
 
 - 远程 SSH 项目的 Skill 扫描（后续单独做）。
-- Command Queue 输入框等其他 prompt 输入处接入（组件可复用，后续单独做）。
 - 文件监听与跨会话缓存。
 - 用户自定义 Skill Location。`AgentKind` 是封闭集合。
 - 安装、编辑或同步 Skill（那是 YouSkill 的职责）。
@@ -141,7 +140,15 @@ struct SkillLocation {
 - **Skills 按钮**：在光标处插入前缀（替换选中文本；光标前紧跟非空白字符时先补一个空格，`invocationPosition == .leading` 时插在 prompt 开头），并把光标移到前缀后，于是弹出同一个弹窗。
 - **不可用**：agent 的 `invocationStyle == .none` 或项目为远程时，不弹出，Skills 按钮置灰，tooltip 说明原因（`NewAgentFeature.State.skillsUnavailableReason`）：远程项目为 "Skill suggestions are not available for remote projects"，不支持的 agent 为 "Skill suggestions are not available for <agent>"；未选项目或 agent 时提示先选择。
 
-组件 `ComposerSkillCompletion`、列表面板与 `ComposerTextEditor` 并列放在 `App/Features/Composer/`，不依赖 New Agent，便于后续接入其他输入处。
+组件 `ComposerSkillCompletion`、列表面板与 `ComposerTextEditor` 并列放在 `App/Features/Composer/`，不依赖 New Agent，便于后续接入其他输入处。不可用原因中远程项目与不支持的 agent 两条由 `ComposerSkillCompletion.unavailableReason(for:isRemote:)` 统一给出。
+
+### Command Queue 输入框
+
+Command Queue（⌘L）的输入框用同一个组件、同一个修饰符和 Skills 按钮，补全对象是目标 pane 中正在运行的 agent：
+
+- **agent 与目录**：打开时读目标 pane 的 `Pane.agentKind`（由前台进程识别）与 `workingDirectory`，以该目录为项目起点扫描（`AgentSkillClient`，无新 worktree 视图）。pane 不记录启动它的 profile，所以按该 agent 的默认 profile 解析：用户 HOME，没有 profile 的环境变量与额外参数。由专属 HOME 或配置根变量的 profile 启动的 agent，列表可能与其实际可用的 Skill 不一致（已知限制）。
+- **不可用**：pane 中没有识别到 agent 时为 "Skill suggestions need an agent running in this pane"；远程项目与不支持的 agent 同 New Agent。此时不弹出，Skills 按钮置灰。
+- **按键**：列表弹出时 Return / Tab 插入、Esc 只关列表；收起后与原来一致：Return 发送（草稿为空时吞掉 Return，不换行），⇧Return / ⌥Return 换行，Esc 关闭面板。
 
 `.composerSkillCompletion` 修饰符同时接管输入框的 Return 和 Esc（`onSubmit` / `onCancel`）：SwiftUI 先把按键交给最外层的 `onKeyPress`，宿主另写的处理器会在弹窗之前拿走 Return。弹窗跟随文本与光标一起更新，光标移出调用 token（点击、方向键）即收起；扫描未完成时已输入的前缀保留，结果到达后弹出。切换 profile 时先清空旧结果，只接受属于当前 profile 的扫描结果。
 
@@ -183,7 +190,7 @@ struct SkillLocation {
 ## 后续
 
 - 远程项目：经 SSH 读取远端 Skill 目录。
-- Command Queue 输入框接入 `ComposerSkillCompletion`。
+- Command Queue：pane 记录启动它的 profile 后，按该 profile 解析 Skill。
 - `SkillInstaller.Target` 改为从 Skill Location 表推导。
 - OpenCode：交互式启动能带首条 prompt 并发送后，重跑探针。
 - Gemini CLI：在有可用凭据的机器上重跑探针（[#490](https://github.com/wanggang316/codans/issues/490)）。
