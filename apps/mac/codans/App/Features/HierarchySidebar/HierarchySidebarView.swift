@@ -1217,7 +1217,7 @@ struct HierarchySidebarView: View {
     // Workspace children keep Pin but not Archive / Remove: those act on a
     // worktree of *this* repository, and a child's repository is elsewhere —
     // membership changes go through the workspace flow.
-    if !isMainCheckout {
+    if project.canPin(worktree) {
       Divider()
       Button {
         store.send(.worktreePinToggleTapped(worktreeID: worktree.id, current: worktree.isPinned))
@@ -1227,6 +1227,7 @@ struct HierarchySidebarView: View {
           systemImage: worktree.isPinned ? "pin.slash" : "pin"
         )
       }
+      .appKeyboardShortcut(.toggleCurrentWorktreePinned, in: resolvedShortcuts)
     }
     if project.isWorkspace {
       workspaceRowLifecycleItems(worktree: worktree, project: project)

@@ -416,6 +416,10 @@ struct RootFeature {
     /// Resolves the current Worktree's absolute path and writes it to the
     /// system pasteboard. Silent no-op when no worktree is selected.
     case copyCurrentWorktreePathRequested
+    /// ⌘⌥P and the palette's Pin / Unpin item. Flips the current Worktree's
+    /// pin state through the sidebar's row toggle. Silent no-op without a
+    /// selection or on the main checkout, which the sidebar refuses to pin.
+    case toggleCurrentWorktreePinnedRequested
     /// Flips `state.sidebarVisible`. ContentView's NavigationSplitView reads
     /// this through a binding, so the chord, the disclosure button, and any
     /// future UI affordance share the same source of truth.
@@ -2472,6 +2476,16 @@ struct RootFeature {
         state.unreadWorktreeIDs = worktreeIDs
         return .none
 
+      case .toggleCurrentWorktreePinnedRequested:
+        // Resolve the pin state from the live catalog so the toggle flips the
+        // right way even when the caller (menu, palette) holds a stale view.
+        guard
+          let worktree = Self.pinnableCurrentWorktree(
+            selection: state.selection, catalog: hierarchyClient.snapshot())
+        else { return .none }
+        return .send(
+          .sidebar(.worktreePinToggleTapped(worktreeID: worktree.id, current: worktree.isPinned)))
+
       case .copyCurrentWorktreePathRequested:
         guard
           let projectID = state.selection.projectID,
@@ -2703,18 +2717,7 @@ struct RootFeature {
     case .archiveCurrentWorktree:
       return .send(.archiveCurrentWorktreeRequested)
     case .toggleCurrentWorktreePinned:
-      // Resolve the current pin state from the catalog so the sidebar's
-      // toggle flips the right way (the palette item carries no payload).
-      guard
-        let projectID = state.selection.projectID,
-        let worktreeID = state.selection.worktreeID,
-        let worktree = hierarchyClient.snapshot()
-          .projects.first(where: { $0.id == projectID })?
-          .worktrees.first(where: { $0.id == worktreeID })
-      else { return .none }
-      return .send(
-        .sidebar(.worktreePinToggleTapped(worktreeID: worktreeID, current: worktree.isPinned))
-      )
+      return .send(.toggleCurrentWorktreePinnedRequested)
     case .openCurrentPR:
       return .send(.openCurrentPRRequested)
     case .openCurrentProjectOnGitPlatform:
@@ -2901,6 +2904,22 @@ struct RootFeature {
   private func projectOverrideEditorID(for projectID: ProjectID?) -> EditorID? {
     guard let projectID else { return nil }
     return settingsWriter.readSnapshotSync().projects[projectID]?.defaultEditor
+  }
+
+  /// The selected Worktree when the user may pin or unpin it, else `nil`.
+  /// Shared by the reducer and the Worktree menu so the menu item's
+  /// enabled state and title match what ⌘⌥P does.
+  nonisolated static func pinnableCurrentWorktree(
+    selection: HierarchySelection, catalog: Catalog
+  ) -> Worktree? {
+    guard
+      let projectID = selection.projectID,
+      let worktreeID = selection.worktreeID,
+      let project = catalog.projects.first(where: { $0.id == projectID }),
+      let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
+      project.canPin(worktree)
+    else { return nil }
+    return worktree
   }
 
   /// Walks `catalog` to find the `(ProjectID, WorktreeID)` pair whose Worktree

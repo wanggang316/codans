@@ -172,6 +172,14 @@ struct MainWindowCommands: Commands {
       .appKeyboardShortcut(.copyCurrentWorktreePath, in: shortcuts)
       .disabled(!hasActiveWorktree)
 
+      // No sidebar-focus gate, unlike Archive / Delete: ⌘⌥P has no terminal
+      // meaning worth keeping, so the chord fires over a focused pane too.
+      Button(pinnableWorktree?.isPinned == true ? "Unpin Worktree" : "Pin Worktree") {
+        store()?.send(.toggleCurrentWorktreePinnedRequested)
+      }
+      .appKeyboardShortcut(.toggleCurrentWorktreePinned, in: shortcuts)
+      .disabled(pinnableWorktree == nil)
+
       Divider()
 
       // Git Viewer moved here from View — it operates on the current Worktree's
@@ -464,6 +472,13 @@ struct MainWindowCommands: Commands {
     guard let state = store()?.state else { return nil }
     return state.gitPlatform.gitPlatformKind(
       forProject: state.selection.projectID, worktreeID: state.selection.worktreeID)
+  }
+
+  /// Reads the `@Observable` catalog, not a reducer snapshot, so the title
+  /// flips as soon as the pin state changes.
+  private var pinnableWorktree: Worktree? {
+    guard let selection = store()?.state.selection else { return nil }
+    return RootFeature.pinnableCurrentWorktree(selection: selection, catalog: hierarchyManager.catalog)
   }
 
   private var hasActiveWorktree: Bool {
