@@ -39,6 +39,126 @@ struct HierarchyManagerWorktreeMgmtTests {
     #expect(worktree?.archived == true)
   }
 
+  // MARK: - selectWorktree guard
+
+  @Test
+  func selectingAnUnknownWorktreeThrowsNotFoundAndKeepsSelection() throws {
+    let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
+    let featureID = try manager.createWorktree(
+      in: projectID, name: "feature", path: "/repo/feat", branch: "feature"
+    )
+    try manager.selectWorktree(featureID, in: projectID)
+    let unknownID = WorktreeID()
+
+    #expect(throws: HierarchyError.notFound("Worktree \(unknownID)")) {
+      try manager.selectWorktree(unknownID, in: projectID)
+    }
+    #expect(manager.catalog.projects[0].selectedWorktreeID == featureID)
+  }
+
+  @Test
+  func selectingAnArchivedWorktreeThrowsInvariantViolationAndKeepsSelection() throws {
+    let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
+    let mainID = try manager.createWorktree(in: projectID, name: "main", path: "/repo", branch: "main")
+    let featureID = try manager.createWorktree(
+      in: projectID, name: "feature", path: "/repo/feat", branch: "feature"
+    )
+    try manager.selectWorktree(mainID, in: projectID)
+    try manager.setWorktreeArchived(worktreeID: featureID, archived: true)
+
+    #expect(throws: HierarchyError.invariantViolation("Cannot select archived Worktree \(featureID)")) {
+      try manager.selectWorktree(featureID, in: projectID)
+    }
+    #expect(manager.catalog.projects[0].selectedWorktreeID == mainID)
+  }
+
+  @Test
+  func activatingAnArchivedWorktreeThrowsInvariantViolation() throws {
+    let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
+    let mainID = try manager.createWorktree(in: projectID, name: "main", path: "/repo", branch: "main")
+    let featureID = try manager.createWorktree(
+      in: projectID, name: "feature", path: "/repo/feat", branch: "feature"
+    )
+    try manager.selectWorktree(mainID, in: projectID)
+    try manager.setWorktreeArchived(worktreeID: featureID, archived: true)
+
+    #expect(throws: HierarchyError.invariantViolation("Cannot select archived Worktree \(featureID)")) {
+      try manager.activateWorktree(featureID)
+    }
+    #expect(manager.catalog.projects[0].selectedWorktreeID == mainID)
+  }
+
+  @Test
+  func clearingTheWorktreeSelectionSucceeds() throws {
+    let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
+    let featureID = try manager.createWorktree(
+      in: projectID, name: "feature", path: "/repo/feat", branch: "feature"
+    )
+    try manager.selectWorktree(featureID, in: projectID)
+
+    try manager.selectWorktree(nil, in: projectID)
+    #expect(manager.catalog.projects[0].selectedWorktreeID == nil)
+  }
+
+  // MARK: - activateTab guard
+
+  @Test
+  func activatingATabInALiveWorktreeSelectsIt() throws {
+    let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
+    let worktreeID = try manager.createWorktree(
+      in: projectID, name: "feature", path: "/repo/feat", branch: "feature"
+    )
+    let firstID = try manager.createTab(in: worktreeID, in: projectID, name: "one")
+    _ = try manager.createTab(in: worktreeID, in: projectID, name: "two")
+
+    try manager.activateTab(firstID)
+    #expect(manager.catalog.projects[0].worktrees.first { $0.id == worktreeID }?.selectedTabID == firstID)
+  }
+
+  @Test
+  func activatingAnUnknownTabThrowsNotFound() {
+    let unknownID = TabID()
+    #expect(throws: HierarchyError.notFound("Tab \(unknownID)")) {
+      try manager.activateTab(unknownID)
+    }
+  }
+
+  @Test
+  func activatingATabInAnArchivedWorktreeThrowsInvariantViolationAndKeepsSelection() throws {
+    let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
+    let worktreeID = try manager.createWorktree(
+      in: projectID, name: "feature", path: "/repo/feat", branch: "feature"
+    )
+    let firstID = try manager.createTab(in: worktreeID, in: projectID, name: "one")
+    let secondID = try manager.createTab(in: worktreeID, in: projectID, name: "two")
+    try manager.setWorktreeArchived(worktreeID: worktreeID, archived: true)
+
+    #expect(
+      throws: HierarchyError.invariantViolation(
+        "Cannot activate Tab \(firstID) in archived Worktree \(worktreeID)"
+      )
+    ) {
+      try manager.activateTab(firstID)
+    }
+    #expect(manager.catalog.projects[0].worktrees.first { $0.id == worktreeID }?.selectedTabID == secondID)
+  }
+
+  @Test
+  func activatingATabSucceedsAfterItsWorktreeIsUnarchived() throws {
+    let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
+    let worktreeID = try manager.createWorktree(
+      in: projectID, name: "feature", path: "/repo/feat", branch: "feature"
+    )
+    let firstID = try manager.createTab(in: worktreeID, in: projectID, name: "one")
+    _ = try manager.createTab(in: worktreeID, in: projectID, name: "two")
+    try manager.setWorktreeArchived(worktreeID: worktreeID, archived: true)
+    #expect(throws: HierarchyError.self) { try manager.activateTab(firstID) }
+
+    try manager.setWorktreeArchived(worktreeID: worktreeID, archived: false)
+    try manager.activateTab(firstID)
+    #expect(manager.catalog.projects[0].worktrees.first { $0.id == worktreeID }?.selectedTabID == firstID)
+  }
+
   // MARK: - archivedAt + auto-delete due (Cleanup)
 
   @Test

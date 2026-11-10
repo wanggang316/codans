@@ -38,7 +38,9 @@ enum CommandPaletteItems {
     if let project, let worktree = resolveWorktree(selection: selection, catalog: catalog) {
       items.append(
         contentsOf: worktreeItems(
-          worktreeName: worktree.name, isPinned: worktree.isPinned, project: project))
+          worktreeName: worktree.name,
+          pinState: project.canPin(worktree) ? worktree.isPinned : nil,
+          project: project))
       items.append(
         contentsOf: worktreeLifecycleItems(
           worktreeName: worktree.name, isWorkspaceRow: project.isWorkspace, gitPlatform: gitPlatform))
@@ -195,6 +197,13 @@ enum CommandPaletteItems {
         kind: .showUnreadNotifications
       ),
       CommandPaletteItem(
+        id: "app.refresh-all-projects",
+        title: "Refresh All Projects",
+        searchText: "app project refresh reload reconcile",
+        icon: "arrow.clockwise",
+        kind: .refreshAllProjects
+      ),
+      CommandPaletteItem(
         id: "app.open-ghostty-config",
         title: "Open Ghostty Config",
         searchText: "app config settings",
@@ -263,7 +272,7 @@ enum CommandPaletteItems {
   /// (e.g. "Toggle Git Viewer", "Open PR on GitHub").
   private static func worktreeItems(
     worktreeName: String,
-    isPinned: Bool,
+    pinState isPinned: Bool?,
     project: Project
   ) -> [CommandPaletteItem] {
     var items: [CommandPaletteItem] = [
@@ -327,15 +336,20 @@ enum CommandPaletteItems {
         commandID: .copyCurrentWorktreePath,
         kind: .copyCurrentWorktreePath
       ),
-      CommandPaletteItem(
-        id: "worktree.toggle-pin",
-        title: isPinned ? "Unpin Worktree" : "Pin Worktree",
-        subtitle: worktreeName,
-        searchText: "worktree pin unpin",
-        icon: isPinned ? "pin.slash" : "pin",
-        kind: .toggleCurrentWorktreePinned
-      ),
     ])
+    // `nil` for the main checkout, which cannot be pinned.
+    if let isPinned {
+      items.append(
+        CommandPaletteItem(
+          id: "worktree.toggle-pin",
+          title: isPinned ? "Unpin Worktree" : "Pin Worktree",
+          subtitle: worktreeName,
+          searchText: "worktree pin unpin",
+          icon: isPinned ? "pin.slash" : "pin",
+          commandID: .toggleCurrentWorktreePinned,
+          kind: .toggleCurrentWorktreePinned
+        ))
+    }
     return items
   }
 

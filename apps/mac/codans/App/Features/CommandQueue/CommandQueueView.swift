@@ -82,40 +82,38 @@ struct CommandQueueView: View {
   }
 
   private var editor: some View {
-    ComposerTextEditor(text: $store.draft.sending(\.draftChanged), selection: draftSelection)
-      .font(.body)
-      .scrollContentBackground(.hidden)
-      .focusEffectDisabled()
-      .frame(height: Self.editorHeight)
-      .overlay(alignment: .topLeading) {
-        if store.draft.isEmpty {
-          // `TextEditor` has no placeholder of its own; this sits where the
-          // first line of text will, matching the text container's inset.
-          Text("Command or prompt… (⇧↩ for a new line)")
-            .font(.body)
-            .foregroundStyle(.tertiary)
-            .padding(.leading, 5)
-            .allowsHitTesting(false)
-        }
+    ComposerTextEditor(
+      text: $store.draft.sending(\.draftChanged),
+      selection: draftSelection,
+      placeholder: "Command or prompt… (⇧↩ for a new line)"
+    )
+    .font(.body)
+    .scrollContentBackground(.hidden)
+    .focusEffectDisabled()
+    .frame(height: Self.editorHeight)
+    .focused($draftFocused)
+    .onKeyPress(.return, phases: .down) { press in
+      // Return sends; ⇧Return and ⌥Return break a line — the chat
+      // convention the layout borrows. An empty draft swallows Return
+      // rather than opening with a blank line. During composition Return
+      // confirms the input method's text.
+      if press.modifiers.contains(.shift) || press.modifiers.contains(.option)
+        || draftSelection.hasMarkedText
+      {
+        return .ignored
       }
-      .focused($draftFocused)
-      .onKeyPress(.return, phases: .down) { press in
-        // Return sends; ⇧Return and ⌥Return break a line — the chat
-        // convention the layout borrows. An empty draft swallows Return
-        // rather than opening with a blank line.
-        if press.modifiers.contains(.shift) || press.modifiers.contains(.option) {
-          return .ignored
-        }
-        if store.canSubmit {
-          store.send(.submitted)
-        }
-        return .handled
+      if store.canSubmit {
+        store.send(.submitted)
       }
-      .onKeyPress(.escape) {
-        onDismiss()
-        return .handled
-      }
-      .accessibilityLabel("Command")
+      return .handled
+    }
+    .onKeyPress(.escape) {
+      // During composition Escape cancels the input method's text.
+      if draftSelection.hasMarkedText { return .ignored }
+      onDismiss()
+      return .handled
+    }
+    .accessibilityLabel("Command")
   }
 
   private var scheduleSummary: String {

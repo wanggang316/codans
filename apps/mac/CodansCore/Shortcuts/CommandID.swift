@@ -50,6 +50,7 @@ public enum CommandID: String, CaseIterable, Hashable, Sendable, Codable, Coding
   case deleteCurrentWorktree
   case showArchivedWorktrees
   case copyCurrentWorktreePath
+  case toggleCurrentWorktreePinned
 
   // Sidebar.
   case toggleSidebar

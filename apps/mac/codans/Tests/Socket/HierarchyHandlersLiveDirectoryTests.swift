@@ -55,7 +55,39 @@ struct HierarchyHandlersLiveDirectoryTests {
     #expect(fixture.runtime.ensureSurfaceCalls.last?.paneID == fixture.paneID)
   }
 
-  private static func makeFixture(liveDirectory: String) -> Fixture {
+  @Test
+  func focusPaneInAnArchivedWorktreeFails() async throws {
+    let fixture = Self.makeFixture(liveDirectory: "/repo/app", archived: true)
+    let params = try JSONValue.encoded(
+      HierarchyHandlers.PaneLocatorParams(
+        id: fixture.paneID,
+        tabID: fixture.tabID,
+        worktreeID: fixture.worktreeID,
+        projectID: fixture.projectID
+      )
+    )
+
+    let outcome = await fixture.handlers.focusPane(params)
+    guard case .failed = outcome else {
+      Issue.record("expected failure, got \(outcome)")
+      return
+    }
+    #expect(fixture.runtime.focusSurfaceViewCalls.isEmpty)
+  }
+
+  @Test
+  func activateTabInAnArchivedWorktreeFails() async throws {
+    let fixture = Self.makeFixture(liveDirectory: "/repo/app", archived: true)
+    let params = try JSONValue.encoded(HierarchyHandlers.ActivateParams(id: fixture.tabID.raw))
+
+    let outcome = await fixture.handlers.activateTab(params)
+    guard case .failed(.conflict) = outcome else {
+      Issue.record("expected conflict, got \(outcome)")
+      return
+    }
+  }
+
+  private static func makeFixture(liveDirectory: String, archived: Bool = false) -> Fixture {
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
     let tabID = TabID()
@@ -68,7 +100,8 @@ struct HierarchyHandlersLiveDirectoryTests {
       path: "/repo",
       branch: "main",
       tabs: [tab],
-      selectedTabID: tabID
+      selectedTabID: tabID,
+      archived: archived
     )
     let project = Project(
       id: projectID,

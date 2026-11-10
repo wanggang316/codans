@@ -9,6 +9,8 @@ import GhosttyKit
 /// A direct jump into the worktree visit history: which stack to walk and
 /// how deep. `offset` is 0-based from the top of that stack, so
 /// `.back(offset: 0)` is the single step the Back button / its menu chord take.
+/// The jump lands on the nearest landable entry at or past `offset`
+/// (`WorktreeHistoryLanding`).
 nonisolated enum WorktreeHistoryJump: Equatable, Sendable {
   case back(offset: Int)
   case forward(offset: Int)
@@ -174,6 +176,23 @@ struct RootFeature {
     /// `selectionChanged` does not re-record the navigation as a fresh
     /// step. Cleared in `selectionChanged` itself.
     var suppressHistoryPush: Bool = false
+    /// Catalog Worktrees a history entry can land on (not archived), from
+    /// `WorktreeHistoryLanding.landableWorktreeIDs`. Kept here so the Go
+    /// menu, which cannot read the catalog, gates Back / Forward by the same
+    /// rule as the header. Refreshed on selection and membership changes.
+    var historyLandableWorktreeIDs: Set<WorktreeID> = []
+
+    /// True when a Back step has an entry to land on.
+    var canNavigateHistoryBack: Bool {
+      WorktreeHistoryLanding.nearestLandableOffset(
+        in: navigationHistoryBack, landable: historyLandableWorktreeIDs, current: selection) != nil
+    }
+
+    /// True when a Forward step has an entry to land on.
+    var canNavigateHistoryForward: Bool {
+      WorktreeHistoryLanding.nearestLandableOffset(
+        in: navigationHistoryForward, landable: historyLandableWorktreeIDs, current: selection) != nil
+    }
   }
 
   /// Opaque marker for diagnostic logging / tests — the full `TerminalEvent`
@@ -397,6 +416,10 @@ struct RootFeature {
     /// Resolves the current Worktree's absolute path and writes it to the
     /// system pasteboard. Silent no-op when no worktree is selected.
     case copyCurrentWorktreePathRequested
+    /// ⌘⌥P and the palette's Pin / Unpin item. Flips the current Worktree's
+    /// pin state through the sidebar's row toggle. Silent no-op without a
+    /// selection or on the main checkout, which the sidebar refuses to pin.
+    case toggleCurrentWorktreePinnedRequested
     /// Flips `state.sidebarVisible`. ContentView's NavigationSplitView reads
     /// this through a binding, so the chord, the disclosure button, and any
     /// future UI affordance share the same source of truth.
@@ -410,8 +433,9 @@ struct RootFeature {
     /// renders: projects in catalog order, within each project the main
     /// row first, then pinned, then unpinned, archived rows excluded.
     case selectAdjacentWorktreeRequested(TabAdjacency)
-    /// Pops the last entry from `navigationHistoryBack` and selects it,
-    /// pushing the current selection onto `navigationHistoryForward`.
+    /// Selects the nearest landable entry of `navigationHistoryBack`. The
+    /// current selection and the passed entries move onto
+    /// `navigationHistoryForward`.
     case worktreeHistoryBackRequested
     /// Mirror of `worktreeHistoryBackRequested` in the opposite direction.
     case worktreeHistoryForwardRequested
@@ -999,6 +1023,7 @@ struct RootFeature {
         }
         if let worktreeID = selection.worktreeID {
           let snapshot = hierarchyClient.snapshot()
+          state.historyLandableWorktreeIDs = WorktreeHistoryLanding.landableWorktreeIDs(in: snapshot)
           let isBadged =
             snapshot.projects
             .first(where: { $0.id == selection.projectID })?
@@ -1125,6 +1150,7 @@ struct RootFeature {
 
       case .catalogMembershipChanged:
         let catalog = hierarchyClient.snapshot()
+        state.historyLandableWorktreeIDs = WorktreeHistoryLanding.landableWorktreeIDs(in: catalog)
         // Live keys are Projects plus every fetch unit a workspace derives
         // from its member repositories; the prune must keep those too.
         var projectIDs = Set(catalog.projects.map(\.id))
@@ -2450,6 +2476,16 @@ struct RootFeature {
         state.unreadWorktreeIDs = worktreeIDs
         return .none
 
+      case .toggleCurrentWorktreePinnedRequested:
+        // Resolve the pin state from the live catalog so the toggle flips the
+        // right way even when the caller (menu, palette) holds a stale view.
+        guard
+          let worktree = Self.pinnableCurrentWorktree(
+            selection: state.selection, catalog: hierarchyClient.snapshot())
+        else { return .none }
+        return .send(
+          .sidebar(.worktreePinToggleTapped(worktreeID: worktree.id, current: worktree.isPinned)))
+
       case .copyCurrentWorktreePathRequested:
         guard
           let projectID = state.selection.projectID,
@@ -2599,12 +2635,16 @@ struct RootFeature {
   /// Back / Forward / history jump: moves the stacks, then selects the
   /// landing worktree under a sidebar category that lists it.
   private func navigateHistory(_ state: inout State, jump: WorktreeHistoryJump) -> Effect<Action> {
+    // Read the live catalog, not the cached set: a removal or archive can
+    // land between the last refresh and this step.
+    let catalog = hierarchyClient.snapshot()
+    state.historyLandableWorktreeIDs = WorktreeHistoryLanding.landableWorktreeIDs(in: catalog)
     guard
-      let target = Self.navigateHistory(&state, jump: jump),
+      let target = Self.navigateHistory(&state, jump: jump, landable: state.historyLandableWorktreeIDs),
       let projectID = target.projectID,
       let worktreeID = target.worktreeID
     else { return .none }
-    showAllFilterIfUnlisted(worktreeID, catalog: hierarchyClient.snapshot(), state: state)
+    showAllFilterIfUnlisted(worktreeID, catalog: catalog, state: state)
     return .send(.sidebar(.worktreeRowTapped(worktreeID, inProject: projectID)))
   }
 
@@ -2642,6 +2682,8 @@ struct RootFeature {
       return .send(.toggleSidebarRequested)
     case .openGhosttyConfig:
       return .send(.windowActionRouter(.requested(.openConfig)))
+    case .refreshAllProjects:
+      return .send(.sidebar(.refreshAllProjectsTapped))
 
     // Worktree
     case .selectWorktree(let projectID, let worktreeID):
@@ -2677,18 +2719,7 @@ struct RootFeature {
     case .archiveCurrentWorktree:
       return .send(.archiveCurrentWorktreeRequested)
     case .toggleCurrentWorktreePinned:
-      // Resolve the current pin state from the catalog so the sidebar's
-      // toggle flips the right way (the palette item carries no payload).
-      guard
-        let projectID = state.selection.projectID,
-        let worktreeID = state.selection.worktreeID,
-        let worktree = hierarchyClient.snapshot()
-          .projects.first(where: { $0.id == projectID })?
-          .worktrees.first(where: { $0.id == worktreeID })
-      else { return .none }
-      return .send(
-        .sidebar(.worktreePinToggleTapped(worktreeID: worktreeID, current: worktree.isPinned))
-      )
+      return .send(.toggleCurrentWorktreePinnedRequested)
     case .openCurrentPR:
       return .send(.openCurrentPRRequested)
     case .openCurrentProjectOnGitPlatform:
@@ -2875,6 +2906,22 @@ struct RootFeature {
   private func projectOverrideEditorID(for projectID: ProjectID?) -> EditorID? {
     guard let projectID else { return nil }
     return settingsWriter.readSnapshotSync().projects[projectID]?.defaultEditor
+  }
+
+  /// The selected Worktree when the user may pin or unpin it, else `nil`.
+  /// Shared by the reducer and the Worktree menu so the menu item's
+  /// enabled state and title match what ⌘⌥P does.
+  nonisolated static func pinnableCurrentWorktree(
+    selection: HierarchySelection, catalog: Catalog
+  ) -> Worktree? {
+    guard
+      let projectID = selection.projectID,
+      let worktreeID = selection.worktreeID,
+      let project = catalog.projects.first(where: { $0.id == projectID }),
+      let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
+      project.canPin(worktree)
+    else { return nil }
+    return worktree
   }
 
   /// Walks `catalog` to find the `(ProjectID, WorktreeID)` pair whose Worktree
@@ -3470,39 +3517,43 @@ struct RootFeature {
   }
 
   /// Shared implementation behind Back, Forward, and the header control's
-  /// press-and-hold jump. Takes `offset + 1` entries off the requested
-  /// stack; the entries it skipped over, plus the selection being left,
-  /// move to the opposite stack so a following single step retraces the
-  /// jump one entry at a time. A single step is just `offset == 0`.
+  /// press-and-hold jump. Lands on the nearest landable entry at or past
+  /// the requested offset (`WorktreeHistoryLanding`) and takes it, plus
+  /// every entry above it, off the requested stack. The entries it passed
+  /// (stale ones included), plus the selection being left, move to the
+  /// opposite stack so a following single step retraces the path one entry
+  /// at a time. A single step is just `offset == 0`.
   ///
-  /// Nothing is mutated unless the target resolves to a real
-  /// Project/Worktree pair — a half-applied jump would desync the two
-  /// stacks from the selection they describe. Returns the entry to select,
-  /// or nil when nothing moved.
+  /// Nothing is mutated unless a landable entry exists — a half-applied
+  /// jump would desync the two stacks from the selection they describe.
+  /// Returns the entry to select, or nil when nothing moved.
   @discardableResult
   static func navigateHistory(
     _ state: inout State,
-    jump: WorktreeHistoryJump
+    jump: WorktreeHistoryJump,
+    landable: Set<WorktreeID>
   ) -> HierarchySelection? {
-    let offset: Int
+    let requested: Int
     let goingBack: Bool
     switch jump {
     case .back(let value):
-      offset = value
+      requested = value
       goingBack = true
     case .forward(let value):
-      offset = value
+      requested = value
       goingBack = false
     }
     var source = goingBack ? state.navigationHistoryBack : state.navigationHistoryForward
     var destination = goingBack ? state.navigationHistoryForward : state.navigationHistoryBack
-    guard offset >= 0, offset < source.count else { return nil }
+    guard
+      let offset = WorktreeHistoryLanding.nearestLandableOffset(
+        in: source, from: requested, landable: landable, current: state.selection)
+    else { return nil }
 
-    // Stacks are oldest-first, so the requested entry sits `offset` below
+    // Stacks are oldest-first, so the landing entry sits `offset` below
     // the top and everything above it was visited more recently.
     let targetIndex = source.count - 1 - offset
     let target = source[targetIndex]
-    guard target.projectID != nil, target.worktreeID != nil else { return nil }
 
     let skipped = Array(source[(targetIndex + 1)...])
     source.removeSubrange(targetIndex...)

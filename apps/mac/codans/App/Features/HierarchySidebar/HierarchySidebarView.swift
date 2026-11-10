@@ -119,6 +119,8 @@ struct HierarchySidebarView: View {
   /// the non-animated signals (phase icon, phase line + its stage value)
   /// carry the state on their own. Mirrors `PendingWorktreeRow`'s gating.
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  /// Footer Settings button opens the same window as the Settings… menu item.
+  @Environment(\.openWindow) private var openWindow
 
   /// App-wide "is a newer version available?" mirror, injected by
   /// `ContentView`. Drives the persistent update reminder in the sidebar
@@ -310,7 +312,7 @@ struct HierarchySidebarView: View {
         onTagTapped: { store.send(.tagChipTapped($0)) },
         onUntaggedTapped: { store.send(.untaggedChipTapped) },
         onEditTagsTapped: { store.send(.delegate(.openTagManager)) },
-        onRefreshTapped: { store.send(.refreshAllProjectsTapped) },
+        onSettingsTapped: { openWindow(id: CodansApp.settingsWindowID) },
         onAgentStateTapped: !agentStatePanelAvailable
           ? nil
           : {
@@ -391,11 +393,11 @@ struct HierarchySidebarView: View {
     } message: {
       Text(projectRemovalMessage)
     }
-    // First-archive explainer (once per session).
+    // Archive confirmation, shown for every interactive archive (ADR 0010).
     .confirmationDialog(
       "Archive this Worktree?",
       isPresented: Binding(
-        get: { store.pendingArchiveExplainer != nil },
+        get: { store.pendingWorktreeArchive != nil },
         set: { if !$0 { store.send(.worktreeArchiveCancelled) } }
       ),
       titleVisibility: .visible
@@ -408,7 +410,8 @@ struct HierarchySidebarView: View {
       }
     } message: {
       Text(
-        "Files and branch are kept. Find it later under “Archived Worktrees” in the Project menu.")
+        "Its terminal sessions stop. Files and branch are kept. Find it later under “Archived Worktrees” in the Project menu."
+      )
     }
     // Batch "Archive All Merged Worktrees" confirmation (Project ⋯ menu).
     .confirmationDialog(
@@ -1217,7 +1220,7 @@ struct HierarchySidebarView: View {
     // Workspace children keep Pin but not Archive / Remove: those act on a
     // worktree of *this* repository, and a child's repository is elsewhere —
     // membership changes go through the workspace flow.
-    if !isMainCheckout {
+    if project.canPin(worktree) {
       Divider()
       Button {
         store.send(.worktreePinToggleTapped(worktreeID: worktree.id, current: worktree.isPinned))
@@ -1227,6 +1230,7 @@ struct HierarchySidebarView: View {
           systemImage: worktree.isPinned ? "pin.slash" : "pin"
         )
       }
+      .appKeyboardShortcut(.toggleCurrentWorktreePinned, in: resolvedShortcuts)
     }
     if project.isWorkspace {
       workspaceRowLifecycleItems(worktree: worktree, project: project)

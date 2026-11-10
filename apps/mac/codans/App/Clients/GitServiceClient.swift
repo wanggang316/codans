@@ -108,7 +108,10 @@ extension GitServiceClient {
 }
 
 extension GitServiceClient: DependencyKey {
-  static let liveValue: GitServiceClient = .live()
+  /// Routes Remote Project locations through `GitRemoteRoute.shared`, so
+  /// every reader gets the same transport as the main window.
+  static let liveValue: GitServiceClient = .live(
+    service: Git.makeService(remoteHostResolver: { await GitRemoteRoute.shared.remoteHost(for: $0) }))
 
   static let testValue: GitServiceClient = GitServiceClient(
     comparison: unimplemented(

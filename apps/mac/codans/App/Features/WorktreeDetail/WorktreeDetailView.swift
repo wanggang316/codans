@@ -383,6 +383,7 @@ struct WorktreeDetailView: View {
     return WorktreeHistoryEntry.resolve(
       stack: stack,
       catalog: hierarchyManager.catalog,
+      current: selection,
       pullRequests: gitPlatformStore.snapshots
     )
   }

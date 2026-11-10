@@ -246,8 +246,15 @@ extension Catalog {
   /// grouped by Host (This Mac first) while the Host level shows, else the
   /// catalog order.
   public var sidebarOrderedProjects: [Project] {
-    guard let level = sidebarHostLevel else { return projects }
-    return level.groups(projects).flatMap(\.projects)
+    unfilteredSidebarHostGroups?.flatMap(\.projects) ?? projects
+  }
+
+  /// Every Project grouped by Host as the sidebar groups them, with no
+  /// filter and no Host collapsed. A Host with no Project has no group, This
+  /// Mac included. `nil` when every Project is on This Mac.
+  public var unfilteredSidebarHostGroups: [SidebarHostGroup]? {
+    guard sidebarHostLevel != nil else { return nil }
+    return SidebarHostLevel(records: hosts, collapsed: []).groups(projects)
   }
 
   /// The Host level of the sidebar, `nil` when every Project is on This Mac

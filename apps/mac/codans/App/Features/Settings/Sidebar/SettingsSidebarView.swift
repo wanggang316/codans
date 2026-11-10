@@ -3,10 +3,8 @@ import ComposableArchitecture
 import SwiftUI
 
 /// Settings window sidebar. Fixed-order global sections at the top, then the open
-/// Projects grouped by where they live: a "Local" section for on-disk projects and one
-/// section per server host (titled with its hostname / IP). With no Remote Projects the
-/// single group keeps the plain "Projects" title. Each project row opens the Project's
-/// single Settings page.
+/// Projects in the Host groups of the main sidebar (`SettingsProjectGroup`). Each
+/// project row opens the Project's single Settings page.
 ///
 /// The Project list comes from the live `HierarchyManager` catalog; adding or removing a
 /// Project in the main window reflects here without any explicit refresh (@Observable
@@ -32,7 +30,7 @@ struct SettingsSidebarView: View {
           }
         }
 
-        let groups = projectGroups(in: hierarchyManager.catalog)
+        let groups = SettingsProjectGroup.groups(in: hierarchyManager.catalog)
         if groups.isEmpty {
           Section("Projects") {
             Text("No open projects")
@@ -40,7 +38,7 @@ struct SettingsSidebarView: View {
               .foregroundStyle(.tertiary)
           }
         } else {
-          ForEach(groups, id: \.title) { group in
+          ForEach(groups) { group in
             Section(group.title) {
               ForEach(group.projects) { project in
                 projectRow(project: project)
@@ -92,42 +90,6 @@ struct SettingsSidebarView: View {
   }
 
   // MARK: - Helpers
-
-  private func sortedProjects(in catalog: Catalog) -> [Project] {
-    catalog.projects
-      .sorted { lhs, rhs in
-        lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-      }
-  }
-
-  private struct ProjectGroup {
-    let title: String
-    let projects: [Project]
-  }
-
-  /// Group the open projects by where they live. Local projects come first;
-  /// server hosts follow alphabetically, titled by hostname / IP (the address
-  /// alone — user and port stay out of the section header). A catalog with no
-  /// Remote Projects keeps the familiar single "Projects" title.
-  private func projectGroups(in catalog: Catalog) -> [ProjectGroup] {
-    let sorted = sortedProjects(in: catalog)
-    let locals = sorted.filter { $0.remoteHost == nil }
-    let servers = sorted.filter { $0.remoteHost != nil }
-    guard !servers.isEmpty else {
-      return locals.isEmpty ? [] : [ProjectGroup(title: "Projects", projects: locals)]
-    }
-    var groups: [ProjectGroup] = []
-    if !locals.isEmpty {
-      groups.append(ProjectGroup(title: "Local", projects: locals))
-    }
-    let byHost = Dictionary(grouping: servers) { $0.remoteHost?.alias ?? "" }
-    for alias in byHost.keys.sorted(by: {
-      $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
-    }) {
-      groups.append(ProjectGroup(title: alias, projects: byHost[alias] ?? []))
-    }
-    return groups
-  }
 
   /// Global sidebar row: the title with a colored icon tile, in the style of
   /// System Settings. Project rows keep their own Project icons.

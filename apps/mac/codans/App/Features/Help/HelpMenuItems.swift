@@ -1,15 +1,23 @@
 import AppKit
 import SwiftUI
 
-/// Menu items for every `HelpMenuLink`, in order. Used as the content of the
-/// menubar Help menu and of the sidebar footer's help menu.
+/// Menu items for every `HelpMenuLink`, in `HelpMenuLink.groups` order with a
+/// separator between groups. Used as the content of the menubar Help menu and
+/// of the sidebar footer's help menu.
 struct HelpMenuItems: View {
   var body: some View {
-    ForEach(HelpMenuLink.allCases, id: \.self) { link in
-      Button {
-        NSWorkspace.shared.open(link.url(in: .current))
-      } label: {
-        Label(link.title, systemImage: link.systemImage)
+    ForEach(Array(HelpMenuLink.groups.enumerated()), id: \.offset) { index, group in
+      if index > 0 {
+        Divider()
+      }
+      ForEach(group, id: \.self) { link in
+        Button {
+          NSWorkspace.shared.open(link.url(in: .current))
+        } label: {
+          // NSMenu hides item images unless the label asks for them.
+          Label(link.title, systemImage: link.systemImage)
+            .labelStyle(.titleAndIcon)
+        }
       }
     }
   }
@@ -23,14 +31,10 @@ struct SidebarHelpMenuButton: View {
       HelpMenuItems()
     } label: {
       Image(systemName: "questionmark.circle")
-        .font(.system(size: 13, weight: .regular))
-        .foregroundStyle(.secondary)
-        .frame(width: 22, height: 22)
-        .contentShape(Rectangle())
         .accessibilityLabel("Help")
     }
     .menuStyle(.button)
-    .buttonStyle(.plain)
+    .buttonStyle(.sidebarFooter)
     .menuIndicator(.hidden)
     .fixedSize()
     .help("Help")
