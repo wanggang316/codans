@@ -141,6 +141,24 @@ struct NewWorktreeFilesTests {
     #expect(await names(copyIgnored: false, copyUntracked: true).contains("linked"))
   }
 
+  /// A tracked symlink is in every new worktree, but its target in the
+  /// repository can be ignored. Without Copy ignored the new worktree's
+  /// symlink dangles, so the skill through it is not offered.
+  @Test
+  func skillThroughATrackedSymlinkToAnIgnoredTargetCountsOnlyWhenIgnoredFilesAreCopied() async throws {
+    try await fixture(local: "{}")
+    try write(
+      ".claude/settings.local.json\n.claude/skills/scratch/\nvendor/\n", to: repo.appending(path: ".gitignore"))
+    try skill("vendored", in: repo.appending(path: "vendor"))
+    try FileManager.default.createSymbolicLink(
+      atPath: repo.appending(path: ".claude/skills/vendored").path(percentEncoded: false),
+      withDestinationPath: "../../vendor/vendored")
+    try await git(["add", ".gitignore", ".claude/skills/vendored"])
+    try await git(["-c", "user.email=t@example.com", "-c", "user.name=T", "commit", "-qm", "vendored"])
+    #expect(!(await names(copyIgnored: false, copyUntracked: true)).contains("vendored"))
+    #expect(await names(copyIgnored: true, copyUntracked: false).contains("vendored"))
+  }
+
   /// A tracked settings file is in every new worktree. Here the local file
   /// turns the tracked plugin off, which counts only when it is copied.
   @Test
