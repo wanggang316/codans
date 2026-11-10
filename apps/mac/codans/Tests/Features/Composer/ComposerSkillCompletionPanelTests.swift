@@ -124,6 +124,35 @@ struct ComposerSkillCompletionPanelTests {
     #expect(panel.frame.height == Layout.height(rowCount: 2))
   }
 
+  private func editorFrameOnScreen(_ textView: NSTextView) throws -> CGRect {
+    let scrollView = try #require(textView.enclosingScrollView)
+    return window.convertToScreen(scrollView.convert(scrollView.bounds, to: nil))
+  }
+
+  @Test
+  func panelOpensAboveTheEditorWhenThereIsRoom() throws {
+    let visible = try #require(NSScreen.main?.visibleFrame)
+    window.setFrameOrigin(CGPoint(x: visible.minX + 100, y: visible.minY + 100))
+    let textView = try show()
+    defer { window.close() }
+    type("/", in: textView)
+    let panel = try #require(panel)
+    let editor = try editorFrameOnScreen(textView)
+    #expect(panel.frame.minY >= editor.maxY)
+  }
+
+  @Test
+  func panelOpensBelowTheEditorAtTheTopOfTheScreen() throws {
+    let visible = try #require(NSScreen.main?.visibleFrame)
+    window.setFrameTopLeftPoint(CGPoint(x: visible.minX + 100, y: visible.maxY))
+    let textView = try show()
+    defer { window.close() }
+    type("/", in: textView)
+    let panel = try #require(panel)
+    let editor = try editorFrameOnScreen(textView)
+    #expect(panel.frame.maxY <= editor.minY)
+  }
+
   @Test
   func closingTheListHidesThePanel() throws {
     let textView = try show()
