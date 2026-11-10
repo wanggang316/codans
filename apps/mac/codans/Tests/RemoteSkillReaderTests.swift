@@ -190,4 +190,10 @@ struct RemoteSkillReaderTests {
     // No marker.
     #expect(RemoteSkillReader.apply(Data("h 0 9\n/home/bob\n".utf8), requests: [], to: snapshot) == nil)
   }
+
+  @Test(arguments: ["f 0 \(Int.max)\nabc\n", "f 0 \(Int.max - 1)\n\n", "f 0 -1\n\n", "f 0 99999999999999999999\n\n"])
+  func aFrameLengthBeyondTheReplyIsRejected(_ frame: String) {
+    let reply = Data(("===CODANS-SKILL-FILES===\nh 0 9\n/home/bob\n" + frame).utf8)
+    #expect(RemoteSkillReader.records(in: reply) == nil)
+  }
 }

@@ -268,8 +268,10 @@ nonisolated struct RemoteSkillReader: Sendable {
     while cursor < reply.endIndex {
       guard let end = reply[cursor...].firstIndex(of: newline) else { return nil }
       let fields = (String(data: reply[cursor..<end], encoding: .utf8) ?? "").split(separator: " ")
+      // The byte count comes from the host: compare it with what is left
+      // (the bytes and their closing newline) before any arithmetic on it.
       guard fields.count == 3, let index = Int(fields[1]), let count = Int(fields[2]), count >= 0,
-        reply.distance(from: end, to: reply.endIndex) > count + 1
+        count < reply.distance(from: end, to: reply.endIndex) - 1
       else { return nil }
       let start = reply.index(after: end)
       let stop = reply.index(start, offsetBy: count)
