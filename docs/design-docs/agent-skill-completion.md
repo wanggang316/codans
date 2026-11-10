@@ -2,7 +2,7 @@
 
 **Availability:** Available: New Agent completion of user-level and project-level skills for Claude Code, Codex, and Pi, of enabled Claude Code and Codex plugin skills, and the Skills button; the Command Queue composer offers the same completion for the agent running in the target pane. Other agents and remote projects get no completion; the Skills button is disabled with the reason (see "探针实测").
 **Author:** Gump（与 Claude）
-**Implementation:** Entry points: [NewAgentView](../../apps/mac/codans/App/Features/NewAgent/NewAgentView.swift) (Skills button, prompt editor), [NewAgentFeature](../../apps/mac/codans/App/Features/NewAgent/NewAgentFeature.swift) (scan scope, `skillsUnavailableReason`), [CommandQueueView](../../apps/mac/codans/App/Features/CommandQueue/CommandQueueView.swift) and [CommandQueueFeature](../../apps/mac/codans/App/Features/CommandQueue/CommandQueueFeature.swift) (target pane's agent and working directory), [ComposerTextEditor](../../apps/mac/codans/App/Features/Composer/ComposerTextEditor.swift) (prefix and keys), [AgentSkillClient](../../apps/mac/codans/App/Clients/AgentSkillClient.swift) (scan). Supporting: [ComposerSkillCompletion](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletion.swift), [ComposerSkillCompletionList](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletionList.swift), [ComposerSkillCompletionPanel](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletionPanel.swift) (list and description panels), [SkillLocation](../../apps/mac/CodansCore/Agents/SkillLocation.swift), [SkillLocationResolver](../../apps/mac/CodansCore/Agents/SkillLocationResolver.swift), [SkillScanner](../../apps/mac/CodansCore/Agents/SkillScanner.swift), [ClaudePluginRegistry](../../apps/mac/CodansCore/Agents/ClaudePluginRegistry.swift), [CodexPluginRegistry](../../apps/mac/CodansCore/Agents/CodexPluginRegistry.swift), [PiProjectTrust](../../apps/mac/CodansCore/Agents/PiProjectTrust.swift), [NewWorktreeFiles](../../apps/mac/codans/Git/NewWorktreeFiles.swift)
+**Implementation:** Entry points: [NewAgentView](../../apps/mac/codans/App/Features/NewAgent/NewAgentView.swift) (Skills button, prompt editor), [NewAgentFeature](../../apps/mac/codans/App/Features/NewAgent/NewAgentFeature.swift) (scan scope, `skillsUnavailableReason`), [CommandQueueView](../../apps/mac/codans/App/Features/CommandQueue/CommandQueueView.swift) and [CommandQueueFeature](../../apps/mac/codans/App/Features/CommandQueue/CommandQueueFeature.swift) (target pane's agent and working directory), [ComposerTextEditor](../../apps/mac/codans/App/Features/Composer/ComposerTextEditor.swift) (prefix and keys), [AgentSkillClient](../../apps/mac/codans/App/Clients/AgentSkillClient.swift) (scan). Supporting: [ComposerSkillCompletion](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletion.swift), [ComposerSkillCompletionList](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletionList.swift), [ComposerSkillCompletionPanel](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletionPanel.swift) (list and description panels), [SkillLocation](../../apps/mac/CodansCore/Agents/SkillLocation.swift), [SkillLaunch](../../apps/mac/CodansCore/Agents/SkillLaunch.swift), [ForegroundJobReader](../../apps/mac/codans/Runtime/ForegroundJobReader.swift) (running agent argv, environment, directory), [SkillLocationResolver](../../apps/mac/CodansCore/Agents/SkillLocationResolver.swift), [SkillScanner](../../apps/mac/CodansCore/Agents/SkillScanner.swift), [ClaudePluginRegistry](../../apps/mac/CodansCore/Agents/ClaudePluginRegistry.swift), [CodexPluginRegistry](../../apps/mac/CodansCore/Agents/CodexPluginRegistry.swift), [PiProjectTrust](../../apps/mac/CodansCore/Agents/PiProjectTrust.swift), [NewWorktreeFiles](../../apps/mac/codans/Git/NewWorktreeFiles.swift)
 
 ## 背景与范围
 
@@ -146,8 +146,12 @@ struct SkillLocation {
 
 Command Queue（⌘L）的输入框用同一个组件、同一个修饰符和 Skills 按钮，补全对象是目标 pane 中正在运行的 agent：
 
-- **agent 与目录**：打开时读目标 pane 的 `Pane.agentKind`（由前台进程识别）与 `workingDirectory`，以该目录为项目起点扫描（`AgentSkillClient`，无新 worktree 视图）。pane 不记录启动它的 profile，所以按该 agent 的默认 profile 解析：用户 HOME，没有 profile 的环境变量与额外参数。由专属 HOME 或配置根变量的 profile 启动的 agent，列表可能与其实际可用的 Skill 不一致（已知限制）。
-- **不可用**：pane 中没有识别到 agent 时为 "Skill suggestions need an agent running in this pane"；远程项目与不支持的 agent 同 New Agent。此时不弹出，Skills 按钮置灰。
+- **agent 与启动方式**：读目标 pane 的 `Pane.agentKind`（由前台进程识别），再从 pane 的前台进程组中找到该 agent 的进程（`AgentKindPatterns.agentLaunch`：进程名即 agent 的优先于 `node` 等包装进程，同类中先启动的优先），用 `KERN_PROCARGS2` 读它的 argv 与环境（`ForegroundJobReader`），得到 `SkillLaunch`：只保留 `HOME` 与该 agent 的配置根变量（`CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`PI_CODING_AGENT_DIR`），参数为可执行文件之后的原样 argv。不论 agent 由哪个 profile（专属 HOME、环境变量、额外参数）或手动启动，解析的都是它实际的 HOME、配置根和启动参数（ADR 0010）。
+  - argv 已由 shell 展开，按词读，不需要 `PlainShellWords` 规则；首条 prompt 是一个词，不影响参数解析。仍以 `~` 开头的词说明它被引号括住，agent 是否展开未知，此时参数视为读不准（与 profile 的额外参数读不准时相同：不列插件 Skill，Pi 不列任何 Skill）。
+  - `HOME` 不是绝对路径，或读不到该进程（其他用户的进程、argv 不可读）时，不列任何 Skill。
+- **目录**：项目起点为该 agent 进程的当前目录（`proc_pidinfo`），读不到时用 pane 的 `workingDirectory`；无新 worktree 视图。
+- **跟随 pane**：面板打开期间订阅该 pane（`HierarchyClient.paneChanges`）。pane 每次变化都重新读取 agent 进程；扫描范围（agent 进程 pid、`SkillLaunch`、项目起点）变化时先清空旧结果再扫描，扫描结果按范围对应，旧范围的结果丢弃。agent 退出时列表关闭。
+- **不可用**：pane 中没有识别到 agent 时为 "Skill suggestions need an agent running in this pane"；读不到 agent 的启动方式时为 "Skill suggestions are not available: codans cannot read how this agent was started"；远程项目与不支持的 agent 同 New Agent。此时不弹出，Skills 按钮置灰。
 - **按键**：列表弹出时 Return / Tab 插入、Esc 只关列表；收起后与原来一致：Return 发送（草稿为空时吞掉 Return，不换行），⇧Return / ⌥Return 换行，Esc 关闭面板。
 
 `.composerSkillCompletion` 修饰符同时接管输入框的 Return 和 Esc（`onSubmit` / `onCancel`）：SwiftUI 先把按键交给最外层的 `onKeyPress`，宿主另写的处理器会在弹窗之前拿走 Return。弹窗跟随文本与光标一起更新，光标移出调用 token（点击、方向键）即收起；扫描未完成时已输入的前缀保留，结果到达后弹出。切换 profile 时先清空旧结果，只接受属于当前 profile 的扫描结果。
@@ -190,7 +194,6 @@ Command Queue（⌘L）的输入框用同一个组件、同一个修饰符和 Sk
 ## 后续
 
 - 远程项目：经 SSH 读取远端 Skill 目录。
-- Command Queue：pane 记录启动它的 profile 后，按该 profile 解析 Skill。
 - `SkillInstaller.Target` 改为从 Skill Location 表推导。
 - OpenCode：交互式启动能带首条 prompt 并发送后，重跑探针。
 - Gemini CLI：在有可用凭据的机器上重跑探针（[#490](https://github.com/wanggang316/codans/issues/490)）。
