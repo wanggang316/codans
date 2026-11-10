@@ -594,7 +594,12 @@ nonisolated enum GitWorktreeShell {
     onStdout: @escaping @Sendable (String) -> Void,
     onStderr: @escaping @Sendable (String) -> Void
   ) async -> (exitCode: Int32, stdoutLast: String, stderrCollected: String, spawnFailedReason: String?) {
-    await withCheckedContinuation { cont in
+    // Same guard as `FoundationCommandRunner`: a non-file cwd makes
+    // `Process` raise an Objective-C exception.
+    guard cwd.isFileURL else {
+      return (-1, "", "", FoundationCommandRunner.nonLocalDirectoryReason(cwd))
+    }
+    return await withCheckedContinuation { cont in
       let process = Process()
       process.executableURL = executable
       process.arguments = arguments
@@ -1629,8 +1634,10 @@ extension GitWorktreeClient: DependencyKey {
   /// script and `/usr/bin/git`. Closures throw
   /// `GitWorktreeError.executableMissing` if the `wt` resource cannot
   /// be resolved (which the pre-build `verify-git-wt.sh` makes
-  /// impossible in a clean build).
-  static let liveValue: GitWorktreeClient = .makeLive()
+  /// impossible in a clean build). Routes Remote Project locations through
+  /// `GitRemoteRoute.shared`, so every reader gets the same transport.
+  static let liveValue: GitWorktreeClient = .makeLive(
+    remoteHostResolver: { await GitRemoteRoute.shared.remoteHost(for: $0) })
 
   static let testValue: GitWorktreeClient = GitWorktreeClient(
     lsWorktrees: unimplemented("GitWorktreeClient.lsWorktrees", placeholder: []),

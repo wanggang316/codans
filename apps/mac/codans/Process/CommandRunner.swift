@@ -89,6 +89,11 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
     timeout: Duration,
     maxOutputBytes: Int
   ) async -> CommandOutcome {
+    // `Process.currentDirectoryURL` raises an Objective-C exception for a
+    // non-file URL (a Remote Project's `codans-host://` location). Return an
+    // error instead: a location that reaches this runner unresolved is a
+    // routing bug, not a reason to stop the app.
+    guard cwd.isFileURL else { return .spawnFailed(reason: Self.nonLocalDirectoryReason(cwd)) }
     await Self.gate.acquire()
     // `defer` can't await, so release on a detached task — this still runs if
     // the surrounding task is cancelled or `launch` returns early.
@@ -101,6 +106,11 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
       timeout: timeout,
       maxOutputBytes: maxOutputBytes
     )
+  }
+
+  /// The `.spawnFailed` reason for a working directory that is not on This Mac.
+  static func nonLocalDirectoryReason(_ cwd: URL) -> String {
+    "working directory is not a local path: \(cwd.absoluteString)"
   }
 
   private func launch(

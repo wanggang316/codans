@@ -30,7 +30,9 @@ struct CodansApp: App {
       // batch fetch, sidebar status monitor) that the running host app spins
       // up before `bringUp()` reaches its own `prepareDependencies` block.
       $0.gitPlatform = .live()
-      $0.gitService = .live()
+      // Routed through `GitRemoteRoute.shared`, which `bringUp()` binds to
+      // the catalog; until then every location resolves to This Mac.
+      $0.gitService = GitServiceClient.liveValue
     }
 
     // Install the Sentry crash handler before SwiftUI renders anything,
@@ -743,16 +745,16 @@ final class AppState {
     // handlers share the exact same live instances — avoids two parallel
     // `LiveEditorService`s with divergent settings captures.
     let editor = EditorClient.live(settings: settings)
-    // Remote Project transport seam for the worktree-management surface:
-    // paths owned by a remote project route their plain-git operations
-    // (listing, branch queries, removal, prune, status) over SSH. Shared by
-    // the HierarchyClient (reconcile + removal) and the root store (create
-    // sheet option loading) so both sides agree on the transport.
-    let worktreeClient = GitWorktreeClient.makeLive(
-      remoteHostResolver: { [weak manager] url in
-        await MainActor.run { manager?.remoteHost(forGitURL: url) }
-      }
-    )
+    // Remote Project transport seam: bind the one routing source behind
+    // both live git clients (`GitServiceClient.liveValue`,
+    // `GitWorktreeClient.liveValue`) to the catalog. Paths owned by a remote
+    // project then route their git operations over SSH for every reader —
+    // the HierarchyClient, both window stores, and views that read the
+    // dependency directly — so no reader can get an unrouted client.
+    GitRemoteRoute.shared.bind { [weak manager] url in
+      await MainActor.run { manager?.remoteHost(forGitURL: url) }
+    }
+    let worktreeClient = GitWorktreeClient.liveValue
     let hierarchy = HierarchyClient.live(
       manager: manager,
       settings: settings,
@@ -768,19 +770,11 @@ final class AppState {
       Task { await hierarchy.reconcileDiscoveredWorktrees(projectID) }
     }
 
-    // Remote Project git transport: a GitService whose invocations route over
-    // SSH whenever the repository path belongs to a remote project (resolved
-    // live against the manager's catalog). Installed on the root store (below)
-    // and rebound into the two sidebar monitors, so the `+N −M` chip, dirty
-    // flag, PR badge remote-URL probe, branch switcher, and diff inspector all
-    // work against remote worktrees with no per-feature changes. The global
-    // `gitService` prepared in `CodansApp.init` stays purely local — it cannot
-    // be re-prepared, and no view-side reader needs the remote route.
-    let routedGitClient = GitServiceClient.live(
-      service: Git.makeService(remoteHostResolver: { [weak manager] url in
-        await MainActor.run { manager?.remoteHost(forGitURL: url) }
-      })
-    )
+    // The routed GitService (see `GitRemoteRoute` above). Installed on both
+    // window stores and rebound into the two sidebar monitors, so the
+    // `+N −M` chip, dirty flag, PR badge remote-URL probe, branch switcher,
+    // and diff inspector all work against remote worktrees.
+    let routedGitClient = GitServiceClient.liveValue
     worktreeStatusMonitor.rebindFetch(routedGitClient.status)
     worktreeLocalDiffMonitor.rebindFetch(routedGitClient.localDiffStats)
 
@@ -977,6 +971,10 @@ final class AppState {
       $0.editorClient = editor
       $0.settingsWriter = .live(settings)
       $0.hierarchyClient = hierarchy
+      // Same routed git clients as the root store: a Remote Project's page
+      // loads its base ref options from the Host.
+      $0.gitService = routedGitClient
+      $0.gitWorktreeClient = worktreeClient
       // The Workspace pane adds and removes sources through the same client
       // as the sidebar; it has no live default.
       $0.workspaceClient = workspaceClient
