@@ -11,15 +11,16 @@ import Foundation
 /// without a question at startup; anything it cannot be sure of gives no
 /// project skills (ADR 0010; design doc: Agent Skill Completion → Probe).
 nonisolated enum PiProjectTrust {
-  /// `true` when Pi, launched with `extraArguments` in `start`, trusts the
+  /// `true` when Pi, launched with `arguments` (the words after its
+  /// executable, `nil` when they cannot be read) in `start`, trusts the
   /// project without asking. `agentDirectory` is Pi's config root
   /// (`~/.pi/agent` or `PI_CODING_AGENT_DIR`). `startExists` is `false`
   /// when `start` stands in for a new worktree whose own path is not known
   /// yet, so no saved decision can be matched to it.
   static func trusts(
-    agentDirectory: URL, extraArguments: String, start: URL, startExists: Bool
+    agentDirectory: URL, arguments: [String]?, start: URL, startExists: Bool
   ) -> Bool {
-    guard let launch = PiLaunchArguments(extraArguments) else { return false }
+    guard let launch = PiLaunchArguments(words: arguments) else { return false }
     if let approve = launch.approve { return approve }
     if launch.loadsExtensionFile { return false }
     guard let settings = readSettings(agentDirectory) else { return false }
@@ -128,7 +129,12 @@ nonisolated struct PiLaunchArguments: Equatable {
 
   /// `nil` when the arguments are not plain words (`PlainShellWords`).
   init?(_ extraArguments: String) {
-    guard let words = PlainShellWords.split(extraArguments) else { return nil }
+    self.init(words: PlainShellWords.split(extraArguments))
+  }
+
+  /// `nil` when the words cannot be read.
+  init?(words: [String]?) {
+    guard let words else { return nil }
     var index = 0
     while index < words.count, words[index] != "--" {
       let next = index + 1 < words.count ? words[index + 1] : nil

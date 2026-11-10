@@ -41,7 +41,8 @@ struct PiProjectTrustTests {
 
   private func trusts(_ arguments: String = "", start: URL? = nil, startExists: Bool = true) -> Bool {
     PiProjectTrust.trusts(
-      agentDirectory: agent, extraArguments: arguments, start: start ?? project, startExists: startExists)
+      agentDirectory: agent, arguments: PlainShellWords.split(arguments), start: start ?? project,
+      startExists: startExists)
   }
 
   @Test

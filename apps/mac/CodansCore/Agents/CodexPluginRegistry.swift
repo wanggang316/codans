@@ -25,7 +25,13 @@ nonisolated enum CodexPluginRegistry {
 
   /// Reads the plugin-related flags from a profile's extra arguments.
   static func launchConfig(extraArguments: String) -> LaunchConfig {
-    guard let words = PlainShellWords.split(extraArguments) else { return .unknown }
+    launchConfig(arguments: PlainShellWords.split(extraArguments))
+  }
+
+  /// Reads the plugin-related flags from the words after the executable,
+  /// `nil` when they cannot be read.
+  static func launchConfig(arguments: [String]?) -> LaunchConfig {
+    guard let words = arguments else { return .unknown }
     var profiles: [String?] = []
     var plugins: Bool?
     var index = 0
@@ -62,14 +68,14 @@ nonisolated enum CodexPluginRegistry {
   }
 
   /// The skill directories of every plugin that Codex, launched with
-  /// `extraArguments` in each of `projectDirectories` (the working
+  /// `arguments` in each of `projectDirectories` (the working
   /// directory and its parents up to the repository root), has enabled,
   /// called as `<plugin>:<skill>`. Each cached version is listed, newest
   /// first, so the newest copy keeps a name.
   static func skillDirectories(
-    configRoot: URL, extraArguments: String, projectDirectories: [URL]
+    configRoot: URL, arguments: [String]?, projectDirectories: [URL]
   ) -> [SkillDirectory] {
-    guard case .known(let profile, let launchPlugins) = launchConfig(extraArguments: extraArguments),
+    guard case .known(let profile, let launchPlugins) = launchConfig(arguments: arguments),
       launchPlugins != false
     else { return [] }
     // A trusted project's `.codex/config.toml` is one more layer. Whether

@@ -31,7 +31,16 @@ nonisolated enum ClaudePluginRegistry {
   static func launchSettings(
     extraArguments: String, projectStart: URL?, userHome: URL
   ) -> LaunchSettings {
-    switch settingsFlag(extraArguments) {
+    launchSettings(
+      arguments: PlainShellWords.split(extraArguments), projectStart: projectStart, userHome: userHome)
+  }
+
+  /// `launchSettings(extraArguments:projectStart:userHome:)` for the words
+  /// after the executable, `nil` when they cannot be read.
+  static func launchSettings(
+    arguments: [String]?, projectStart: URL?, userHome: URL
+  ) -> LaunchSettings {
+    switch settingsFlag(arguments) {
     case .none: return .none
     case .unknown: return .unknown
     case .value(let value):
@@ -47,7 +56,11 @@ nonisolated enum ClaudePluginRegistry {
   /// The `--settings` path when it is relative to the directory the agent
   /// starts in, else `nil`.
   static func relativeLaunchSettingsPath(extraArguments: String) -> String? {
-    guard case .value(let value) = settingsFlag(extraArguments),
+    relativeLaunchSettingsPath(arguments: PlainShellWords.split(extraArguments))
+  }
+
+  static func relativeLaunchSettingsPath(arguments: [String]?) -> String? {
+    guard case .value(let value) = settingsFlag(arguments),
       !value.hasPrefix("/"), !value.hasPrefix("~/")
     else { return nil }
     return value
@@ -59,8 +72,8 @@ nonisolated enum ClaudePluginRegistry {
     case value(String)
   }
 
-  private static func settingsFlag(_ extraArguments: String) -> SettingsFlag {
-    guard let tokens = PlainShellWords.split(extraArguments) else { return .unknown }
+  private static func settingsFlag(_ arguments: [String]?) -> SettingsFlag {
+    guard let tokens = arguments else { return .unknown }
     var values: [String?] = []
     for (index, token) in tokens.enumerated() {
       if token == "--setting-sources" || token.hasPrefix("--setting-sources=")
