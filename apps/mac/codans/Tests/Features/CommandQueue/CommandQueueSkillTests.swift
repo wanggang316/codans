@@ -29,13 +29,17 @@ struct CommandQueueSkillTests {
     return Catalog(projects: [project])
   }
 
-  /// A Claude Code process with a launch flag, run in the pane's subfolder.
+  /// A Claude Code process with its own home and a launch flag, run in
+  /// the pane's subfolder.
   private nonisolated static func claude(
     pid: Int32 = 41, arguments: [String] = ["--settings", "/srv/s.json"],
     cwd: String? = "/tmp/queue/repo/sub/agent"
   ) -> RunningAgent {
     RunningAgent(
-      pid: pid, arguments: arguments,
+      pid: pid,
+      launch: SkillLaunch(
+        kind: .claudeCode, arguments: arguments,
+        environment: ["HOME": "/srv/agent-home", "PATH": "/usr/bin"]),
       workingDirectory: cwd.map { URL(fileURLWithPath: $0, isDirectory: true) })
   }
 
@@ -48,8 +52,7 @@ struct CommandQueueSkillTests {
 
   private static func makeStore(
     catalog: Catalog, paneID: PaneID, loads: LockIsolated<[Load]>,
-    running: LockIsolated<RunningAgent?> = LockIsolated(claude()),
-    profiles: [AgentProfile] = AgentProfile.defaults
+    running: LockIsolated<RunningAgent?> = LockIsolated(claude())
   ) -> TestStoreOf<CommandQueueFeature> {
     TestStore(initialState: CommandQueueFeature.State(paneID: paneID)) {
       CommandQueueFeature()
@@ -62,11 +65,6 @@ struct CommandQueueSkillTests {
         }
       }
       $0.terminalClient.runningAgent = { _, _ in running.value }
-      $0[SettingsWriter.self].readSnapshotSync = {
-        var settings = Settings()
-        settings.agents.profiles = profiles
-        return settings
-      }
       $0[AgentSkillClient.self].load = { launch, start, newWorktree in
         loads.withValue {
           $0.append(Load(launch: launch, start: start?.path(percentEncoded: false), newWorktree: newWorktree))
@@ -76,10 +74,9 @@ struct CommandQueueSkillTests {
     }
   }
 
-  private static func scope(_ agent: RunningAgent, kind: AgentKind = .claudeCode) -> CommandQueueFeature.SkillScope {
+  private static func scope(_ agent: RunningAgent) -> CommandQueueFeature.SkillScope {
     CommandQueueFeature.SkillScope(
-      pid: agent.pid, launch: SkillLaunch(kind: kind, arguments: agent.arguments),
-      projectStart: agent.workingDirectory)
+      pid: agent.pid, launch: agent.launch!, projectStart: agent.workingDirectory)
   }
 
   // MARK: - Reducer
@@ -97,12 +94,10 @@ struct CommandQueueSkillTests {
       $0.skillsScope = Self.scope(Self.claude())
     }
     await store.receive(.skillsLoaded(Self.skills, for: Self.scope(Self.claude()))) { $0.skills = Self.skills }
-    #expect(
-      loads.value == [
-        Load(
-          launch: SkillLaunch(kind: .claudeCode, arguments: ["--settings", "/srv/s.json"]),
-          start: "/tmp/queue/repo/sub/agent/")
-      ])
+    #expect(loads.value == [Load(launch: Self.claude().launch!, start: "/tmp/queue/repo/sub/agent/")])
+    // The agent's own home and flags, not the user's defaults.
+    #expect(loads.value.first?.launch.profile.envVars == ["HOME": "/srv/agent-home"])
+    #expect(loads.value.first?.launch.arguments == ["--settings", "/srv/s.json"])
 
     await store.send(.draftChanged("fix")) { $0.draft = "fix" }
     await store.send(.skillsButtonTapped(selection: 3..<3)) { $0.draft = "fix /" }
@@ -126,7 +121,9 @@ struct CommandQueueSkillTests {
     let paneID = PaneID()
     let loads = LockIsolated<[Load]>([])
     let catalog = Self.catalog(paneID: paneID, agent: .codex)
-    let codex = RunningAgent(pid: 7, arguments: [], workingDirectory: nil)
+    let codex = RunningAgent(
+      pid: 7, launch: SkillLaunch(kind: .codex, arguments: [], environment: ["PATH": "/usr/bin"]),
+      workingDirectory: nil)
     let store = Self.makeStore(catalog: catalog, paneID: paneID, loads: loads, running: LockIsolated(codex))
     store.exhaustivity = .off
     await store.send(.paneChanged(catalog.pane(paneID)))
@@ -175,47 +172,23 @@ struct CommandQueueSkillTests {
     #expect(loads.value.isEmpty)
   }
 
-  /// An agent process codans cannot find or read may run with other
-  /// flags, so it gets no list (ADR 0010).
+  /// An agent process codans cannot find, or whose environment the kernel
+  /// does not give, may run with another home or other flags, so it gets
+  /// no list (ADR 0010).
   @Test
   func unreadableLaunchOffersNoSkills() async {
     let paneID = PaneID()
     let loads = LockIsolated<[Load]>([])
     let catalog = Self.catalog(paneID: paneID, agent: .claudeCode)
-    let store = Self.makeStore(catalog: catalog, paneID: paneID, loads: loads, running: LockIsolated(nil))
+    let running = LockIsolated<RunningAgent?>(nil)
+    let store = Self.makeStore(catalog: catalog, paneID: paneID, loads: loads, running: running)
     await store.send(.paneChanged(catalog.pane(paneID))) {
       $0.skillsUnavailableReason = CommandQueueFeature.State.unreadableLaunchReason
     }
+    running.setValue(RunningAgent(pid: 9, launch: nil, workingDirectory: nil))
+    await store.send(.paneChanged(catalog.pane(paneID)))
     #expect(store.state.skillLocation == .none)
     #expect(loads.value.isEmpty)
-  }
-
-  /// macOS does not report another process's environment. While a profile
-  /// of the agent's kind moves its home or config root, the agent in the
-  /// pane may run with them, so it gets no list (ADR 0010). A profile of
-  /// another kind does not matter.
-  @Test
-  func profileThatMovesTheAgentRootsOffersNoSkills() async {
-    let paneID = PaneID()
-    let loads = LockIsolated<[Load]>([])
-    let catalog = Self.catalog(paneID: paneID, agent: .claudeCode)
-    let dedicated = AgentProfile(kind: .claudeCode, name: "Work", isEnabled: false, usesDedicatedHome: true)
-    let store = Self.makeStore(
-      catalog: catalog, paneID: paneID, loads: loads,
-      profiles: [AgentProfile(kind: .claudeCode), dedicated])
-    await store.send(.paneChanged(catalog.pane(paneID))) {
-      $0.skillsUnavailableReason = CommandQueueFeature.State.movedRootsReason(AgentKind.claudeCode.displayName)
-    }
-    #expect(store.state.skillLocation == .none)
-    #expect(loads.value.isEmpty)
-
-    let other = Self.makeStore(
-      catalog: catalog, paneID: paneID, loads: loads,
-      profiles: [AgentProfile(kind: .codex, envVars: ["CODEX_HOME": "/srv/codex"])])
-    other.exhaustivity = .off
-    await other.send(.paneChanged(catalog.pane(paneID)))
-    await other.receive(\.skillsLoaded)
-    #expect(loads.value.count == 1)
   }
 
   /// The pane's agent changes while the panel is open: the old skills go
@@ -300,7 +273,6 @@ struct CommandQueueSkillTests {
         }
       }
       $0.terminalClient.runningAgent = { _, _ in claude() }
-      $0[SettingsWriter.self].readSnapshotSync = { Settings() }
       $0[AgentSkillClient.self].load = { _, _, _ in skills }
     }
     let window = NSWindow(

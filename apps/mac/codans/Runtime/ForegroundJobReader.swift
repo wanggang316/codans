@@ -131,19 +131,6 @@ nonisolated struct ForegroundJobReader: Sendable {
     return procargs2Argv(buffer)
   }
 
-  /// The current directory of `pid`, `nil` when it cannot be read.
-  static func processWorkingDirectory(pid: Int32) -> String? {
-    guard pid > 0 else { return nil }
-    var info = proc_vnodepathinfo()
-    let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
-    guard proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, size) == size else { return nil }
-    let path = withUnsafeBytes(of: info.pvi_cdir.vip_path) { raw in
-      String(bytes: raw.prefix { $0 != 0 }, encoding: .utf8)
-    }
-    guard let path, !path.isEmpty else { return nil }
-    return path
-  }
-
   static func kernProcargs2(pid: Int32) -> [UInt8]? {
     var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
     var size = 0
@@ -182,6 +169,37 @@ nonisolated struct ForegroundJobReader: Sendable {
   }
 
   static func procargs2Argv(_ buffer: [UInt8]) -> [String]? {
+    procargs2(buffer)?.argv
+  }
+
+  /// The environment of `pid`, read from the same kernel buffer as its
+  /// argv. `nil` when the kernel does not give it: macOS leaves it out for
+  /// another process that is an Apple platform binary (`/bin/sleep`,
+  /// `zsh`) and for another user's process. An empty environment counts as
+  /// not given, as the two cannot be told apart.
+  static func processEnvironment(pid: Int32) -> [String: String]? {
+    guard let buffer = kernProcargs2(pid: pid),
+      let environment = procargs2(buffer)?.environment, !environment.isEmpty
+    else { return nil }
+    return environment
+  }
+
+  /// The current directory of `pid`, `nil` when it cannot be read.
+  static func processWorkingDirectory(pid: Int32) -> String? {
+    guard pid > 0 else { return nil }
+    var info = proc_vnodepathinfo()
+    let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
+    guard proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, size) == size else { return nil }
+    let path = withUnsafeBytes(of: info.pvi_cdir.vip_path) { raw in
+      String(bytes: raw.prefix { $0 != 0 }, encoding: .utf8)
+    }
+    guard let path, !path.isEmpty else { return nil }
+    return path
+  }
+
+  /// `KERN_PROCARGS2` holds `argc`, the executable path, padding, the
+  /// `argc` arguments, then the environment up to an empty string.
+  static func procargs2(_ buffer: [UInt8]) -> (argv: [String], environment: [String: String])? {
     guard buffer.count >= MemoryLayout<Int32>.size else { return nil }
     let argc = buffer.withUnsafeBytes { rawBuffer in
       rawBuffer.loadUnaligned(as: Int32.self)
@@ -209,7 +227,21 @@ nonisolated struct ForegroundJobReader: Sendable {
       argv.append(value)
       position += 1
     }
+    guard argv.count == Int(argc) else { return nil }
 
-    return argv.count == Int(argc) ? argv : nil
+    var environment: [String: String] = [:]
+    while position < buffer.count, buffer[position] != 0 {
+      let start = position
+      while position < buffer.count, buffer[position] != 0 {
+        position += 1
+      }
+      if let entry = String(bytes: buffer[start..<position], encoding: .utf8),
+        let separator = entry.firstIndex(of: "="), environment[String(entry[..<separator])] == nil
+      {
+        environment[String(entry[..<separator])] = String(entry[entry.index(after: separator)...])
+      }
+      position += 1
+    }
+    return (argv, environment)
   }
 }

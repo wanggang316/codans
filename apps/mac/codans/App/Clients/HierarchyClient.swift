@@ -310,8 +310,9 @@ nonisolated struct HierarchyClient: Sendable {
   var paneMembershipChanges: @MainActor @Sendable () -> AsyncStream<Set<PaneID>>
 
   /// Emits `paneID`'s pane, first at once and then whenever it changes
-  /// (its agent binding, its working directory, ...). `nil` once the pane
-  /// leaves the catalog.
+  /// (its agent binding, its working directory, ...) or its foreground job
+  /// changes (an agent replaced by another of the same kind changes the
+  /// process, not the pane). `nil` once the pane leaves the catalog.
   var paneChanges: @MainActor @Sendable (_ paneID: PaneID) -> AsyncStream<Pane?>
 
   // MARK: - Worktree Management additions
@@ -1003,7 +1004,7 @@ extension HierarchyClient {
       snapshot: { manager.catalog },
       selectionChanges: { makeSelectionStream(manager: manager) },
       paneMembershipChanges: { makeObservedStream(manager: manager) { $0.catalog.allPaneIDs() } },
-      paneChanges: { paneID in makeObservedStream(manager: manager) { $0.catalog.pane(paneID) } },
+      paneChanges: { paneID in makePaneStream(paneID, manager: manager) },
       setWorktreeArchived: { worktreeID, archived in
         try manager.setWorktreeArchived(worktreeID: worktreeID, archived: archived)
       },
@@ -2321,6 +2322,20 @@ extension HierarchyClient {
     makeObservedStream(manager: manager, sample: currentSelection(for:))
   }
 
+  @MainActor
+  private static func makePaneStream(_ paneID: PaneID, manager: HierarchyManager) -> AsyncStream<Pane?> {
+    let samples = makeObservedStream(manager: manager) {
+      PaneJobSample(pane: $0.catalog.pane(paneID), job: $0.processRegistry.foregroundJobs[paneID])
+    }
+    return AsyncStream { continuation in
+      let task = Task { @MainActor in
+        for await sample in samples { continuation.yield(sample.pane) }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// AsyncStream backed by Swift Observation — yields `sample(manager)` at
   /// once and again whenever it changes. Closes the re-arm race window by
   /// sampling BEFORE arming the next `withObservationTracking` block: any
@@ -2630,4 +2645,11 @@ extension DependencyValues {
     get { self[HierarchyClient.self] }
     set { self[HierarchyClient.self] = newValue }
   }
+}
+
+/// A pane with its foreground job, so a new process emits too. The job is
+/// only the trigger: consumers read the process they need.
+private nonisolated struct PaneJobSample: Equatable, Sendable {
+  var pane: Pane?
+  var job: ForegroundJob?
 }

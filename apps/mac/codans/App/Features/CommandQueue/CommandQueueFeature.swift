@@ -40,13 +40,6 @@ struct CommandQueueFeature {
     static let unreadableLaunchReason =
       "Skill suggestions are not available: codans cannot read how this agent was started"
 
-    /// A profile of the agent's kind moves its home or config root, and
-    /// codans cannot tell which profile started the agent in the pane.
-    static func movedRootsReason(_ agent: String) -> String {
-      "Skill suggestions are not available: a profile for \(agent) sets its own home or config folder, "
-        + "and codans cannot tell which profile started this agent"
-    }
-
     init(paneID: PaneID, now: Date = Date()) {
       self.paneID = paneID
       self.scheduledAt = Self.defaultScheduleDate(from: now)
@@ -157,7 +150,6 @@ struct CommandQueueFeature {
   @Dependency(HierarchyClient.self) private var hierarchyClient
   @Dependency(TerminalClient.self) private var terminalClient
   @Dependency(AgentSkillClient.self) private var agentSkillClient
-  @Dependency(SettingsWriter.self) private var settingsWriter
   @Dependency(\.date) private var date
 
   var body: some Reducer<State, Action> {
@@ -271,11 +263,10 @@ struct CommandQueueFeature {
   private nonisolated enum CancelID { case pane, skills }
 
   /// Reads the skills of the agent that runs in the pane as that agent
-  /// resolves them (ADR 0010): its launch flags come from the argv of the
-  /// running process, and project skills are searched from its current
-  /// directory. macOS does not report another process's environment, so
-  /// its home and config root are the user's only while no profile of its
-  /// kind moves them; otherwise, or when the process cannot be read, it
+  /// resolves them (ADR 0010): its home, config root, and launch flags
+  /// come from the environment and argv of the running process, whatever
+  /// set them (a profile, the project, the shell), and project skills are
+  /// searched from its current directory. A process codans cannot read
   /// gets no skills. A new agent or directory drops the old skills at once.
   private func updateSkills(for pane: Pane?, state: inout State) -> Effect<Action> {
     guard let pane, let kind = pane.agentKind else {
@@ -289,15 +280,9 @@ struct CommandQueueFeature {
     if let reason = ComposerSkillCompletion.unavailableReason(for: descriptor, isRemote: isRemote) {
       return clearSkills(reason: reason, state: &state)
     }
-    if settingsWriter.readSnapshotSync().agents.profiles.contains(where: {
-      $0.kind == kind && SkillLocationResolver.movesSkillRoots($0)
-    }) {
-      return clearSkills(reason: State.movedRootsReason(descriptor.displayName), state: &state)
-    }
-    guard let agent = terminalClient.runningAgent(pane.id, kind) else {
+    guard let agent = terminalClient.runningAgent(pane.id, kind), let launch = agent.launch else {
       return clearSkills(reason: State.unreadableLaunchReason, state: &state)
     }
-    let launch = SkillLaunch(kind: kind, arguments: agent.arguments)
     let projectStart =
       agent.workingDirectory
       ?? (pane.workingDirectory.isEmpty ? nil : URL(fileURLWithPath: pane.workingDirectory, isDirectory: true))
