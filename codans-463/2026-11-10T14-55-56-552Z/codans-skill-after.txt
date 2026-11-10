@@ -1,0 +1,225 @@
+$ codans skill list
+codans-cli  <S>/App.app/Contents/Resources/skills/codans-cli
+  claude  missing        <S>/home/.claude/skills
+  codex   missing        <S>/home/.codex/skills
+codans-review  <S>/App.app/Contents/Resources/skills/codans-review
+  claude  missing        <S>/home/.claude/skills
+  codex   missing        <S>/home/.codex/skills
+exit=0
+$ codans skill list --json
+{
+  "data" : {
+    "skills" : [
+      {
+        "id" : "codans-cli",
+        "path" : "<S>/App.app/Contents/Resources/skills/codans-cli",
+        "targets" : [
+          {
+            "directory" : "<S>/home/.claude/skills",
+            "status" : "missing",
+            "target" : "claude"
+          },
+          {
+            "directory" : "<S>/home/.codex/skills",
+            "status" : "missing",
+            "target" : "codex"
+          }
+        ]
+      },
+      {
+        "id" : "codans-review",
+        "path" : "<S>/App.app/Contents/Resources/skills/codans-review",
+        "targets" : [
+          {
+            "directory" : "<S>/home/.claude/skills",
+            "status" : "missing",
+            "target" : "claude"
+          },
+          {
+            "directory" : "<S>/home/.codex/skills",
+            "status" : "missing",
+            "target" : "codex"
+          }
+        ]
+      }
+    ]
+  },
+  "schemaVersion" : "codans.cli.skill.list.v1"
+}
+exit=0
+$ codans skill install
+installed <S>/home/.claude/skills/codans-cli
+installed <S>/home/.codex/skills/codans-cli
+installed <S>/home/.claude/skills/codans-review
+installed <S>/home/.codex/skills/codans-review
+exit=0
+$ codans skill list
+codans-cli  <S>/App.app/Contents/Resources/skills/codans-cli
+  claude  installed      <S>/home/.claude/skills
+  codex   installed      <S>/home/.codex/skills
+codans-review  <S>/App.app/Contents/Resources/skills/codans-review
+  claude  installed      <S>/home/.claude/skills
+  codex   installed      <S>/home/.codex/skills
+exit=0
+$ codans skill install codans-cli --target agents
+installed <S>/home/.agents/skills/codans-cli
+exit=0
+$ codans skill list --target claude codex agents --json
+{
+  "data" : {
+    "skills" : [
+      {
+        "id" : "codans-cli",
+        "path" : "<S>/App.app/Contents/Resources/skills/codans-cli",
+        "targets" : [
+          {
+            "directory" : "<S>/home/.claude/skills",
+            "status" : "installed",
+            "target" : "claude"
+          },
+          {
+            "directory" : "<S>/home/.codex/skills",
+            "status" : "installed",
+            "target" : "codex"
+          },
+          {
+            "directory" : "<S>/home/.agents/skills",
+            "status" : "installed",
+            "target" : "agents"
+          }
+        ]
+      },
+      {
+        "id" : "codans-review",
+        "path" : "<S>/App.app/Contents/Resources/skills/codans-review",
+        "targets" : [
+          {
+            "directory" : "<S>/home/.claude/skills",
+            "status" : "installed",
+            "target" : "claude"
+          },
+          {
+            "directory" : "<S>/home/.codex/skills",
+            "status" : "installed",
+            "target" : "codex"
+          },
+          {
+            "directory" : "<S>/home/.agents/skills",
+            "status" : "missing",
+            "target" : "agents"
+          }
+        ]
+      }
+    ]
+  },
+  "schemaVersion" : "codans.cli.skill.list.v1"
+}
+exit=0
+$ codans skill install --scope project --project-root <S>/repo
+installed <S>/repo/.agents/skills/codans-cli
+installed <S>/repo/.agents/skills/codans-review
+exit=0
+$ codans skill install --scope project --project-root <S>/repo --target claude codex agents
+installed <S>/repo/.claude/skills/codans-cli
+installed <S>/repo/.codex/skills/codans-cli
+installed <S>/repo/.claude/skills/codans-review
+installed <S>/repo/.codex/skills/codans-review
+already installed <S>/repo/.agents/skills/codans-cli
+already installed <S>/repo/.agents/skills/codans-review
+exit=0
+$ codans skill list --scope project --project-root <S>/repo
+codans-cli  <S>/App.app/Contents/Resources/skills/codans-cli
+  claude  installed      <S>/repo/.claude/skills
+  codex   installed      <S>/repo/.codex/skills
+  agents  installed      <S>/repo/.agents/skills
+codans-review  <S>/App.app/Contents/Resources/skills/codans-review
+  claude  installed      <S>/repo/.claude/skills
+  codex   installed      <S>/repo/.codex/skills
+  agents  installed      <S>/repo/.agents/skills
+exit=0
+<S>/home/.agents/skills/codans-cli -> <S>/App.app/Contents/Resources/skills/codans-cli
+<S>/home/.claude/skills/codans-cli -> <S>/App.app/Contents/Resources/skills/codans-cli
+<S>/home/.claude/skills/codans-review -> <S>/App.app/Contents/Resources/skills/codans-review
+<S>/home/.codex/skills/codans-cli -> <S>/App.app/Contents/Resources/skills/codans-cli
+<S>/home/.codex/skills/codans-review -> <S>/App.app/Contents/Resources/skills/codans-review
+<S>/repo/.agents/skills/codans-cli -> <S>/App.app/Contents/Resources/skills/codans-cli
+<S>/repo/.agents/skills/codans-review -> <S>/App.app/Contents/Resources/skills/codans-review
+<S>/repo/.claude/skills/codans-cli -> <S>/App.app/Contents/Resources/skills/codans-cli
+<S>/repo/.claude/skills/codans-review -> <S>/App.app/Contents/Resources/skills/codans-review
+<S>/repo/.codex/skills/codans-cli -> <S>/App.app/Contents/Resources/skills/codans-cli
+<S>/repo/.codex/skills/codans-review -> <S>/App.app/Contents/Resources/skills/codans-review
+$ codans skill install --target codex
+already installed <S>/home/.codex/skills/codans-cli
+already installed <S>/home/.codex/skills/codans-review
+exit=0
+$ codans skill uninstall --target codex
+removed <S>/home/.codex/skills/codans-cli
+removed <S>/home/.codex/skills/codans-review
+exit=0
+$ codans skill uninstall
+removed <S>/home/.claude/skills/codans-cli
+removed <S>/home/.agents/skills/codans-cli
+removed <S>/home/.claude/skills/codans-review
+already absent <S>/home/.codex/skills/codans-cli
+already absent <S>/home/.codex/skills/codans-review
+already absent <S>/home/.agents/skills/codans-review
+exit=0
+$ codans skill uninstall --scope project --project-root <S>/repo --target claude codex agents
+removed <S>/repo/.claude/skills/codans-cli
+removed <S>/repo/.codex/skills/codans-cli
+removed <S>/repo/.agents/skills/codans-cli
+removed <S>/repo/.claude/skills/codans-review
+removed <S>/repo/.codex/skills/codans-review
+removed <S>/repo/.agents/skills/codans-review
+exit=0
+$ codans skill list --json
+{
+  "data" : {
+    "skills" : [
+      {
+        "id" : "codans-cli",
+        "path" : "<S>/App.app/Contents/Resources/skills/codans-cli",
+        "targets" : [
+          {
+            "directory" : "<S>/home/.claude/skills",
+            "status" : "missing",
+            "target" : "claude"
+          },
+          {
+            "directory" : "<S>/home/.codex/skills",
+            "status" : "missing",
+            "target" : "codex"
+          },
+          {
+            "directory" : "<S>/home/.agents/skills",
+            "status" : "missing",
+            "target" : "agents"
+          }
+        ]
+      },
+      {
+        "id" : "codans-review",
+        "path" : "<S>/App.app/Contents/Resources/skills/codans-review",
+        "targets" : [
+          {
+            "directory" : "<S>/home/.claude/skills",
+            "status" : "missing",
+            "target" : "claude"
+          },
+          {
+            "directory" : "<S>/home/.codex/skills",
+            "status" : "missing",
+            "target" : "codex"
+          },
+          {
+            "directory" : "<S>/home/.agents/skills",
+            "status" : "missing",
+            "target" : "agents"
+          }
+        ]
+      }
+    ]
+  },
+  "schemaVersion" : "codans.cli.skill.list.v1"
+}
+exit=0
