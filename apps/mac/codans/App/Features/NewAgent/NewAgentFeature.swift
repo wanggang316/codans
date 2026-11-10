@@ -413,9 +413,9 @@ struct NewAgentFeature {
       }
       // The dialog stays usable while the host answers; the list fills in
       // when the read ends.
-      switch await client.loadRemote(
+      let result = await client.loadRemote(
         scope.profile, host, scope.projectStart?.path(percentEncoded: false), scope.newWorktree != nil)
-      {
+      switch result {
       case .success(let skills): await send(.skillsLoaded(skills, for: scope))
       case .failure(let error): await send(.skillsFailed(error.reason, for: scope))
       }

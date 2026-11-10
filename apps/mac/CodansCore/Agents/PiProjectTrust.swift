@@ -23,7 +23,9 @@ nonisolated enum PiProjectTrust {
     if let approve = launch.approve { return approve }
     if launch.loadsExtensionFile { return false }
     guard let settings = readSettings(agentDirectory, fileSystem: fileSystem) else { return false }
-    if !launch.noExtensions, hasUserExtensions(agentDirectory, settings: settings, fileSystem: fileSystem) { return false }
+    if !launch.noExtensions, hasUserExtensions(agentDirectory, settings: settings, fileSystem: fileSystem) {
+      return false
+    }
     guard startExists else { return false }
     switch savedDecision(agentDirectory, start: start, fileSystem: fileSystem) {
     case .trusted: return true
