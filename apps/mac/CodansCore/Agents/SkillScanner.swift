@@ -9,6 +9,9 @@ public nonisolated struct AgentSkillEntry: Equatable, Sendable, Hashable, Identi
   /// First line of the frontmatter `description`, or `nil` when the
   /// frontmatter has none or cannot be read.
   public let summary: String?
+  /// The whole frontmatter `description`, trimmed, or `nil` when there is
+  /// none. Shown beside the completion list.
+  public let details: String?
   public let source: AgentSkillSource
   /// The skill folder.
   public let url: URL
@@ -20,11 +23,12 @@ public nonisolated struct AgentSkillEntry: Equatable, Sendable, Hashable, Identi
   public var id: String { name }
 
   public init(
-    name: String, summary: String?, source: AgentSkillSource, url: URL,
+    name: String, summary: String?, details: String? = nil, source: AgentSkillSource, url: URL,
     disablesModelInvocation: Bool = false
   ) {
     self.name = name
     self.summary = summary
+    self.details = details
     self.source = source
     self.url = url
     self.disablesModelInvocation = disablesModelInvocation
@@ -93,6 +97,7 @@ public nonisolated enum SkillScanner {
       return AgentSkillEntry(
         name: directory.namespace.map { "\($0):\(name)" } ?? name,
         summary: frontmatter?.summary,
+        details: frontmatter?.details,
         source: directory.source,
         url: folder,
         disablesModelInvocation: frontmatter?.disablesModelInvocation ?? false
@@ -106,6 +111,7 @@ public nonisolated enum SkillScanner {
 nonisolated struct SkillFrontmatter: Equatable {
   var name: String?
   var summary: String?
+  var details: String?
   var disablesModelInvocation = false
 
   /// `nil` when the file has no frontmatter block or the block is not a
@@ -119,9 +125,12 @@ nonisolated struct SkillFrontmatter: Equatable {
     let summary = mapping["description"]?.string.flatMap { description in
       description.split(whereSeparator: { $0.isNewline }).lazy.map(trimmed).first { !$0.isEmpty }
     }
+    let details = mapping["description"]?.string
+      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.flatMap(nonEmpty)
     let disablesModelInvocation = mapping["disable-model-invocation"]?.bool ?? false
     return SkillFrontmatter(
-      name: name, summary: summary, disablesModelInvocation: disablesModelInvocation)
+      name: name, summary: summary, details: details,
+      disablesModelInvocation: disablesModelInvocation)
   }
 
   /// The text between a leading `---` line and the next `---` line.

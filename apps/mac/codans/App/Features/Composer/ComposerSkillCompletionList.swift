@@ -3,16 +3,29 @@ import SwiftUI
 
 /// The open skill list of a `ComposerSkillCompletion`, drawn as a menu card
 /// in `ComposerSkillCompletionPanel`: one row per match with an icon for its
-/// source, its name, and, quieter, the first line of its description and
-/// its source. The highlighted row has the system selection color and
-/// follows the arrow keys; a click picks a row.
+/// source and its name. The highlighted row has the system selection color
+/// and follows the arrow keys; a click picks a row. The description of the
+/// row under the pointer, else of the highlighted row, goes to
+/// `onTooltipTarget`, which shows it beside the list.
 struct ComposerSkillCompletionList: View {
   private typealias Layout = ComposerSkillCompletionPanelLayout
+
+  /// A description to show and the frame of its row, in the list's
+  /// top-left coordinates.
+  struct TooltipTarget: Equatable {
+    var text: String
+    var rowFrame: CGRect
+  }
 
   let completion: ComposerSkillCompletion
   let text: String
   let selection: ComposerSelection
   let onInsert: (String) -> Void
+  /// Set by the presenter that shows the tooltip.
+  var onTooltipTarget: (TooltipTarget?) -> Void = { _ in }
+
+  @State private var hoveredID: String?
+  @State private var rowFrames: [String: CGRect] = [:]
 
   var body: some View {
     ScrollViewReader { proxy in
@@ -28,6 +41,16 @@ struct ComposerSkillCompletionList: View {
             .buttonStyle(.plain)
             .focusable(false)
             .id(skill.id)
+            .onHover { hovering in
+              if hovering {
+                hoveredID = skill.id
+              } else if hoveredID == skill.id {
+                hoveredID = nil
+              }
+            }
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+              rowFrames[skill.id] = frame
+            }
           }
         }
         .padding(.vertical, Layout.verticalPadding)
@@ -38,44 +61,43 @@ struct ComposerSkillCompletionList: View {
         if let id { proxy.scrollTo(id) }
       }
     }
+    .onChange(of: tooltipTarget, initial: true) { _, target in onTooltipTarget(target) }
     .accessibilityElement(children: .contain)
     .accessibilityLabel("Skills")
   }
 
+  /// The hovered row wins over the highlighted one. No tooltip for a skill
+  /// without a description or a row out of view.
+  private var tooltipTarget: TooltipTarget? {
+    let id = hoveredID ?? completion.highlighted?.id
+    guard let skill = completion.matches.first(where: { $0.id == id }), let details = skill.details,
+      let frame = rowFrames[skill.id]
+    else { return nil }
+    return TooltipTarget(text: details, rowFrame: frame)
+  }
+
   private func row(_ skill: AgentSkillEntry, isHighlighted: Bool) -> some View {
-    let secondary: AnyShapeStyle = isHighlighted ? AnyShapeStyle(.white.opacity(0.8)) : AnyShapeStyle(.secondary)
-    return HStack(spacing: 6) {
+    HStack(spacing: Layout.iconSpacing) {
       Image(systemName: Self.symbol(for: skill.source))
-        .frame(width: 16)
-        .foregroundStyle(secondary)
-        // The source text says the same.
-        .accessibilityHidden(true)
+        .frame(width: Layout.iconWidth)
+        .foregroundStyle(isHighlighted ? AnyShapeStyle(.white.opacity(0.85)) : AnyShapeStyle(.secondary))
       Text(skill.name)
         .foregroundStyle(isHighlighted ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
         .lineLimit(1)
-        .layoutPriority(1)
-      if let summary = skill.summary {
-        Text(summary)
-          .foregroundStyle(secondary)
-          .lineLimit(1)
-          .truncationMode(.tail)
-      }
-      Spacer(minLength: 8)
-      Text(skill.source.rawValue)
-        .font(.caption)
-        .foregroundStyle(secondary)
+        .truncationMode(.middle)
+      Spacer(minLength: 0)
     }
-    .font(.system(size: NSFont.systemFontSize))
-    .padding(.horizontal, 6)
+    .font(Font(Layout.rowFont))
+    .padding(.horizontal, Layout.rowHorizontalPadding)
     .frame(height: Layout.rowHeight)
     .background(
       isHighlighted
         ? AnyShapeStyle(Color(nsColor: .selectedContentBackgroundColor)) : AnyShapeStyle(.clear),
       in: RoundedRectangle(cornerRadius: 4)
     )
-    .help(skill.summary ?? "")
-    .accessibilityElement(children: .combine)
-    .accessibilityAddTraits(isHighlighted ? .isSelected : [])
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel("\(skill.name), \(skill.source.rawValue)")
+    .accessibilityAddTraits(isHighlighted ? [.isButton, .isSelected] : .isButton)
   }
 
   private static func symbol(for source: AgentSkillSource) -> String {
@@ -84,6 +106,21 @@ struct ComposerSkillCompletionList: View {
     case .project: "folder"
     case .plugin: "puzzlepiece.extension"
     }
+  }
+}
+
+/// The description beside the list, in the system tooltip font. It wraps
+/// at `ComposerSkillCompletionPanelLayout.tooltipMaxWidth`.
+struct ComposerSkillCompletionTooltip: View {
+  let text: String
+
+  var body: some View {
+    Text(text)
+      .font(Font(NSFont.toolTipsFont(ofSize: 0)))
+      .foregroundStyle(.primary)
+      .fixedSize(horizontal: false, vertical: true)
+      .padding(.horizontal, ComposerSkillCompletionPanelLayout.tooltipHorizontalPadding)
+      .padding(.vertical, ComposerSkillCompletionPanelLayout.tooltipVerticalPadding)
   }
 }
 
@@ -154,7 +191,7 @@ private struct ComposerSkillCompletionKeys: ViewModifier {
         ComposerSkillCompletionPanelAnchor(
           content: ComposerSkillCompletionList(
             completion: completion, text: text, selection: selection, onInsert: onInsert),
-          rowCount: completion.isOpen ? completion.matches.count : 0,
+          names: completion.isOpen ? completion.matches.map(\.name) : [],
           onResignKey: { [completion, text] in _ = completion.handle(.dismiss, text: text) }
         )
       )

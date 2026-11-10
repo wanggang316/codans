@@ -26,17 +26,45 @@ struct ComposerSkillCompletionPanelTests {
   }
 
   @Test
-  func panelOpensAboveTheEditorWithItsWidth() {
+  func panelOpensAboveTheEditorOnItsLeadingEdge() {
     let editor = CGRect(x: 300, y: 400, width: 500, height: 110)
-    let frame = Layout.frame(editor: editor, height: 200, visible: Self.screen)
-    #expect(frame == CGRect(x: 300, y: 510 + Layout.gap, width: 500, height: 200))
+    let frame = Layout.frame(editor: editor, width: 220, height: 200, visible: Self.screen)
+    #expect(frame == CGRect(x: 300, y: 510 + Layout.gap, width: 220, height: 200))
   }
 
   @Test
   func panelOpensBelowTheEditorWhenSpaceAboveIsShort() {
     let editor = CGRect(x: 300, y: 800, width: 500, height: 110)
-    let frame = Layout.frame(editor: editor, height: 200, visible: Self.screen)
-    #expect(frame == CGRect(x: 300, y: 800 - Layout.gap - 200, width: 500, height: 200))
+    let frame = Layout.frame(editor: editor, width: 220, height: 200, visible: Self.screen)
+    #expect(frame == CGRect(x: 300, y: 800 - Layout.gap - 200, width: 220, height: 200))
+  }
+
+  @Test
+  func widthFitsTheWidestNameBetweenTheMinimumAndTheEditor() {
+    #expect(Layout.width(names: ["tdd"], maxWidth: 500) == Layout.minWidth)
+    let long = String(repeating: "long-skill-name-", count: 4)
+    let fitted = Layout.width(names: ["tdd", long], maxWidth: 1000)
+    #expect(fitted > Layout.minWidth && fitted < 1000)
+    #expect(Layout.width(names: [long, "tdd"], maxWidth: 1000) == fitted)
+    #expect(Layout.width(names: [String(repeating: long, count: 4)], maxWidth: 500) == 500)
+  }
+
+  @Test
+  func tooltipSitsRightOfThePanelTopAlignedWithTheRow() {
+    let panel = CGRect(x: 300, y: 500, width: 200, height: 226)
+    let row = CGRect(x: 305, y: 650, width: 190, height: 24)
+    let frame = Layout.tooltipFrame(
+      row: row, size: CGSize(width: 150, height: 40), panel: panel, visible: Self.screen)
+    #expect(frame == CGRect(x: 500 + Layout.tooltipGap, y: 674 - 40, width: 150, height: 40))
+  }
+
+  @Test
+  func tooltipFlipsLeftWhenTheRightSideHasNoRoom() {
+    let panel = CGRect(x: 1300, y: 500, width: 200, height: 226)
+    let row = CGRect(x: 1305, y: 650, width: 190, height: 24)
+    let frame = Layout.tooltipFrame(
+      row: row, size: CGSize(width: 150, height: 40), panel: panel, visible: Self.screen)
+    #expect(frame == CGRect(x: 1300 - Layout.tooltipGap - 150, y: 634, width: 150, height: 40))
   }
 
   // MARK: - Panel
@@ -69,9 +97,12 @@ struct ComposerSkillCompletionPanelTests {
 
   init() {
     completion.location = .claudeCode
-    completion.skills = ["code-review", "tdd"].map {
-      AgentSkillEntry(name: $0, summary: nil, source: .user, url: URL(fileURLWithPath: "/tmp/\($0)"))
-    }
+    completion.skills = [
+      AgentSkillEntry(
+        name: "code-review", summary: "Review a change.", details: Self.reviewDetails, source: .user,
+        url: URL(fileURLWithPath: "/tmp/code-review")),
+      AgentSkillEntry(name: "tdd", summary: nil, source: .project, url: URL(fileURLWithPath: "/tmp/tdd")),
+    ]
     window = NSWindow(
       contentRect: NSRect(x: 200, y: 200, width: 300, height: 120), styleMask: [.titled],
       backing: .buffered, defer: false)
@@ -102,8 +133,15 @@ struct ComposerSkillCompletionPanelTests {
     settle()
   }
 
+  private static let reviewDetails =
+    "Review a change along two axes, standards and spec, and return both reports with a verdict."
+
   private var panel: NSWindow? {
-    window.childWindows?.first { $0.isVisible }
+    window.childWindows?.first { $0.isVisible && $0 is ComposerSkillCompletionPanel }
+  }
+
+  private var tooltip: NSWindow? {
+    window.childWindows?.first { $0.isVisible && $0 is ComposerSkillCompletionTooltipPanel }
   }
 
   @Test
@@ -122,6 +160,64 @@ struct ComposerSkillCompletionPanelTests {
     #expect(window.isKeyWindow == wasKey)
     #expect(window.firstResponder === textView)
     #expect(panel.frame.height == Layout.height(rowCount: 2))
+    // Short names: the panel is narrower than the editor.
+    let editor = try editorFrameOnScreen(textView)
+    #expect(panel.frame.width == Layout.minWidth)
+    #expect(panel.frame.minX == editor.minX)
+  }
+
+  @Test
+  func longNameWidensThePanelUpToTheEditor() throws {
+    completion.skills.append(
+      AgentSkillEntry(
+        name: String(repeating: "very-long-skill-name-", count: 6), summary: nil, source: .plugin,
+        url: URL(fileURLWithPath: "/tmp/long")))
+    let textView = try show()
+    defer { window.close() }
+    type("/", in: textView)
+    let panel = try #require(panel)
+    #expect(panel.frame.width == (try editorFrameOnScreen(textView)).width)
+  }
+
+  @Test
+  func tooltipShowsTheHighlightedDescriptionBesideItsRow() throws {
+    let visible = try #require(NSScreen.main?.visibleFrame)
+    window.setFrameOrigin(CGPoint(x: visible.minX + 100, y: visible.minY + 100))
+    let textView = try show()
+    defer { window.close() }
+    type("/", in: textView)
+    let panel = try #require(panel)
+    let tooltip = try #require(tooltip)
+    #expect(!tooltip.canBecomeKey)
+    #expect(tooltip.ignoresMouseEvents)
+    #expect(tooltip.frame.minX >= panel.frame.maxX)
+    // The first row's top.
+    #expect(tooltip.frame.maxY == panel.frame.maxY - Layout.verticalPadding)
+    #expect(tooltip.frame.width <= Layout.tooltipMaxWidth)
+    #expect(window.firstResponder === textView)
+
+    // `tdd` has no description.
+    _ = completion.handle(.down, text: owner.text)
+    settle()
+    #expect(self.tooltip == nil)
+    _ = completion.handle(.up, text: owner.text)
+    settle()
+    #expect(self.tooltip != nil)
+
+    type("x ", in: textView)
+    #expect(self.tooltip == nil)
+  }
+
+  @Test
+  func tooltipFlipsLeftAtTheRightEdgeOfTheScreen() throws {
+    let visible = try #require(NSScreen.main?.visibleFrame)
+    window.setFrameOrigin(CGPoint(x: visible.maxX - 300, y: visible.minY + 100))
+    let textView = try show()
+    defer { window.close() }
+    type("/", in: textView)
+    let panel = try #require(panel)
+    let tooltip = try #require(tooltip)
+    #expect(tooltip.frame.maxX <= panel.frame.minX)
   }
 
   private func editorFrameOnScreen(_ textView: NSTextView) throws -> CGRect {

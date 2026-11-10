@@ -41,6 +41,7 @@ struct SkillScannerTests {
     let entries = await SkillScanner.scan([directory()])
     #expect(entries.map(\.name) == ["code-review", "tdd"])
     #expect(entries.map(\.summary) == ["Review a change.", "Write tests first."])
+    #expect(entries.map(\.details) == ["Review a change.\nSecond line.", "Write tests first."])
     #expect(entries.allSatisfy { $0.source == .user })
   }
 
@@ -51,14 +52,14 @@ struct SkillScannerTests {
     try write("no-frontmatter", "# Just a body\n")
     let entries = await SkillScanner.scan([directory()])
     #expect(entries.map(\.name) == ["bad-yaml", "no-frontmatter", "unclosed"])
-    #expect(entries.allSatisfy { $0.summary == nil })
+    #expect(entries.allSatisfy { $0.summary == nil && $0.details == nil })
   }
 
   @Test
   func missingNameFallsBackToTheFolderName() async throws {
     try write("helper", "---\ndescription: Helps.\n---\n")
     let entries = await SkillScanner.scan([directory()])
-    #expect(entries == [AgentSkillEntry(name: "helper", summary: "Helps.", source: .user, url: entries[0].url)])
+    #expect(entries == [AgentSkillEntry(name: "helper", summary: "Helps.", details: "Helps.", source: .user, url: entries[0].url)])
   }
 
   @Test
