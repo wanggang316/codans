@@ -24,6 +24,12 @@ nonisolated struct AgentSkillClient: Sendable {
   var load:
     @Sendable (_ profile: AgentProfile, _ projectStart: URL?, _ newWorktree: NewWorktreeSource?)
       async -> [AgentSkillEntry]
+  /// The skills in a remote project on `host`: `projectStart` is a path on
+  /// the host, `createsWorktree` is `true` when the agent starts in a
+  /// worktree that does not exist yet. Fails when the host cannot be read.
+  var loadRemote:
+    @Sendable (_ profile: AgentProfile, _ host: RemoteHost, _ projectStart: String?, _ createsWorktree: Bool)
+      async -> Result<[AgentSkillEntry], RemoteSkillReadError>
 }
 
 extension AgentSkillClient: DependencyKey {
@@ -51,10 +57,19 @@ extension AgentSkillClient: DependencyKey {
       return await SkillScanner.scan(
         SkillLocationResolver.directories(for: profile, projectStart: view, projectStartExists: false),
         precedence: precedence)
+    },
+    loadRemote: { profile, host, projectStart, createsWorktree in
+      do throws(RemoteSkillReadError) {
+        return .success(
+          try await RemoteSkillReader(host: host).load(
+            profile: profile, projectStart: projectStart, createsWorktree: createsWorktree))
+      } catch {
+        return .failure(error)
+      }
     }
   )
 
   /// Empty rather than unimplemented: every feature that opens a composer
   /// loads skills, and most tests do not care which.
-  static let testValue = AgentSkillClient(load: { _, _, _ in [] })
+  static let testValue = AgentSkillClient(load: { _, _, _ in [] }, loadRemote: { _, _, _, _ in .success([]) })
 }

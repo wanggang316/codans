@@ -325,7 +325,9 @@ struct NewAgentFeatureTests {
     catalog: Catalog, loaded: LockIsolated<[AgentKind]>,
     starts: LockIsolated<[String?]> = LockIsolated([]),
     copies: LockIsolated<[NewWorktreeSource?]> = LockIsolated([]),
-    preferredProjectID: ProjectID? = nil
+    preferredProjectID: ProjectID? = nil,
+    remote: (@Sendable (AgentProfile, RemoteHost, String?, Bool) async -> Result<[AgentSkillEntry], RemoteSkillReadError>)? =
+      nil
   ) -> TestStore<NewAgentFeature.State, NewAgentFeature.Action> {
     let store = TestStore(initialState: NewAgentFeature.State(preferredProjectID: preferredProjectID)) {
       NewAgentFeature()
@@ -352,6 +354,7 @@ struct NewAgentFeatureTests {
         if let path, path != "/tmp/new-agent/notes" { return [Self.projectSkill(at: path)] }
         return profile.envVars.isEmpty ? [Self.reviewSkill] : [Self.workSkill]
       }
+      if let remote { $0[AgentSkillClient.self].loadRemote = remote }
     }
     store.exhaustivity = .off
     return store
@@ -413,17 +416,66 @@ struct NewAgentFeatureTests {
   }
 
   @Test
-  func remoteProjectOffersNoSkills() async {
+  func remoteProjectReadsItsSkillsOnTheHost() async {
     let loaded = LockIsolated<[AgentKind]>([])
+    let reads = LockIsolated<[String]>([])
+    let host = RemoteHost(alias: "devbox")
+    let remote = Project(
+      name: "server", rootPath: "/srv/repo", remoteHost: host,
+      worktrees: [Worktree(name: "repo", path: "/srv/repo")])
+    let store = makeSkillStore(catalog: Catalog(projects: [remote]), loaded: loaded) { profile, readHost, start, creates in
+      reads.withValue { $0.append("\(profile.kind.rawValue) \(readHost.alias) \(start ?? "-") \(creates)") }
+      return .success([Self.projectSkill(at: "/srv/repo")])
+    }
+    await store.send(.onAppear)
+    await store.send(.agentProfilesChanged([profile]))
+    await store.receive(\.skillsLoaded) {
+      $0.skills = [Self.projectSkill(at: "/srv/repo")]
+    }
+    #expect(store.state.skillLocation == .claudeCode)
+    #expect(store.state.skillsUnavailableReason == nil)
+    #expect(store.state.skillsScope?.host == host)
+    #expect(reads.value == ["claude-code devbox /srv/repo/ false"])
+    // The local reader never runs for a remote project.
+    #expect(loaded.value.isEmpty)
+  }
+
+  @Test
+  func aFailedRemoteReadDisablesSkillsWithTheReason() async {
     let remote = Project(
       name: "server", rootPath: "/srv/repo", remoteHost: RemoteHost(alias: "devbox"),
       worktrees: [Worktree(name: "repo", path: "/srv/repo")])
-    let store = makeSkillStore(catalog: Catalog(projects: [remote]), loaded: loaded)
+    let store = makeSkillStore(catalog: Catalog(projects: [remote]), loaded: LockIsolated([])) { _, _, _, _ in
+      .failure(RemoteSkillReadError(reason: "Could not connect to devbox"))
+    }
     await store.send(.onAppear)
     await store.send(.agentProfilesChanged([profile]))
-    #expect(store.state.skillLocation == .none)
+    await store.receive(\.skillsFailed) {
+      $0.skillsFailure = "Could not connect to devbox"
+    }
     #expect(store.state.skills.isEmpty)
-    #expect(loaded.value.isEmpty)
+    #expect(store.state.skillsUnavailableReason == "Could not connect to devbox")
+
+    // The Skills button does nothing while it is disabled.
+    await store.send(.skillsButtonTapped(selection: nil))
+    #expect(store.state.prompt.isEmpty)
+  }
+
+  @Test
+  func anotherAgentClearsARemoteFailure() async {
+    let codex = AgentProfile(kind: .codex, name: "Codex")
+    let remote = Project(
+      name: "server", rootPath: "/srv/repo", remoteHost: RemoteHost(alias: "devbox"),
+      worktrees: [Worktree(name: "repo", path: "/srv/repo")])
+    let store = makeSkillStore(catalog: Catalog(projects: [remote]), loaded: LockIsolated([])) { profile, _, _, _ in
+      profile.kind == .codex ? .success([Self.reviewSkill]) : .failure(RemoteSkillReadError(reason: "timed out"))
+    }
+    await store.send(.onAppear)
+    await store.send(.agentProfilesChanged([profile, codex]))
+    await store.receive(\.skillsFailed)
+    await store.send(.agentSelected(codex.id)) { $0.skillsFailure = nil }
+    await store.receive(\.skillsLoaded) { $0.skills = [Self.reviewSkill] }
+    #expect(store.state.skillsUnavailableReason == nil)
   }
 
   @Test
@@ -688,24 +740,6 @@ struct NewAgentFeatureTests {
     await store.send(.promptChanged("fix")) { $0.prompt = "fix" }
     await store.send(.skillsButtonTapped(selection: 3..<3))
     #expect(store.state.prompt == "fix")
-    #expect(loaded.value.isEmpty)
-  }
-
-  @Test
-  func skillsButtonIsOffForARemoteProject() async {
-    let loaded = LockIsolated<[AgentKind]>([])
-    let remote = Project(
-      name: "server", rootPath: "/srv/repo", remoteHost: RemoteHost(alias: "devbox"),
-      worktrees: [Worktree(name: "repo", path: "/srv/repo")])
-    let store = makeSkillStore(catalog: Catalog(projects: [remote]), loaded: loaded)
-    await store.send(.onAppear)
-    await store.send(.agentProfilesChanged([profile]))
-    #expect(store.state.skillLocation == .none)
-    #expect(
-      store.state.skillsUnavailableReason == "Skill suggestions are not available for remote projects")
-
-    await store.send(.skillsButtonTapped(selection: nil))
-    #expect(store.state.prompt.isEmpty)
     #expect(loaded.value.isEmpty)
   }
 
