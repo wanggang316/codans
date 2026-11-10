@@ -151,11 +151,13 @@ struct CreateWorkspaceSheet: View {
     if store.canAddSources {
       HStack(spacing: 8) {
         Menu {
-          ForEach(store.availableCandidates) { candidate in
+          // An action menu: a chosen project joins the list and leaves the
+          // menu, so rows carry no checkmark.
+          ProjectMenuContent(menu: store.addProjectMenu) { project, marksRemote in
             Button {
-              store.send(.addProjectTapped(candidate.id))
+              store.send(.addProjectTapped(project.id))
             } label: {
-              Label(candidate.name, systemImage: Self.menuSymbol(for: candidate.icon))
+              ProjectMenuRowLabel(project: project, marksRemote: marksRemote)
             }
           }
         } label: {
@@ -178,13 +180,6 @@ struct CreateWorkspaceSheet: View {
       .foregroundStyle(.primary)
       .fixedSize(horizontal: false, vertical: true)
     }
-  }
-
-  /// Menus draw SF Symbols only; a custom project image falls back to the
-  /// default glyph.
-  private static func menuSymbol(for icon: ProjectIcon?) -> String {
-    if case .symbol(let name) = icon { return name }
-    return ProjectIconView.folderSymbol
   }
 
   // MARK: New Group

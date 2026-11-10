@@ -318,12 +318,12 @@ struct NewAgentFeatureTests {
     workspace.icon = .symbol("hammer")
     workspace.color = .red
     workspace.isWorkspace = true
-    let option = NewAgentFeature.ProjectOption(workspace)
+    let option = ProjectMenuOption(workspace)
     #expect(option.icon == .symbol("hammer"))
     #expect(option.color == .red)
     #expect(option.defaultSymbol == ProjectIconView.workspaceSymbol)
     #expect(!option.isRemote)
-    let remote = NewAgentFeature.ProjectOption(Self.folder("server", hostID: HostID()))
+    let remote = ProjectMenuOption(Self.folder("server", hostID: HostID()))
     #expect(remote.isRemote)
     #expect(remote.defaultSymbol == ProjectIconView.folderSymbol)
     #expect(remote.icon == nil && remote.color == nil)
@@ -334,7 +334,7 @@ struct NewAgentFeatureTests {
     let projects = [
       Self.folder("a", active: 3), Self.folder("b", active: 1), Self.folder("c", active: 2),
     ]
-    let menu = NewAgentFeature.ProjectMenu(Catalog(projects: projects))
+    let menu = ProjectMenu(Catalog(projects: projects))
     #expect(menu.recent.isEmpty)
     #expect(menu.sections.map(\.title) == ["Projects"])
     #expect(menu.sections.first?.projects.map(\.name) == ["a", "b", "c"])
@@ -346,7 +346,7 @@ struct NewAgentFeatureTests {
       Self.folder("never"), Self.folder("old", active: 1), Self.folder("newest", active: 9),
       Self.folder("mid", active: 5), Self.folder("newer", active: 7),
     ]
-    let menu = NewAgentFeature.ProjectMenu(Catalog(projects: projects))
+    let menu = ProjectMenu(Catalog(projects: projects))
     #expect(menu.recent.map(\.name) == ["newest", "newer", "mid"])
     // Recent projects stay in their section too, in catalog order.
     #expect(menu.sections.first?.projects.map(\.name) == ["never", "old", "newest", "mid", "newer"])
@@ -357,7 +357,7 @@ struct NewAgentFeatureTests {
     let projects = [
       Self.folder("a"), Self.folder("b", active: 2), Self.folder("c"), Self.folder("d"),
     ]
-    let menu = NewAgentFeature.ProjectMenu(Catalog(projects: projects))
+    let menu = ProjectMenu(Catalog(projects: projects))
     #expect(menu.recent.map(\.name) == ["b"])
   }
 
@@ -373,7 +373,7 @@ struct NewAgentFeatureTests {
       hosts: [first, second])
     catalog.sidebarFilter = .pullRequests
     catalog.collapsedSidebarHosts = [.thisMac, .host(first.id)]
-    let menu = NewAgentFeature.ProjectMenu(catalog)
+    let menu = ProjectMenu(catalog)
     #expect(menu.sections.map(\.title) == [HostRecord.thisMacName, "First", "second.example"])
     #expect(menu.sections.map { $0.projects.map(\.name) } == [["local-1", "local-2"], ["on-first"], ["on-second"]])
   }
@@ -382,7 +382,7 @@ struct NewAgentFeatureTests {
   func onAppearBuildsTheProjectMenu() async {
     let store = makeStore(preferredProjectID: folderProjectID)
     await store.send(.onAppear)
-    #expect(store.state.projectMenu == NewAgentFeature.ProjectMenu(catalog))
+    #expect(store.state.projectMenu == ProjectMenu(catalog))
     #expect(store.state.projectID == folderProjectID)
   }
 }

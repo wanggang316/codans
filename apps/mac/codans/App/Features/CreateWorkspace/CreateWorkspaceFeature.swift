@@ -23,13 +23,29 @@ struct CreateWorkspaceFeature {
     let gitRoot: String
     var icon: ProjectIcon?
     var color: ProjectColor?
+    /// Picks the default glyph when the project has no icon.
+    var kind: ProjectKind
+    /// Orders the Add Project menu's Recent section.
+    var lastActiveAt: Date?
 
-    init(id: ProjectID, name: String, gitRoot: String, icon: ProjectIcon? = nil, color: ProjectColor? = nil) {
+    init(
+      id: ProjectID, name: String, gitRoot: String, icon: ProjectIcon? = nil, color: ProjectColor? = nil,
+      kind: ProjectKind = .gitRepo, lastActiveAt: Date? = nil
+    ) {
       self.id = id
       self.name = name
       self.gitRoot = gitRoot
       self.icon = icon
       self.color = color
+      self.kind = kind
+      self.lastActiveAt = lastActiveAt
+    }
+
+    /// Candidates are local git projects by construction.
+    var menuOption: ProjectMenuOption {
+      ProjectMenuOption(
+        id: id, name: name, icon: icon, color: color, kind: kind, isGit: true, isRemote: false,
+        lastActiveAt: lastActiveAt)
     }
   }
 
@@ -195,6 +211,12 @@ struct CreateWorkspaceFeature {
       return candidates.filter {
         !used.contains($0.id) && !listed.contains(HierarchyManager.canonicalPath($0.gitRoot))
       }
+    }
+
+    /// The Add Project menu: Recent and one Projects section over the
+    /// available candidates, so a listed project is in no section.
+    var addProjectMenu: ProjectMenu {
+      ProjectMenu(projects: availableCandidates.map(\.menuOption))
     }
 
     var sourcePlan: WorkspaceSourcePlan {
