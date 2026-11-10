@@ -18,7 +18,7 @@
 
 ## Sidebar
 
-`HierarchySidebarView` 把当前 Catalog 渲染成一棵 `NSOutlineView` 树（`SidebarOutline`，[ADR 0002](../adr/0002-sidebar-outline-with-host-level.md)）：有远程 Project 时顶层是 Host 行，其下是 Project 行，Project 行下列出 Worktree；底部钉一条 footer（`TagFilterPopoverFooter`），左侧是帮助菜单（Website / Report issue / Changelog，与菜单栏 Help 菜单共用 `HelpMenuLink`），右侧露出 Agents View 与刷新两个动作，没有排序按钮。`HierarchySidebarFeature`（`@Reducer`）持有展开集合与瞬态 UI 状态（filter 状态、上下文菜单、确认对话框、stub sheet），并把行点击/变更经 `HierarchyClient` 转发。
+`HierarchySidebarView` 把当前 Catalog 渲染成一棵 `NSOutlineView` 树（`SidebarOutline`，[ADR 0002](../adr/0002-sidebar-outline-with-host-level.md)）：有远程 Project 时顶层是 Host 行，其下是 Project 行，Project 行下列出 Worktree；底部钉一条 footer（`TagFilterPopoverFooter`），左侧是帮助菜单（Website、Changelog，分隔线，Report issue，每项带图标；与菜单栏 Help 菜单共用 `HelpMenuLink.groups`），右侧依次是 Agents View 与 Settings（打开 Settings 窗口，同 Settings… 菜单项），没有排序按钮和刷新按钮。三个按钮共用 `SidebarFooterButtonStyle`：hover 时显示 22×22 圆形 primary 0.08 填充、图标由 secondary 变 primary，与 Project 行 `+` 按钮一致；帮助菜单打开时按钮不保持高亮。手动 reconcile 全部 Project 改为 Command Palette 的 "Refresh All Projects"。`HierarchySidebarFeature`（`@Reducer`）持有展开集合与瞬态 UI 状态（filter 状态、上下文菜单、确认对话框、stub sheet），并把行点击/变更经 `HierarchyClient` 转发。
 
 **Project 行。** git Project 的行不可选中：点整行或行右侧悬停出现的 `>` 箭头开合其 Worktree 行，主检出（星标）是第一个子行。没有自己仓库的 Project——普通文件夹、远程文件夹、workspace——的行就是它的根目录（`Project.rowWorktree`：`path == rootPath` 的合成 worktree）：行打上该 worktree 的 tag，与 worktree 行一样可选中、打开终端，并承载它的忙碌转圈、未读铃铛、⌃N 与右键菜单；它下面不再列根目录行，于是文件夹没有子行，workspace 只列检出目录，开合只能用箭头。⌃1…⌃0 与 ⌘⌃↑ / ⌘⌃↓ 共用 `Catalog.sidebarSelectionOrder`：按侧栏的 Tag 过滤与 Project order（`catalog.projects` 的数组顺序），只数屏幕上的可选行（折叠 Project 的子行、加载失败的 Project 不计）；揭示（palette、通知跳转、Agents 面板）选中的若是 Project 行自身，不展开该 Project。
 
@@ -46,7 +46,7 @@
 
 ### Tag filter（已实现，当前隐藏）
 
-侧栏底部 footer 钉在 `.safeAreaInset(edge: .bottom)`。Tag 过滤入口（`TagFilterPopoverFooter` 的过滤按钮 + popover 内的 `TagFilterList`）已实现并保留接线：popover 列每个 `Tag` 一行 + 隐含 `[All]` / `[Untagged]`，点击切换 `Catalog.activeTagFilter`（多选 OR；`[Untagged]` 互斥，仅在存在无标签 Project 时出现）。但该过滤按钮**当前刻意隐藏**（`TagChipFooter.swift`）——footer 当前只露帮助菜单、Agents View 与刷新，过滤可在不重接调用点的前提下重新挂出。Tag 模型（`Tag` / `TagID` / `TagFilter` / `Project.tagIDs` / `Catalog.tags` / `Catalog.activeTagFilter`）、CRUD、持久化和接口边界 全在 [project-tags.md](project-tags.md)，本文不复述。
+侧栏底部 footer 钉在 `.safeAreaInset(edge: .bottom)`。Tag 过滤入口（`TagFilterPopoverFooter` 的过滤按钮 + popover 内的 `TagFilterList`）已实现并保留接线：popover 列每个 `Tag` 一行 + 隐含 `[All]` / `[Untagged]`，点击切换 `Catalog.activeTagFilter`（多选 OR；`[Untagged]` 互斥，仅在存在无标签 Project 时出现）。但该过滤按钮**当前刻意隐藏**（`TagChipFooter.swift`）——footer 当前只露帮助菜单、Agents View 与 Settings，过滤可在不重接调用点的前提下重新挂出。Tag 模型（`Tag` / `TagID` / `TagFilter` / `Project.tagIDs` / `Catalog.tags` / `Catalog.activeTagFilter`）、CRUD、持久化和接口边界 全在 [project-tags.md](project-tags.md)，本文不复述。
 
 ## Header
 
@@ -157,7 +157,7 @@ tab-bar 的副作用是同步 `try?` 调进 `HierarchyClient`：`.notFound(...)`
 | 组件 | 拥有 | 不拥有 |
 |---|---|---|
 | `HierarchySidebarFeature` | 展开集合、filter/popover/sheet 瞬态状态、上下文菜单派发、选择/filter 编排、delegate 上抛 | 编辑器打开副作用（delegate 给 EditorFeature）、Finder 揭示（经 FinderClient）、catalog 变更（经 HierarchyClient） |
-| `HierarchySidebarView` | 视觉树、hover chrome、行点、底部 footer（帮助菜单/Agents View/刷新；Tag 过滤已实现但当前隐藏） | 选择逻辑、catalog 状态（直读 `hierarchyManager.catalog`）、inbox 状态（直读 `inboxStore`） |
+| `HierarchySidebarView` | 视觉树、hover chrome、行点、底部 footer（帮助菜单/Agents View/Settings；Tag 过滤已实现但当前隐藏） | 选择逻辑、catalog 状态（直读 `hierarchyManager.catalog`）、inbox 状态（直读 `inboxStore`） |
 | `WorktreeDetailView` / Header feature | 工具栏布局、Worktree 身份、New Agent 入口、状态与进程入口、Run / Open 操作及 delegate | 默认编辑器解析（`EditorFeature.resolveDefault`）、通知数据（InboxStore）、Git diff 状态（DiffFeature） |
 | `DiffFeature` / `DiffPanelView` | 只读比较范围、文件选择、请求生命周期、可见期刷新及独立窗口 | Git 命令执行（GitServiceClient）、编辑器启动（DiffEditorClient）、终端会话所有权 |
 | `TabBarFeature` | 把每个 tab 操作一行转发经 client；无状态 reducer | catalog 状态、运行态/焦点 map（在 HierarchyManager 上） |
