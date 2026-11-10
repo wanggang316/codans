@@ -317,6 +317,14 @@ struct SkillLocationTests {
     #expect(
       SkillLocationResolver.projectFilePaths(
         for: AgentProfile(kind: .claudeCode, extraArguments: "--settings /etc/agent.json")).count == 3)
+    // Outside the directory the agent starts in: not a project file.
+    #expect(
+      SkillLocationResolver.projectFilePaths(
+        for: AgentProfile(kind: .claudeCode, extraArguments: "--settings ../agent.json")).count == 3)
+    #expect(
+      SkillLocationResolver.projectFilePaths(
+        for: AgentProfile(kind: .claudeCode, extraArguments: "--settings ./conf/../agent.json")).last
+        == "agent.json")
     #expect(
       SkillLocationResolver.projectFilePaths(for: AgentProfile(kind: .codex))
         == [".agents/skills", ".codex/config.toml"])

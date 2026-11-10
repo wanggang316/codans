@@ -95,8 +95,8 @@ struct NewWorktreeFilesTests {
     let directories =
       SkillLocationResolver.projectDirectories(for: profile, startDirectory: view)
       + SkillLocationResolver.pluginDirectories(
-        for: profile, projectStart: view, userHome: home, stateDirectory: stateRoot,
-        managedSettings: managed)
+        for: profile, projectStart: view, projectStartExists: false, userHome: home,
+        stateDirectory: stateRoot, managedSettings: managed)
     return SkillScanner.scanSync(directories).map(\.name)
   }
 
@@ -208,6 +208,38 @@ struct NewWorktreeFilesTests {
     // An uncommitted change in the checkout is not in the new worktree.
     try FileManager.default.removeItem(at: repo.appending(path: ".claude/skills/shared"))
     #expect(await names(ref: "main", copyIgnored: false, copyUntracked: false) == ["shared", "tracked:run"])
+  }
+
+  /// `wt` copies without overwriting: a file the ref tracks stays the
+  /// ref's, also when the main checkout has an ignored or untracked file
+  /// at that path.
+  @Test
+  func copiedFilesDoNotReplaceTheRefsFiles() async throws {
+    try await fixture(local: "{}")
+    try await git(["switch", "-q", "-c", "next"])
+    try write("---\nname: dup-ref\n---\n", to: repo.appending(path: ".claude/skills/dup/SKILL.md"))
+    try write("---\nname: scratch-ref\n---\n", to: repo.appending(path: ".claude/skills/scratch/SKILL.md"))
+    try await git(["add", "-f", "--", ".claude/skills/dup", ".claude/skills/scratch"])
+    try await git(["-c", "user.email=t@example.com", "-c", "user.name=T", "commit", "-qm", "next"])
+    try await git(["switch", "-q", "main"])
+    // The main checkout has its own files at the same paths: `dup` is
+    // untracked there, `scratch` ignored.
+    try write("---\nname: dup-local\n---\n", to: repo.appending(path: ".claude/skills/dup/SKILL.md"))
+    try write("---\nname: scratch-local\n---\n", to: repo.appending(path: ".claude/skills/scratch/SKILL.md"))
+    let names = await names(ref: "next", copyIgnored: true, copyUntracked: true)
+    #expect(names.contains("dup-ref") && names.contains("scratch-ref"))
+    #expect(!names.contains("dup-local") && !names.contains("scratch-local"))
+  }
+
+  /// A `--settings` file outside the repository is not one of the new
+  /// worktree's files: its place relative to the new worktree is unknown.
+  /// The project skills stay; the plugin skills, which it can turn on or
+  /// off, go.
+  @Test
+  func settingsOutsideTheRepositoryKeepProjectSkills() async throws {
+    try await fixture(local: "{}")
+    let profile = AgentProfile(kind: .claudeCode, extraArguments: "--settings ../settings.json")
+    #expect(await names(copyIgnored: false, copyUntracked: false, profile: profile) == ["shared"])
   }
 
   /// A tracked symlink to a tracked folder outside the skill directory is

@@ -50,6 +50,7 @@ public nonisolated enum SkillLocationResolver {
   static func pluginDirectories(
     for profile: AgentProfile,
     projectStart: URL?,
+    projectStartExists: Bool = true,
     userHome: URL,
     stateDirectory: URL,
     managedSettings: URL = ClaudePluginRegistry.managedSettings,
@@ -61,6 +62,14 @@ public nonisolated enum SkillLocationResolver {
     else { return [] }
     switch plugins {
     case .claudeCode:
+      // A relative `--settings` file outside a new worktree is somewhere
+      // codans cannot place: the worktree's own directory is not known yet.
+      if !projectStartExists,
+        let relative = ClaudePluginRegistry.relativeLaunchSettingsPath(extraArguments: profile.extraArguments),
+        pathInside(relative) == nil
+      {
+        return []
+      }
       let launchSettings: URL?
       let flags = ClaudePluginRegistry.launchSettings(
         extraArguments: profile.extraArguments, projectStart: projectStart, userHome: userHome)
@@ -147,8 +156,8 @@ public nonisolated enum SkillLocationResolver {
       } ?? []
     return project + userDirectories(for: profile, userHome: userHome, stateDirectory: stateDirectory)
       + pluginDirectories(
-        for: profile, projectStart: projectStart, userHome: userHome, stateDirectory: stateDirectory,
-        isRepositoryRoot: isRepositoryRoot)
+        for: profile, projectStart: projectStart, projectStartExists: projectStartExists, userHome: userHome,
+        stateDirectory: stateDirectory, isRepositoryRoot: isRepositoryRoot)
   }
 
   /// `false` when the profile's launch flags turn skills off: Pi's
@@ -228,7 +237,9 @@ public nonisolated enum SkillLocationResolver {
     switch location.plugins {
     case .claudeCode?:
       paths += [".claude/settings.json", ".claude/settings.local.json"]
-      if let settings = ClaudePluginRegistry.relativeLaunchSettingsPath(extraArguments: profile.extraArguments) {
+      if let settings = ClaudePluginRegistry.relativeLaunchSettingsPath(extraArguments: profile.extraArguments)
+        .flatMap(pathInside)
+      {
         paths.append(settings)
       }
     case .codex?:
@@ -238,6 +249,22 @@ public nonisolated enum SkillLocationResolver {
     }
     var seen = Set<String>()
     return paths.filter { seen.insert($0).inserted }
+  }
+
+  /// `relative` with `.` and `..` applied, or `nil` when it is empty or
+  /// leaves the directory it is relative to.
+  public static func pathInside(_ relative: String) -> String? {
+    guard !relative.hasPrefix("/") else { return nil }
+    var components: [Substring] = []
+    for component in relative.split(separator: "/") {
+      switch component {
+      case ".": continue
+      case "..":
+        guard components.popLast() != nil else { return nil }
+      default: components.append(component)
+      }
+    }
+    return components.isEmpty ? nil : components.joined(separator: "/")
   }
 
   /// Project-level skill directories for `profile`, searched from

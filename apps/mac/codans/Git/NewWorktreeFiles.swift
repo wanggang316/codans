@@ -16,7 +16,8 @@ nonisolated enum NewWorktreeFiles {
   private static let maxSymlinkRounds = 8
 
   /// A new directory with the view, or `nil` when git fails (then no
-  /// project file can be trusted). The caller removes the directory.
+  /// project file can be trusted). `paths` outside the repository are
+  /// left out. The caller removes the directory.
   static func makeView(
     repoRoot: URL, ref: String, copyIgnored: Bool, copyUntracked: Bool, paths: [String],
   ) async -> URL? {
@@ -28,8 +29,10 @@ nonisolated enum NewWorktreeFiles {
       return nil
     }
     let source = Source(
-      repoRoot: repoRoot, ref: ref, copyIgnored: copyIgnored, copyUntracked: copyUntracked,)
-    var pending = paths
+      repoRoot: repoRoot, ref: ref, copyIgnored: copyIgnored, copyUntracked: copyUntracked, )
+    // git refuses a path outside the repository, and the new worktree's
+    // place relative to such a path is unknown anyway.
+    var pending = paths.compactMap(SkillLocationResolver.pathInside)
     var done = Set<String>()
     for _ in 0...maxSymlinkRounds {
       pending = pending.filter { done.insert($0).inserted }
@@ -65,7 +68,7 @@ nonisolated enum NewWorktreeFiles {
               + files.sorted()) != nil,
           await run(
             URL(fileURLWithPath: "/usr/bin/tar"),
-            ["-xf", archive.path(percentEncoded: false), "-C", view.path(percentEncoded: false)],) != nil
+            ["-xf", archive.path(percentEncoded: false), "-C", view.path(percentEncoded: false)], ) != nil
         else { return false }
       }
       if copyIgnored {
@@ -79,7 +82,9 @@ nonisolated enum NewWorktreeFiles {
 
     /// Copies the main checkout's untracked files under `paths`, or its
     /// ignored ones with `--ignored`. These are the `git ls-files` lists
-    /// `wt` copies; a symlink is copied as a symlink.
+    /// `wt` copies; a symlink is copied as a symlink. Like `wt` without
+    /// `--force`, a copy never replaces a path the view already has: a file
+    /// the ref tracks stays the ref's.
     private func copy(_ extra: [String], _ paths: [String], into view: URL) async -> Bool {
       guard
         let output = await git(
@@ -88,14 +93,13 @@ nonisolated enum NewWorktreeFiles {
       let fileManager = FileManager.default
       for file in NewWorktreeFiles.parse(output) {
         let target = view.appending(path: file, directoryHint: .notDirectory)
+        let targetPath = target.path(percentEncoded: false)
+        guard (try? fileManager.destinationOfSymbolicLink(atPath: targetPath)) == nil,
+          !fileManager.fileExists(atPath: targetPath)
+        else { continue }
         do {
           try fileManager.createDirectory(
-            at: target.deletingLastPathComponent(), withIntermediateDirectories: true,)
-          if (try? fileManager.destinationOfSymbolicLink(atPath: target.path(percentEncoded: false))) != nil
-            || fileManager.fileExists(atPath: target.path(percentEncoded: false))
-          {
-            try fileManager.removeItem(at: target)
-          }
+            at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
           try fileManager.copyItem(at: repoRoot.appending(path: file, directoryHint: .notDirectory), to: target)
         } catch {
           return false
@@ -108,7 +112,7 @@ nonisolated enum NewWorktreeFiles {
     private func git(_ arguments: [String]) async -> Data? {
       await run(
         GitWorktreeShell.gitURL,
-        ["--literal-pathspecs", "-C", repoRoot.path(percentEncoded: false)] + arguments,)
+        ["--literal-pathspecs", "-C", repoRoot.path(percentEncoded: false)] + arguments, )
     }
 
     private func run(_ executable: URL, _ arguments: [String]) async -> Data? {
@@ -131,29 +135,12 @@ nonisolated enum NewWorktreeFiles {
     while let relative = enumerator.nextObject() as? String {
       guard let destination = try? fileManager.destinationOfSymbolicLink(atPath: base + relative),
         !destination.hasPrefix("/"),
-        let target = normalized(
-          relative.split(separator: "/").dropLast().map(String.init)
-            + destination.split(separator: "/").map(String.init))
+        let target = SkillLocationResolver.pathInside(
+          (relative.split(separator: "/").dropLast() + [Substring(destination)]).joined(separator: "/"))
       else { continue }
       if !fileManager.fileExists(atPath: base + target) { targets.append(target) }
     }
     return targets
-  }
-
-  /// `components` with `.` and `..` applied, or `nil` when `..` leaves the
-  /// root.
-  private static func normalized(_ components: [String]) -> String? {
-    var result: [String] = []
-    for component in components {
-      switch component {
-      case "", ".": continue
-      case "..":
-        guard result.popLast() != nil else { return nil }
-      default:
-        result.append(component)
-      }
-    }
-    return result.isEmpty ? nil : result.joined(separator: "/")
   }
 
   static func parse(_ output: Data) -> Set<String> {
