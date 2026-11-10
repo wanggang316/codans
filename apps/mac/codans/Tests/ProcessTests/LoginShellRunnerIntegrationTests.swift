@@ -9,14 +9,40 @@ import Testing
 struct LoginShellRunnerIntegrationTests {
   struct ShellCase: CustomTestStringConvertible, Sendable {
     let shell: LoginShell
+    /// Relative to `HOME`.
     let rcName: String
+    /// The file `-l` reads, relative to `HOME`.
+    let profileName: String
     var testDescription: String { shell.url.lastPathComponent }
+
+    var isFish: Bool {
+      if case .fish = shell { return true }
+      return false
+    }
+
+    /// rc text in this shell's syntax.
+    func rc(posix: String, fish: String) -> String { isFish ? fish : posix }
   }
 
-  static let shells = [
-    ShellCase(shell: .zsh(URL(fileURLWithPath: "/bin/zsh")), rcName: ".zshrc"),
-    ShellCase(shell: .bash(URL(fileURLWithPath: "/bin/bash")), rcName: ".bashrc"),
-  ]
+  /// zsh and bash ship with macOS. fish runs when it is installed, or when
+  /// `CODANS_TEST_FISH` names a binary (pass `TEST_RUNNER_CODANS_TEST_FISH` to
+  /// `xcodebuild test`).
+  static let shells: [ShellCase] = {
+    var cases = [
+      ShellCase(shell: .zsh(URL(fileURLWithPath: "/bin/zsh")), rcName: ".zshrc", profileName: ".zprofile"),
+      ShellCase(shell: .bash(URL(fileURLWithPath: "/bin/bash")), rcName: ".bashrc", profileName: ".bash_profile"),
+    ]
+    let fishCandidates =
+      [ProcessInfo.processInfo.environment["CODANS_TEST_FISH"]].compactMap(\.self)
+      + ["/opt/homebrew/bin/fish", "/usr/local/bin/fish"]
+    if let fish = fishCandidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
+      cases.append(
+        ShellCase(
+          shell: .fish(URL(fileURLWithPath: fish)), rcName: ".config/fish/config.fish",
+          profileName: ".config/fish/conf.d/profile.fish"))
+    }
+    return cases
+  }()
 
   /// A temporary `HOME` whose rc file is `rc`, plus a scratch directory.
   struct Sandbox {
@@ -30,7 +56,15 @@ struct LoginShellRunnerIntegrationTests {
       work = root.appendingPathComponent("work dir", isDirectory: true)
       try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
       try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
-      try rc.write(to: home.appendingPathComponent(rcName), atomically: true, encoding: .utf8)
+      try write(rc, to: rcName)
+    }
+
+    /// Writes `text` to `name` under `HOME`, creating its directories.
+    func write(_ text: String, to name: String) throws {
+      let file = home.appendingPathComponent(name)
+      try FileManager.default.createDirectory(
+        at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+      try text.write(to: file, atomically: true, encoding: .utf8)
     }
 
     static func realPath(_ path: String) -> String {
@@ -67,7 +101,9 @@ struct LoginShellRunnerIntegrationTests {
 
   @Test(arguments: shells)
   func gitRunsAHelperThatOnlyTheRcPutsOnPath(_ shellCase: ShellCase) async throws {
-    let sandbox = try Sandbox(rcName: shellCase.rcName, rc: "export PATH=\"$HOME/tools:$PATH\"\n")
+    let sandbox = try Sandbox(
+      rcName: shellCase.rcName,
+      rc: shellCase.rc(posix: "export PATH=\"$HOME/tools:$PATH\"\n", fish: "set -gx PATH $HOME/tools $PATH\n"))
     let tools = sandbox.home.appendingPathComponent("tools", isDirectory: true)
     try FileManager.default.createDirectory(at: tools, withIntermediateDirectories: true)
     let helper = tools.appendingPathComponent("codans-test-helper")
@@ -98,6 +134,8 @@ struct LoginShellRunnerIntegrationTests {
   @Test(arguments: shells)
   func rcOutputDoesNotReachCapturedOutput(_ shellCase: ShellCase) async throws {
     let sandbox = try Sandbox(rcName: shellCase.rcName, rc: "echo BANNER\necho BANNER-ERR >&2\n")
+    // The profile `-l` reads runs before the script, outside its rc redirect.
+    try sandbox.write("echo PROFILE-BANNER\necho PROFILE-BANNER-ERR >&2\n", to: shellCase.profileName)
     let outcome = await runner(shellCase.shell).run(
       executable: URL(fileURLWithPath: "/bin/echo"), arguments: ["hello"], env: sandbox.gitEnv,
       cwd: sandbox.work, timeout: .seconds(30), maxOutputBytes: 1 << 16, launch: .loginShell)
@@ -113,7 +151,9 @@ struct LoginShellRunnerIntegrationTests {
   func rcCannotSeeOrChangeTheCommandOrItsDirectory(_ shellCase: ShellCase) async throws {
     let sandbox = try Sandbox(
       rcName: shellCase.rcName,
-      rc: "printf '%s' \"$*\" > \"$HOME/seen-args\"\nset -- /bin/echo hijacked\ncd /\n")
+      rc: shellCase.rc(
+        posix: "printf '%s' \"$*\" > \"$HOME/seen-args\"\nset -- /bin/echo hijacked\ncd /\n",
+        fish: "printf '%s' \"$argv\" > $HOME/seen-args\nset -g argv /bin/echo hijacked\ncd /\n"))
     let outcome = await runner(shellCase.shell).run(
       executable: URL(fileURLWithPath: "/bin/sh"),
       arguments: ["-c", "/bin/pwd -P; printf '[%s]' \"$@\"", "sh", "a b", "it's", "$HOME", "\"q\""],

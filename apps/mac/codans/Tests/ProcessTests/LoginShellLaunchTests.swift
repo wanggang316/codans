@@ -28,14 +28,15 @@ struct LoginShellLaunchTests {
       cwd: repo,
       shell: .zsh(URL(fileURLWithPath: "/bin/zsh"))
     )
-    #expect(launch.executable.path == "/bin/zsh")
+    #expect(launch.executable.path == "/bin/sh")
     #expect(
       launch.arguments == [
+        "-c", "exec 3>&1 4>&2 >/dev/null 2>&1; exec \"$0\" \"$@\"", "/bin/zsh",
         "-l", "-c",
         "__codans_dir=$1; shift; __codans_argv=(\"$@\"); set --; "
-          + "if [ -r \"${ZDOTDIR:-$HOME}/.zshrc\" ]; then . \"${ZDOTDIR:-$HOME}/.zshrc\" </dev/null >/dev/null 2>&1; fi; "
-          + "builtin cd -- \"$__codans_dir\" >/dev/null 2>&1 || exit 125; "
-          + "exec /usr/bin/env -i \"PATH=$PATH\" \"${__codans_argv[@]}\"",
+          + "if [ -r \"${ZDOTDIR:-$HOME}/.zshrc\" ]; then . \"${ZDOTDIR:-$HOME}/.zshrc\" </dev/null 3>&- 4>&-; fi; "
+          + "builtin cd -- \"$__codans_dir\" || exit 125; "
+          + "exec /usr/bin/env -i \"PATH=$PATH\" \"${__codans_argv[@]}\" 1>&3 2>&4 3>&- 4>&-",
         "--",
         "/tmp/my repo",
         "HOME=/Users/u", "LC_ALL=C.UTF-8",
@@ -55,10 +56,11 @@ struct LoginShellLaunchTests {
     )
     #expect(
       launch.arguments == [
+        "-c", LoginShellLaunch.redirectScript, "/bin/bash",
         "-l", "-c",
         "__codans_argv=(\"$@\"); set --; "
-          + "if [ -r \"$HOME/.bashrc\" ]; then . \"$HOME/.bashrc\" </dev/null >/dev/null 2>&1; fi; "
-          + "exec /usr/bin/env -i \"PATH=$PATH\" \"${__codans_argv[@]}\"",
+          + "if [ -r \"$HOME/.bashrc\" ]; then . \"$HOME/.bashrc\" </dev/null 3>&- 4>&-; fi; "
+          + "exec /usr/bin/env -i \"PATH=$PATH\" \"${__codans_argv[@]}\" 1>&3 2>&4 3>&- 4>&-",
         "--", "HOME=/h", "/usr/bin/git", "status", "a b",
       ])
   }
@@ -70,18 +72,21 @@ struct LoginShellLaunchTests {
       executable: git, arguments: ["$x"], env: [:], cwd: repo, shell: fish)
     #expect(
       withDirectory.arguments == [
+        "-c", LoginShellLaunch.redirectScript, "/opt/homebrew/bin/fish",
         "-l", "-c",
         "set -g __codans_dir $argv[1]; set -g __codans_argv $argv[2..-1]; set -e argv; "
-          + "builtin cd $__codans_dir >/dev/null 2>&1; or exit 125; "
-          + "exec /usr/bin/env -i \"PATH=$PATH\" $__codans_argv",
+          + "builtin cd $__codans_dir; or exit 125; "
+          + "exec /usr/bin/env -i \"PATH=$PATH\" $__codans_argv 1>&3 2>&4 3>&- 4>&-",
         "--", "/tmp/my repo", "/usr/bin/git", "$x",
       ])
     let withoutDirectory = try LoginShellLaunch.build(
       executable: git, arguments: [], env: [:], cwd: nil, shell: fish)
     #expect(
       withoutDirectory.arguments == [
+        "-c", LoginShellLaunch.redirectScript, "/opt/homebrew/bin/fish",
         "-l", "-c",
-        "set -g __codans_argv $argv; set -e argv; exec /usr/bin/env -i \"PATH=$PATH\" $__codans_argv",
+        "set -g __codans_argv $argv; set -e argv; "
+          + "exec /usr/bin/env -i \"PATH=$PATH\" $__codans_argv 1>&3 2>&4 3>&- 4>&-",
         "--", "/usr/bin/git",
       ])
   }
