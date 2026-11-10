@@ -119,6 +119,8 @@ struct HierarchySidebarView: View {
   /// the non-animated signals (phase icon, phase line + its stage value)
   /// carry the state on their own. Mirrors `PendingWorktreeRow`'s gating.
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  /// Footer Settings button opens the same window as the Settings… menu item.
+  @Environment(\.openWindow) private var openWindow
 
   /// App-wide "is a newer version available?" mirror, injected by
   /// `ContentView`. Drives the persistent update reminder in the sidebar
@@ -310,7 +312,7 @@ struct HierarchySidebarView: View {
         onTagTapped: { store.send(.tagChipTapped($0)) },
         onUntaggedTapped: { store.send(.untaggedChipTapped) },
         onEditTagsTapped: { store.send(.delegate(.openTagManager)) },
-        onRefreshTapped: { store.send(.refreshAllProjectsTapped) },
+        onSettingsTapped: { openWindow(id: CodansApp.settingsWindowID) },
         onAgentStateTapped: !agentStatePanelAvailable
           ? nil
           : {
