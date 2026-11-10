@@ -57,12 +57,17 @@ nonisolated enum LoginShell: Equatable, Sendable {
 ///
 /// One launch is:
 ///
-///     <shell> -l -c '<script>' -- [<cwd>] KEY=VALUE… <executable> <arguments…>
+///     /bin/sh -c '<redirect>' <shell> -l -c '<script>' -- [<cwd>] KEY=VALUE… <executable> <arguments…>
 ///
-/// The script saves the positional parameters and clears them, sources the rc
-/// file with its output sent to `/dev/null`, enters `<cwd>` with `builtin cd`
-/// (exit 125 on failure), and then runs
-/// `exec /usr/bin/env -i PATH=<login PATH> KEY=VALUE… <executable> <arguments…>`.
+/// `/bin/sh` copies the captured stdout and stderr to fds 3 and 4, points fds
+/// 1 and 2 at `/dev/null`, and execs the login shell. So nothing the shell runs
+/// before the command reaches the captured output: profile files (`.zprofile`,
+/// `.bash_profile`), the rc, and fish's `config.fish`, which fish loads itself
+/// before any `-c` script. The script saves the positional parameters and
+/// clears them, sources the rc, enters `<cwd>` with `builtin cd` (exit 125 on
+/// failure), and then runs
+/// `exec /usr/bin/env -i PATH=<login PATH> KEY=VALUE… <executable> <arguments…>`
+/// with fds 3 and 4 moved back to 1 and 2.
 ///
 /// After the rc ran, the command gets exactly the caller's environment, with
 /// only `PATH` taken from the login shell. This keeps every caller's environment
@@ -75,6 +80,10 @@ nonisolated enum LoginShellLaunch {
   /// Exit status when the working directory cannot be entered: the command
   /// never started. Git itself does not use it.
   static let directoryFailureStatus: Int32 = 125
+
+  /// Moves the captured output to fds 3 and 4 and silences 1 and 2 for the
+  /// login shell, which it then execs (`$0` is the shell path).
+  static let redirectScript = "exec 3>&1 4>&2 >/dev/null 2>&1; exec \"$0\" \"$@\""
 
   enum Failure: Error, Equatable, Sendable {
     case executableMissing(String)
@@ -124,8 +133,9 @@ nonisolated enum LoginShellLaunch {
     positional.append(executable.path)
     positional += arguments
     return ProcessLaunch(
-      executable: shell.url,
-      arguments: ["-l", "-c", script(for: shell, changesDirectory: cwd != nil), "--"] + positional,
+      executable: URL(fileURLWithPath: "/bin/sh"),
+      arguments: ["-c", redirectScript, shell.url.path]
+        + ["-l", "-c", script(for: shell, changesDirectory: cwd != nil), "--"] + positional,
       environment: env,
       // The shell enters the real directory itself, after the rc; a missing
       // directory must reach the script (exit 125), not fail the spawn.
@@ -144,28 +154,34 @@ nonisolated enum LoginShellLaunch {
     case .fish:
       // fish loads `config.fish` and `conf.d` itself for every `-c`, before
       // this script runs and without access to `$argv`; sourcing it again
-      // would run it twice. Its output cannot be redirected from here.
+      // would run it twice. `redirectScript` keeps its output out.
       [
         changesDirectory
           ? "set -g __codans_dir $argv[1]; set -g __codans_argv $argv[2..-1]"
           : "set -g __codans_argv $argv",
         "set -e argv",
         changesDirectory
-          ? "builtin cd $__codans_dir >/dev/null 2>&1; or exit \(directoryFailureStatus)" : nil,
-        "exec /usr/bin/env -i \"PATH=$PATH\" $__codans_argv",
+          ? "builtin cd $__codans_dir; or exit \(directoryFailureStatus)" : nil,
+        "exec /usr/bin/env -i \"PATH=$PATH\" $__codans_argv \(restoreOutput)",
       ].compactMap(\.self).joined(separator: "; ")
     }
   }
+
+  /// Gives the command the captured output back; the command does not keep
+  /// fds 3 and 4.
+  private static let restoreOutput = "1>&3 2>&4 3>&- 4>&-"
 
   private static func posixScript(rc: String, changesDirectory: Bool) -> String {
     [
       changesDirectory ? "__codans_dir=$1; shift" : nil,
       "__codans_argv=(\"$@\")",
       "set --",
-      "if [ -r \(rc) ]; then . \(rc) </dev/null >/dev/null 2>&1; fi",
+      // The rc does not get the captured output, so a daemon it starts
+      // cannot hold the pipes open.
+      "if [ -r \(rc) ]; then . \(rc) </dev/null 3>&- 4>&-; fi",
       changesDirectory
-        ? "builtin cd -- \"$__codans_dir\" >/dev/null 2>&1 || exit \(directoryFailureStatus)" : nil,
-      "exec /usr/bin/env -i \"PATH=$PATH\" \"${__codans_argv[@]}\"",
+        ? "builtin cd -- \"$__codans_dir\" || exit \(directoryFailureStatus)" : nil,
+      "exec /usr/bin/env -i \"PATH=$PATH\" \"${__codans_argv[@]}\" \(restoreOutput)",
     ].compactMap(\.self).joined(separator: "; ")
   }
 }

@@ -133,20 +133,23 @@ agent 按 skill 敲裸 `codans` 的情况仍会发生，所以 CLI 自己再守�
 所以后台的 git、内置 `wt`、`gh`、`glab` **每次**都经用户的 login shell 启动，不在启动时读一次 `PATH`：shell 配置的改动对下一条命令生效，不需要重启 app。一次调用的形状（`LoginShellLaunch`，`codans/Process/`）：
 
 ```
-<shell> -l -c '<script>' -- <cwd> KEY=VALUE… <executable> <arguments…>
+/bin/sh -c 'exec 3>&1 4>&2 >/dev/null 2>&1; exec "$0" "$@"' \
+  <shell> -l -c '<script>' -- <cwd> KEY=VALUE… <executable> <arguments…>
 
+/bin/sh:  captured stdout/stderr -> fds 3/4; fds 1/2 -> /dev/null; exec the login shell
 script:
   save "$@" (cwd, then argv); set --        rc cannot see or change the command
-  source rc  </dev/null >/dev/null 2>&1      banners do not reach captured output
+  source rc  </dev/null 3>&- 4>&-            rc gets neither the output nor the pipes
   builtin cd -- <cwd> || exit 125            after the rc, which may cd
-  exec /usr/bin/env -i "PATH=$PATH" KEY=VALUE… <executable> <arguments…>
+  exec /usr/bin/env -i "PATH=$PATH" KEY=VALUE… <executable> <arguments…> 1>&3 2>&4 3>&- 4>&-
 ```
 
 - **shell**：用户数据库里的 login shell（`getpwuid`），是 zsh、bash、fish 之一时用它，其他一律 `/bin/zsh`。每次调用都重新读。
-- **rc**：`-l` 读 profile（`/etc/zprofile` 的 `path_helper`、`brew shellenv`）；`-c` 不是交互式，不读 rc，所以显式 source：zsh `${ZDOTDIR:-$HOME}/.zshrc`，bash `~/.bashrc`。fish 例外：fish 对每个 `-c` 都自己加载 `config.fish` 与 `conf.d`（在脚本之前，且看不到 `$argv`），再 source 一次会执行两遍，所以不再 source；它的输出也就无法重定向，靠 fish 的惯例 `status is-interactive` 守住。
+- **rc**：`-l` 读 profile（`/etc/zprofile` 的 `path_helper`、`brew shellenv`）；`-c` 不是交互式，不读 rc，所以显式 source：zsh `${ZDOTDIR:-$HOME}/.zshrc`，bash `~/.bashrc`。fish 例外：fish 对每个 `-c` 都自己加载 `config.fish` 与 `conf.d`（在脚本之前，且看不到 `$argv`），再 source 一次会执行两遍，所以不再 source。
+- **输出**：命令之前 shell 执行的一切（profile、rc、fish 自动加载的配置）都可能打印 banner，而 profile 和 fish 配置在脚本之前运行，脚本里的重定向管不到。所以由外层 `/bin/sh` 先把捕获用的 stdout / stderr 移到 fd 3 / 4，把 1 / 2 指向 `/dev/null`，再 exec login shell；只有最后的 `exec` 把 3 / 4 还给命令，命令不持有 3 / 4。rc 自己启动的后台进程也拿不到这两个管道。
 - **环境**：rc 执行完后，命令拿到的**恰好**是调用方给的环境，只有 `PATH` 取自 login shell（`env -i` 加上逐个 `KEY=VALUE`）。所以每个调用方的环境契约在 rc 之后依然成立：`GitProcessEnv` 的白名单与剥掉的 `GIT_*`、强制的 `LC_ALL`、`GIT_TERMINAL_PROMPT=0`、`gh` / `glab` 剥掉的 token 变量。rc 导出的被剥键（例如 `GIT_DIR`、`GITLAB_TOKEN`）到不了命令。
 - **工作目录**：`Process` 以 `/` 启动 shell，由脚本在 rc 之后 `builtin cd`。目录不存在时退出码 125（`LoginShellLaunch.directoryFailureStatus`），表示「命令没有启动」，不与 git 自己的失败混淆。
-- **进程**：`exec` 让命令替换 shell，pid 不变，runner 的超时与取消直接杀到真实进程。`Process` 把子进程放进独立进程组，超时或取消时 runner 向整个进程组发 SIGTERM、1 秒后 SIGKILL，rc 里还没结束的命令和 git 启动的 helper 也一起结束。
+- **进程**：`/bin/sh` exec login shell，login shell exec 命令，pid 不变，runner 的超时与取消直接杀到真实进程。`Process` 把子进程放进独立进程组，超时或取消时 runner 向整个进程组发 SIGTERM、1 秒后 SIGKILL，rc 里还没结束的命令和 git 启动的 helper 也一起结束。
 - **前置检查**：可执行文件不存在时，不启动 shell，直接返回 `binary not found`，与直接启动时相同。路径含 `=` 时报错（`env` 会把它当作赋值）。
 
 入口只有一个：`CommandRunner.run(…, launch:)` 的 `CommandLaunch.loginShell`。`GitWorktreeShell.runStream`（`wt sw`、clone、fetch 的流式输出）和 `GitWorktreeCLI`（同步 git）自己持有 `Process`，二者调用同一个 `LoginShellLaunch.prepare`，不另写一套。
@@ -161,7 +164,7 @@ script:
 | 远程命令（`ssh`，含远程 git、`ssh -G`） | 直接 | 远端已在远程 login shell 里执行；本地 ssh 需要的是 launchd 的 `SSH_AUTH_SOCK` |
 | 自己启动 shell 的命令（Agent 安装探测、workflow 的 `/bin/sh -c`） | 直接 | 由调用方决定 shell |
 
-**代价**：每条命令多一次 shell 启动和一次 rc 执行，耗时取决于用户的 rc。在一台 Apple Silicon Mac mini 上，`git --version` 21 次的中位数：直接启动 7.9 ms，空 rc 14.0 ms（约 +6 ms），加载 oh-my-zsh、pyenv、starship、nvm 的 rc 687.8 ms（约 +680 ms；机器繁忙时约 2 秒）。rc 越重，后台 git 越慢。
+**代价**：每条命令多一次 shell 启动和一次 rc 执行，耗时取决于用户的 rc。在一台 Apple Silicon Mac mini 上，`git --version` 21 次的中位数：直接启动 6.7 ms，空 rc 14.2 ms（约 +7 ms，含外层 `/bin/sh`），加载 oh-my-zsh、pyenv、starship、nvm 的 rc 667.5 ms（约 +660 ms；机器繁忙时约 2 秒）。rc 越重，后台 git 越慢。
 
 ### 覆盖点（隔离缝）
 
@@ -196,7 +199,7 @@ script:
 
 ## Cross-Cutting
 
-- **测试**：`LoginShellLaunchTests`（调用构造）、`LoginShellRunnerIntegrationTests`（临时 `HOME` 下的真实 zsh / bash：rc 加的 `PATH`、banner、`set --`、`cd /`、125、超时与取消不留子进程、rc 导出的 `GIT_*` 到不了 git）；`BuildChannelTests`、`CodansEnvironmentTests`、`HandoffLayoutTests`（CodansCore）；`SocketDiscoveryTests`（CodansKit）；`SocketPathsTests`、`PaneEnvironmentTests`、`HierarchyManagerResolvedEnvTests`（app）。`CodansEnvironmentTests` 把类型化持有者钉在目录上，任何一处拼写漂移都会在这里失败。
+- **测试**：`LoginShellLaunchTests`（调用构造）、`LoginShellRunnerIntegrationTests`（临时 `HOME` 下的真实 zsh / bash，装了 fish 或设了 `CODANS_TEST_FISH` 时也跑 fish：rc 加的 `PATH`、rc 与 profile 的 banner、`set --`、`cd /`、125、超时与取消不留子进程、rc 导出的 `GIT_*` 到不了 git）；`BuildChannelTests`、`CodansEnvironmentTests`、`HandoffLayoutTests`（CodansCore）；`SocketDiscoveryTests`（CodansKit）；`SocketPathsTests`、`PaneEnvironmentTests`、`HierarchyManagerResolvedEnvTests`（app）。`CodansEnvironmentTests` 把类型化持有者钉在目录上，任何一处拼写漂移都会在这里失败。
 - **可观测性**：`codans doctor` 打印它解析到的 socket 与 `socketFromEnvironment`；「命令跑到别的 app」先看这个。
 - **调用方身份**：pane 导出 `CODANS_PANE_ID`；服务端由该 Pane 推导所属 Tab、Worktree 和 Project。
 
