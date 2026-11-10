@@ -248,6 +248,37 @@ struct CommandPaletteItemsTests {
     #expect(order(remoteMain) == .init(project: 1, worktree: 0))
   }
 
+  // MARK: - Pin / Unpin
+
+  @Test
+  func pinItemCarriesTheRegistryCommand() {
+    var project = Project(name: "P", rootPath: "/tmp/p", gitRoot: "/tmp/p")
+    let worktree = Worktree(name: "wt", path: "/tmp/p-wt", branch: "wt", isPinned: true)
+    project.worktrees = [worktree]
+    let items = Self.withEmptySettings {
+      CommandPaletteItems.build(
+        selection: HierarchySelection(projectID: project.id, worktreeID: worktree.id),
+        catalog: Catalog(projects: [project]))
+    }
+    let item = items.first { $0.id == "worktree.toggle-pin" }
+    #expect(item?.title == "Unpin Worktree")
+    #expect(item?.commandID == .toggleCurrentWorktreePinned)
+  }
+
+  /// The main checkout cannot be pinned from the sidebar, so the palette omits the item.
+  @Test
+  func mainCheckoutHasNoPinItem() {
+    var project = Project(name: "P", rootPath: "/tmp/p", gitRoot: "/tmp/p")
+    let main = Worktree(name: "main", path: "/tmp/p", branch: "main")
+    project.worktrees = [main]
+    let items = Self.withEmptySettings {
+      CommandPaletteItems.build(
+        selection: HierarchySelection(projectID: project.id, worktreeID: main.id),
+        catalog: Catalog(projects: [project]))
+    }
+    #expect(!items.contains { $0.id == "worktree.toggle-pin" })
+  }
+
   // MARK: - Focused pane resolution
 
   @Test
