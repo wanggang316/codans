@@ -9,6 +9,20 @@ nonisolated struct ProcessLaunch: Equatable, Sendable {
   var currentDirectory: URL
 }
 
+nonisolated extension ProcessLaunch {
+  /// The launch for one attempt: direct when `loginShell` is `nil`, else
+  /// through that shell (`LoginShellLaunch.prepare`).
+  static func make(
+    executable: URL, arguments: [String], env: [String: String], cwd: URL, loginShell: LoginShell?
+  ) throws(LoginShellLaunch.Failure) -> ProcessLaunch {
+    guard let loginShell else {
+      return ProcessLaunch(executable: executable, arguments: arguments, environment: env, currentDirectory: cwd)
+    }
+    return try LoginShellLaunch.prepare(
+      executable: executable, arguments: arguments, env: env, cwd: cwd, shell: loginShell)
+  }
+}
+
 /// The shell that wraps a background command. Only shells whose rc file and
 /// argument handling are known are used; any other login shell falls back to
 /// `/bin/zsh`. Terminals are not affected: Ghostty starts the user's real shell.
@@ -84,6 +98,14 @@ nonisolated enum LoginShellLaunch {
   /// Moves the captured output to fds 3 and 4 and silences 1 and 2 for the
   /// login shell, which it then execs (`$0` is the shell path).
   static let redirectScript = "exec 3>&1 4>&2 >/dev/null 2>&1; exec \"$0\" \"$@\""
+
+  /// Whether a finished run failed because a program was not found: the
+  /// shell's 127, or a child's `command not found` that git passed on with
+  /// its own status (a credential helper given by bare name). Such a run is
+  /// worth one more try with the login `PATH`.
+  static func reportsMissingCommand(exitCode: Int32, stderr: String) -> Bool {
+    exitCode == 127 || (exitCode != 0 && stderr.contains("command not found"))
+  }
 
   enum Failure: Error, Equatable, Sendable {
     case executableMissing(String)

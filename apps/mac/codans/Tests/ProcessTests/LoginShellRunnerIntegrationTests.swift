@@ -131,6 +131,78 @@ struct LoginShellRunnerIntegrationTests {
     #expect(code != 0)
   }
 
+  /// A sandbox whose rc puts `$HOME/tools` (holding `codans-test-helper`)
+  /// on `PATH` and appends a line to `$HOME/rc-ran` each time it runs.
+  private func helperSandbox(_ shellCase: ShellCase) throws -> Sandbox {
+    let sandbox = try Sandbox(
+      rcName: shellCase.rcName,
+      rc: shellCase.rc(
+        posix: "echo ran >> \"$HOME/rc-ran\"\nexport PATH=\"$HOME/tools:$PATH\"\n",
+        fish: "echo ran >> $HOME/rc-ran\nset -gx PATH $HOME/tools $PATH\n"))
+    try sandbox.write("#!/bin/sh\necho helper-ran\n", to: "tools/codans-test-helper")
+    try FileManager.default.setAttributes(
+      [.posixPermissions: 0o755], ofItemAtPath: sandbox.home.appendingPathComponent("tools/codans-test-helper").path)
+    return sandbox
+  }
+
+  private func rcRuns(_ sandbox: Sandbox) -> Int {
+    let marker = sandbox.home.appendingPathComponent("rc-ran")
+    return ((try? String(contentsOf: marker, encoding: .utf8)) ?? "").split(separator: "\n").count
+  }
+
+  @Test(arguments: shells)
+  func localStatusAndDiffStartNoLoginShell(_ shellCase: ShellCase) async throws {
+    let sandbox = try helperSandbox(shellCase)
+    let git = URL(fileURLWithPath: "/usr/bin/git")
+    let runner = runner(shellCase.shell)
+    for arguments in [["init", "-q"], ["status", "--porcelain=v1", "-z"], ["diff", "--numstat"]] {
+      let outcome = await runner.run(
+        executable: git, arguments: arguments, env: sandbox.gitEnv, cwd: sandbox.work,
+        timeout: .seconds(30), maxOutputBytes: 1 << 16, launch: GitLaunch.mode(for: arguments))
+      guard case .exited(0, _, _, _) = outcome else {
+        Issue.record("git \(arguments) failed: \(outcome)")
+        return
+      }
+    }
+    #expect(rcRuns(sandbox) == 0)
+  }
+
+  @Test(arguments: shells)
+  func directRunRetriesOnceInTheLoginShellWhenAToolIsMissing(_ shellCase: ShellCase) async throws {
+    let sandbox = try helperSandbox(shellCase)
+    // With an argument, git runs the alias through `sh`, as it runs
+    // `!glab auth git-credential`; a missing program is then sh's 127.
+    let arguments = ["-c", "alias.probe=!codans-test-helper --probe", "probe"]
+    #expect(GitLaunch.mode(for: arguments) == .directThenLoginShell)
+    let outcome = await runner(shellCase.shell).run(
+      executable: URL(fileURLWithPath: "/usr/bin/git"), arguments: arguments, env: sandbox.gitEnv,
+      cwd: sandbox.work, timeout: .seconds(30), maxOutputBytes: 1 << 16, launch: .directThenLoginShell)
+    guard case .exited(0, let stdout, _, _) = outcome else {
+      Issue.record("expected exit 0, got \(outcome)")
+      return
+    }
+    #expect(text(stdout) == "helper-ran\n")
+    #expect(rcRuns(sandbox) == 1)
+  }
+
+  /// The bundled `wt` is a script that calls other tools; one that exists
+  /// only on the login `PATH` makes the direct run exit 127.
+  @Test(arguments: shells)
+  func streamedScriptRetriesOnceInTheLoginShellWhenAToolIsMissing(_ shellCase: ShellCase) async throws {
+    let sandbox = try helperSandbox(shellCase)
+    try sandbox.write("#!/bin/sh\necho start\ncodans-test-helper\n", to: "bin/fake-wt")
+    let script = sandbox.home.appendingPathComponent("bin/fake-wt")
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+    let result = await GitWorktreeShell.runStream(
+      executable: script, arguments: [], cwd: sandbox.work, environment: sandbox.gitEnv,
+      launch: GitWorktreeShell.launch(executable: script, arguments: []), loginShell: shellCase.shell,
+      onStdout: { _ in }, onStderr: { _ in })
+    #expect(result.spawnFailedReason == nil)
+    #expect(result.exitCode == 0)
+    #expect(result.stdoutLast == "helper-ran")
+    #expect(rcRuns(sandbox) == 1)
+  }
+
   @Test(arguments: shells)
   func rcOutputDoesNotReachCapturedOutput(_ shellCase: ShellCase) async throws {
     let sandbox = try Sandbox(rcName: shellCase.rcName, rc: "echo BANNER\necho BANNER-ERR >&2\n")

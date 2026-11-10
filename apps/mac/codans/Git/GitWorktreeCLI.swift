@@ -145,17 +145,31 @@ actor GitWorktreeCLI {
 
   // MARK: - Private
 
-  /// Runs git through the user's login shell (`LoginShellLaunch`), so a
-  /// credential helper given by bare name resolves as it does in a terminal.
+  /// Starts git as `GitLaunch` chooses: `clone` through the user's login
+  /// shell, so a credential helper given by bare name resolves as it does
+  /// in a terminal; local commands directly, retried once in the login shell
+  /// when they report a missing command.
   private func run(arguments: [String], cwd: String) throws -> String {
-    let launch: ProcessLaunch
-    do {
-      launch = try LoginShellLaunch.prepare(
-        executable: gitExecutable, arguments: arguments,
-        env: ProcessInfo.processInfo.environment, cwd: URL(fileURLWithPath: cwd))
-    } catch {
-      throw GitCLIError.executableNotFound
+    var result: (status: Int32, stdout: String, stderr: String) = (-1, "", "")
+    for viaLoginShell in GitLaunch.mode(for: arguments).attemptsViaLoginShell {
+      let launch: ProcessLaunch
+      do {
+        launch = try ProcessLaunch.make(
+          executable: gitExecutable, arguments: arguments, env: ProcessInfo.processInfo.environment,
+          cwd: URL(fileURLWithPath: cwd), loginShell: viaLoginShell ? .current() : nil)
+      } catch {
+        throw GitCLIError.executableNotFound
+      }
+      result = try runOnce(launch)
+      guard LoginShellLaunch.reportsMissingCommand(exitCode: result.status, stderr: result.stderr) else { break }
     }
+    if result.status != 0 {
+      throw GitCLIError.exitCode(result.status, stderr: result.stderr)
+    }
+    return result.stdout
+  }
+
+  private func runOnce(_ launch: ProcessLaunch) throws -> (status: Int32, stdout: String, stderr: String) {
     let process = Process()
     process.executableURL = launch.executable
     process.arguments = launch.arguments
@@ -189,10 +203,7 @@ actor GitWorktreeCLI {
       throw GitCLIError.invalidUTF8
     }
 
-    if process.terminationStatus != 0 {
-      throw GitCLIError.exitCode(process.terminationStatus, stderr: stderr)
-    }
-    return stdout
+    return (process.terminationStatus, stdout, stderr)
   }
 
   private func parseWorktreeList(_ output: String) -> [GitWorktreeEntry] {

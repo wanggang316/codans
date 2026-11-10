@@ -43,9 +43,26 @@ nonisolated enum CommandLaunch: Equatable, Sendable {
   /// that start their own shell.
   case direct
   /// Start it through the user's login shell (`LoginShellLaunch`), so the
-  /// command and what it starts get the login `PATH`. For git, the bundled
-  /// `wt`, `gh`, and `glab`.
+  /// command and what it starts get the login `PATH`. Each run pays for the
+  /// user's rc. For git that reaches a remote (it may start credential, LFS,
+  /// or ssh helpers), `gh`, and `glab`.
   case loginShell
+  /// Start it directly; run it once more through the login shell only when
+  /// the direct run reports a missing command (`LoginShellLaunch.reportsMissingCommand`).
+  /// For local git and the bundled `wt`, which run often and rarely need the
+  /// user's `PATH`.
+  case directThenLoginShell
+
+  /// One entry per attempt, in order: `true` when that attempt goes through
+  /// the login shell. A later attempt runs only when the one before it
+  /// reported a missing command.
+  var attemptsViaLoginShell: [Bool] {
+    switch self {
+    case .direct: [false]
+    case .loginShell: [true]
+    case .directThenLoginShell: [false, true]
+    }
+  }
 }
 
 nonisolated enum CommandOutcome: Equatable, Sendable {
@@ -128,16 +145,26 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
     // error instead: a location that reaches this runner unresolved is a
     // routing bug, not a reason to stop the app.
     guard cwd.isFileURL else { return .spawnFailed(reason: Self.nonLocalDirectoryReason(cwd)) }
-    var launch = ProcessLaunch(executable: executable, arguments: arguments, environment: env, currentDirectory: cwd)
-    if mode == .loginShell {
+    var outcome = CommandOutcome.spawnFailed(reason: "no launch")
+    for viaLoginShell in mode.attemptsViaLoginShell {
+      let launch: ProcessLaunch
       do {
-        launch = try LoginShellLaunch.prepare(
+        launch = try ProcessLaunch.make(
           executable: executable, arguments: arguments, env: env, cwd: cwd,
-          shell: loginShell ?? .current())
+          loginShell: viaLoginShell ? (loginShell ?? .current()) : nil)
       } catch {
         return .spawnFailed(reason: error.reason)
       }
+      outcome = await runGated(launch, timeout: timeout, maxOutputBytes: maxOutputBytes)
+      guard case .exited(let code, _, let stderr, _) = outcome,
+        LoginShellLaunch.reportsMissingCommand(exitCode: code, stderr: String(bytes: stderr, encoding: .utf8) ?? ""),
+        !Task.isCancelled
+      else { break }
     }
+    return outcome
+  }
+
+  private func runGated(_ launch: ProcessLaunch, timeout: Duration, maxOutputBytes: Int) async -> CommandOutcome {
     await Self.gate.acquire()
     // `defer` can't await, so release on a detached task — this still runs if
     // the surrounding task is cancelled or `launch` returns early.
