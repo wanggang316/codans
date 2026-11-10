@@ -1,0 +1,5 @@
+AXMenuItem "Global — origin/HEAD" #menuAction: {Cancel,Press,Pick} @1091,935 227x24
+AXMenuItem [disabled] {Cancel,Press,Pick} @1091,959 227x11
+AXMenuItem "Unknown" {Cancel,Press,Pick} @1091,970 227x24
+AXMenuItem "remote-only/marker (missing)" #menuAction: {Cancel,Press,Pick} @1091,994 227x24
+AXMenuItem [disabled] {Cancel,Press,Pick} @1091,930 0x0

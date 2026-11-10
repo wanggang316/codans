@@ -1,0 +1,13 @@
+112:          AXMenuItem "Global — origin/feat/header-redesign" #menuAction: {Cancel,Press,Pick} @1047,751 271x24
+113:          AXMenuItem [disabled] {Cancel,Press,Pick} @1047,775 271x11
+114:          AXMenuItem "Local" {Cancel,Press,Pick} @1047,786 271x24
+115:          AXMenuItem "origin" #menuAction: {Cancel,Press,Pick} @1047,810 271x24
+116:          AXMenuItem [disabled] {Cancel,Press,Pick} @1047,834 271x11
+117:          AXMenuItem [disabled] {Cancel,Press,Pick} @1047,845 271x24
+118:          AXMenuItem "Remote" {Cancel,Press,Pick} @1047,845 271x24
+119:          AXMenuItem "feat/header-redesign" #menuAction: {Cancel,Press,Pick} @1047,869 271x24
+120:          AXMenuItem "remote-only/marker" #menuAction: {Cancel,Press,Pick} @1047,893 271x24
+121:          AXMenuItem "origin/bugfix/menu" #menuAction: {Cancel,Press,Pick} @1047,917 271x24
+122:          AXMenuItem "origin/feat/header-redesign" #menuAction: {Cancel,Press,Pick} @1047,941 271x24
+123:          AXMenuItem "origin/main" #menuAction: {Cancel,Press,Pick} @1047,965 271x24
+124:          AXMenuItem [disabled] {Cancel,Press,Pick} @1047,746 0x0

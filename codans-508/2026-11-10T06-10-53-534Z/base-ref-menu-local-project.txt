@@ -1,0 +1,8 @@
+AXMenuItem "Global — origin/main" #menuAction: {Cancel,Press,Pick} @985,807 174x24
+AXMenuItem "Local" {Cancel,Press,Pick} @985,842 174x24
+AXMenuItem "main" #menuAction: {Cancel,Press,Pick} @985,866 174x24
+AXMenuItem "Remote" {Cancel,Press,Pick} @985,901 174x24
+AXMenuItem "bugfix/menu" #menuAction: {Cancel,Press,Pick} @985,925 174x24
+AXMenuItem "feat/header-redesign" #menuAction: {Cancel,Press,Pick} @985,949 174x24
+AXMenuItem "origin/feat/new-shell" #menuAction: {Cancel,Press,Pick} @985,973 174x24
+AXMenuItem "origin/main" #menuAction: {Cancel,Press,Pick} @985,997 174x24
