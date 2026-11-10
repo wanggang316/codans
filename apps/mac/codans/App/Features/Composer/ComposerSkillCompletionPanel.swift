@@ -30,10 +30,6 @@ enum ComposerSkillCompletionPanelLayout {
     CGFloat(min(max(rowCount, 1), maxVisibleRows)) * rowHeight + 2 * verticalPadding
   }
 
-  /// Added to a measured name: SwiftUI lays out text slightly wider than
-  /// `NSString` measures it, and a name that just fits would truncate.
-  static let textAllowance: CGFloat = 4
-
   /// The widest row among `names` (icon, name, and padding), at least
   /// `minWidth` and at most `maxWidth`. A longer name truncates. A list
   /// that scrolls also gets room for a legacy scroller, which takes space
@@ -49,7 +45,7 @@ enum ComposerSkillCompletionPanelLayout {
       scrollerStyle == .legacy && names.count > maxVisibleRows
       ? NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy) : 0
     let row =
-      text + textAllowance + iconWidth + iconSpacing + 2 * rowHorizontalPadding + 2 * horizontalPadding
+      text + iconWidth + iconSpacing + 2 * rowHorizontalPadding + 2 * horizontalPadding
       + scroller
     return min(max(row, minWidth), maxWidth)
   }

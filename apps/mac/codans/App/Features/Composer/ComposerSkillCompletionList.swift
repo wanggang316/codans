@@ -85,8 +85,10 @@ struct ComposerSkillCompletionList: View {
         .foregroundStyle(isHighlighted ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
         .lineLimit(1)
         .truncationMode(.middle)
-      Spacer(minLength: 0)
     }
+    // Not a `Spacer`: the stack would put `iconSpacing` before it too and
+    // take that from the name, which `Layout.width` does not count.
+    .frame(maxWidth: .infinity, alignment: .leading)
     .font(Font(Layout.rowFont))
     .padding(.horizontal, Layout.rowHorizontalPadding)
     .frame(height: Layout.rowHeight)

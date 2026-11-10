@@ -56,7 +56,7 @@ struct ComposerSkillCompletionPanelTests {
     let rowPadding =
       Layout.iconWidth + Layout.iconSpacing + 2 * Layout.rowHorizontalPadding + 2 * Layout.horizontalPadding
     let overlay = Layout.width(names: [name], maxWidth: 1000, scrollerStyle: .overlay)
-    #expect(overlay - rowPadding > text)
+    #expect(overlay - rowPadding == text)
     let many = [name] + (0..<Layout.maxVisibleRows).map { "s\($0)" }
     let legacy = Layout.width(names: many, maxWidth: 1000, scrollerStyle: .legacy)
     #expect(legacy == overlay + NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy))
