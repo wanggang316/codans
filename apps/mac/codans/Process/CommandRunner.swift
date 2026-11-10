@@ -81,6 +81,13 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
   /// How long to keep reading output after the child exits.
   var eofGrace: Duration = PipeCollector.defaultGrace
 
+  /// Runs each command through the user's login shell (`LoginShellLaunch`).
+  /// Set for git, the bundled `wt`, `gh`, and `glab`; not for `ssh`, bundled
+  /// internal binaries, or scripts that start their own shell.
+  var usesLoginShell = false
+  /// The wrapping shell; `nil` reads the user's login shell on every run.
+  var loginShell: LoginShell?
+
   func run(
     executable: URL,
     arguments: [String],
@@ -94,18 +101,21 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
     // error instead: a location that reaches this runner unresolved is a
     // routing bug, not a reason to stop the app.
     guard cwd.isFileURL else { return .spawnFailed(reason: Self.nonLocalDirectoryReason(cwd)) }
+    var launch = ProcessLaunch(executable: executable, arguments: arguments, environment: env, currentDirectory: cwd)
+    if usesLoginShell {
+      do {
+        launch = try LoginShellLaunch.prepare(
+          executable: executable, arguments: arguments, env: env, cwd: cwd,
+          shell: loginShell ?? .current())
+      } catch {
+        return .spawnFailed(reason: error.reason)
+      }
+    }
     await Self.gate.acquire()
     // `defer` can't await, so release on a detached task — this still runs if
     // the surrounding task is cancelled or `launch` returns early.
     defer { Task { await Self.gate.release() } }
-    return await launch(
-      executable: executable,
-      arguments: arguments,
-      env: env,
-      cwd: cwd,
-      timeout: timeout,
-      maxOutputBytes: maxOutputBytes
-    )
+    return await run(launch, timeout: timeout, maxOutputBytes: maxOutputBytes)
   }
 
   /// The `.spawnFailed` reason for a working directory that is not on This Mac.
@@ -113,19 +123,12 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
     "working directory is not a local path: \(cwd.absoluteString)"
   }
 
-  private func launch(
-    executable: URL,
-    arguments: [String],
-    env: [String: String],
-    cwd: URL,
-    timeout: Duration,
-    maxOutputBytes: Int
-  ) async -> CommandOutcome {
+  private func run(_ launch: ProcessLaunch, timeout: Duration, maxOutputBytes: Int) async -> CommandOutcome {
     let process = Process()
-    process.executableURL = executable
-    process.arguments = arguments
-    process.currentDirectoryURL = cwd
-    process.environment = env
+    process.executableURL = launch.executable
+    process.arguments = launch.arguments
+    process.currentDirectoryURL = launch.currentDirectory
+    process.environment = launch.environment
     process.standardInput = FileHandle.nullDevice
 
     let stdoutPipe = Pipe.closeOnExec()
@@ -157,7 +160,7 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
       _ = await stdoutCollector.finish(grace: grace)
       _ = await stderrCollector.finish(grace: grace)
       if error.domain == NSPOSIXErrorDomain, error.code == Int(ENOENT) {
-        return .spawnFailed(reason: "binary not found: \(executable.path)")
+        return .spawnFailed(reason: "binary not found: \(launch.executable.path)")
       }
       return .spawnFailed(reason: error.localizedDescription)
     }
@@ -201,18 +204,27 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
       }
       defer { group.cancelAll() }
       guard let first = await group.next() else { return .exited(Int32(-1)) }
-      switch first {
-      case .exited(let code):
-        return .exited(code)
-      case .timedOut:
-        process.terminate()
-        try? await Task.sleep(for: .seconds(1))
-        if process.isRunning {
-          kill(process.processIdentifier, SIGKILL)
-        }
-        return .timedOut
-      }
+      // A cancelled caller ends both child tasks at once, and the exit stream
+      // can win with a placeholder code while the child still runs.
+      if case .exited(let code) = first, !Task.isCancelled { return .exited(code) }
+      await terminate(process)
+      return .timedOut
     }
+  }
+
+  /// SIGTERM, a grace second, then SIGKILL. `Process` starts each child in its
+  /// own process group, so the signals also reach what it started: a login
+  /// shell's rc commands, git's credential helper or `ssh`.
+  private static func terminate(_ process: Process) async {
+    let pid = process.processIdentifier
+    let target = getpgid(pid) == pid ? -pid : pid
+    kill(target, SIGTERM)
+    // Detached: a cancelled caller's `Task.sleep` returns at once, and the
+    // grace must still pass.
+    await Task.detached {
+      try? await Task.sleep(for: .seconds(1))
+    }.value
+    kill(target, SIGKILL)
   }
 }
 
