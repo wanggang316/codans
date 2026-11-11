@@ -36,6 +36,9 @@ actor GitWorktreeCLI {
   private let gitExecutable: URL
   private let runner: any CommandRunner
   private let parentEnvironment: [String: String]
+  /// Per destination, a task that ends when the last clone started there has
+  /// finished, cleanup included. See `clone(remoteURL:destinationPath:)`.
+  private var cloneTails: [String: Task<Void, Never>] = [:]
 
   init(
     gitExecutable: URL = URL(fileURLWithPath: "/usr/bin/git"),
@@ -156,8 +159,28 @@ actor GitWorktreeCLI {
   /// this clone created it: git cleans up on SIGTERM, but a git killed after
   /// the grace period leaves its partial checkout behind. A destination that
   /// existed before stays.
+  ///
+  /// Clones into one destination run one after another: a retry started
+  /// while a cancelled clone is still stopping waits for its cleanup, so that
+  /// cleanup cannot remove the retry's checkout.
   func clone(remoteURL: String, destinationPath: String) async throws {
     let destination = URL(fileURLWithPath: destinationPath)
+    let key = destination.standardizedFileURL.path
+    let previous = cloneTails[key]
+    let (finished, finish) = AsyncStream<Never>.makeStream()
+    let tail = Task {
+      await previous?.value
+      for await _ in finished {}
+    }
+    cloneTails[key] = tail
+    defer {
+      finish.finish()
+      if cloneTails[key] == tail { cloneTails[key] = nil }
+    }
+    await previous?.value
+    // Cancelled while waiting: stop before touching the destination.
+    if Task.isCancelled { throw GitCLIError.timedOut }
+
     let parent = destination.deletingLastPathComponent()
     let existedBefore = FileManager.default.fileExists(atPath: destinationPath)
     try? FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
@@ -173,6 +196,13 @@ actor GitWorktreeCLI {
       }
       throw error
     }
+  }
+
+  /// Returns when every clone started into `destinationPath` has finished,
+  /// cleanup included.
+  func waitForClones(at destinationPath: String) async {
+    let key = URL(fileURLWithPath: destinationPath).standardizedFileURL.path
+    await cloneTails[key]?.value
   }
 
   // MARK: - Private
