@@ -260,6 +260,14 @@ private actor SlowRecheckRunner: CommandRunner {
   }
 
   private func countRecheck() { recheckCount += 1 }
+
+  nonisolated func runStream(
+    executable: URL, arguments: [String], env: [String: String], cwd: URL, timeout: Duration,
+    launch: CommandLaunch, splitOnCarriageReturn: Bool, onSpawn: @escaping @Sendable (pid_t) -> Void,
+    onLine: @escaping @Sendable (String) -> Void
+  ) async -> CommandStreamOutcome {  // swiftlint:disable:this async_without_await
+    .spawnFailed(reason: "not used")
+  }
 }
 
 extension GitLabGitPlatform {

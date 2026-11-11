@@ -18,6 +18,26 @@ nonisolated protocol CommandRunner: Sendable {
     maxOutputBytes: Int,
     launch: CommandLaunch
   ) async -> CommandOutcome
+
+  /// Runs a command and passes each output line to `onLine` while it runs:
+  /// stdout and stderr lines, each stream in order. The same launch modes,
+  /// timeout, and cancel behavior as `run`. For long commands that report
+  /// progress (a clone, the bundled `wt`, a setup script).
+  ///
+  /// `splitOnCarriageReturn` also ends a line at `\r`, so progress output
+  /// that redraws one line (`git clone --progress`) streams each redraw.
+  /// `onSpawn` gets the pid of every started attempt.
+  func runStream(
+    executable: URL,
+    arguments: [String],
+    env: [String: String],
+    cwd: URL,
+    timeout: Duration,
+    launch: CommandLaunch,
+    splitOnCarriageReturn: Bool,
+    onSpawn: @escaping @Sendable (pid_t) -> Void,
+    onLine: @escaping @Sendable (String) -> Void
+  ) async -> CommandStreamOutcome
 }
 
 extension CommandRunner {
@@ -33,6 +53,21 @@ extension CommandRunner {
     await run(
       executable: executable, arguments: arguments, env: env, cwd: cwd,
       timeout: timeout, maxOutputBytes: maxOutputBytes, launch: .direct)
+  }
+
+  func runStream(
+    executable: URL,
+    arguments: [String],
+    env: [String: String],
+    cwd: URL,
+    timeout: Duration,
+    launch: CommandLaunch,
+    splitOnCarriageReturn: Bool = false,
+    onLine: @escaping @Sendable (String) -> Void
+  ) async -> CommandStreamOutcome {
+    await runStream(
+      executable: executable, arguments: arguments, env: env, cwd: cwd, timeout: timeout, launch: launch,
+      splitOnCarriageReturn: splitOnCarriageReturn, onSpawn: { _ in }, onLine: onLine)
   }
 }
 
@@ -74,6 +109,21 @@ nonisolated enum CommandOutcome: Equatable, Sendable {
   case timedOut
   /// `process.run()` threw; typically ENOENT or a permission problem. `reason` is the
   /// localized description.
+  case spawnFailed(reason: String)
+}
+
+/// How a streamed command ended (`CommandRunner.runStream`).
+nonisolated enum CommandStreamOutcome: Equatable, Sendable {
+  /// The child exited within the timeout. `lastStdoutLine` is the last
+  /// non-empty stdout line, trimmed. `stderr` is all stderr output, up to
+  /// `FoundationCommandRunner.streamStderrCap` bytes.
+  case exited(code: Int32, lastStdoutLine: String, stderr: String)
+  /// The child was still running at the deadline. The runner stopped its
+  /// process group.
+  case timedOut
+  /// The calling task was cancelled. The runner stopped the process group.
+  case cancelled
+  /// The command could not start. `reason` is for the user.
   case spawnFailed(reason: String)
 }
 
@@ -124,6 +174,9 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
   /// A modest cap keeps the fan-out fast while staying clear of that contention.
   private static let gate = SubprocessGate(limit: 6)
 
+  /// How much stderr a streamed command keeps for its error report.
+  static let streamStderrCap = 4 * 1024 * 1024
+
   /// How long to keep reading output after the child exits.
   var eofGrace: Duration = PipeCollector.defaultGrace
 
@@ -140,12 +193,62 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
     maxOutputBytes: Int,
     launch mode: CommandLaunch
   ) async -> CommandOutcome {
+    await attempts(
+      executable: executable, arguments: arguments, env: env, cwd: cwd, mode: mode,
+      spawnFailed: { .spawnFailed(reason: $0) },
+      reportsMissingCommand: { outcome in
+        guard case .exited(let code, _, let stderr, _) = outcome else { return false }
+        return LoginShellLaunch.reportsMissingCommand(
+          exitCode: code, stderr: String(bytes: stderr, encoding: .utf8) ?? "")
+      },
+      body: { launch in await runGated(launch, timeout: timeout, maxOutputBytes: maxOutputBytes) })
+  }
+
+  /// Not gated by `gate`: a stream can run for many minutes (a clone, a
+  /// setup script), and holding a slot that long would stall the short
+  /// commands the gate exists for.
+  func runStream(
+    executable: URL,
+    arguments: [String],
+    env: [String: String],
+    cwd: URL,
+    timeout: Duration,
+    launch mode: CommandLaunch,
+    splitOnCarriageReturn: Bool,
+    onSpawn: @escaping @Sendable (pid_t) -> Void,
+    onLine: @escaping @Sendable (String) -> Void
+  ) async -> CommandStreamOutcome {
+    await attempts(
+      executable: executable, arguments: arguments, env: env, cwd: cwd, mode: mode,
+      spawnFailed: { .spawnFailed(reason: $0) },
+      reportsMissingCommand: { outcome in
+        guard case .exited(let code, _, let stderr) = outcome else { return false }
+        return LoginShellLaunch.reportsMissingCommand(exitCode: code, stderr: stderr)
+      },
+      body: { launch in
+        await stream(
+          launch, timeout: timeout, splitOnCarriageReturn: splitOnCarriageReturn, onSpawn: onSpawn, onLine: onLine)
+      })
+  }
+
+  /// Runs one attempt per entry of `mode.attemptsViaLoginShell`; a later
+  /// attempt runs only when the one before it reported a missing command.
+  private func attempts<Outcome>(
+    executable: URL,
+    arguments: [String],
+    env: [String: String],
+    cwd: URL,
+    mode: CommandLaunch,
+    spawnFailed: (String) -> Outcome,
+    reportsMissingCommand: (Outcome) -> Bool,
+    body: (ProcessLaunch) async -> Outcome
+  ) async -> Outcome {
     // `Process.currentDirectoryURL` raises an Objective-C exception for a
     // non-file URL (a Remote Project's `codans-host://` location). Return an
     // error instead: a location that reaches this runner unresolved is a
     // routing bug, not a reason to stop the app.
-    guard cwd.isFileURL else { return .spawnFailed(reason: Self.nonLocalDirectoryReason(cwd)) }
-    var outcome = CommandOutcome.spawnFailed(reason: "no launch")
+    guard cwd.isFileURL else { return spawnFailed(Self.nonLocalDirectoryReason(cwd)) }
+    var outcome = spawnFailed("no launch")
     for viaLoginShell in mode.attemptsViaLoginShell {
       let launch: ProcessLaunch
       do {
@@ -153,13 +256,10 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
           executable: executable, arguments: arguments, env: env, cwd: cwd,
           loginShell: viaLoginShell ? (loginShell ?? .current()) : nil)
       } catch {
-        return .spawnFailed(reason: error.reason)
+        return spawnFailed(error.reason)
       }
-      outcome = await runGated(launch, timeout: timeout, maxOutputBytes: maxOutputBytes)
-      guard case .exited(let code, _, let stderr, _) = outcome,
-        LoginShellLaunch.reportsMissingCommand(exitCode: code, stderr: String(bytes: stderr, encoding: .utf8) ?? ""),
-        !Task.isCancelled
-      else { break }
+      outcome = await body(launch)
+      guard reportsMissingCommand(outcome), !Task.isCancelled else { break }
     }
     return outcome
   }
@@ -178,6 +278,79 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
   }
 
   private func run(_ launch: ProcessLaunch, timeout: Duration, maxOutputBytes: Int) async -> CommandOutcome {
+    let result = await execute(
+      launch, timeout: timeout,
+      stdout: { PipeCollector(pipe: $0, maxBytes: maxOutputBytes) },
+      stderr: { PipeCollector(pipe: $0, maxBytes: maxOutputBytes) },
+      onSpawn: { _ in })
+    switch result.ending {
+    case .exited(let code):
+      return .exited(
+        code: code, stdout: result.stdout.data, stderr: result.stderr.data, stdoutOverflow: result.stdout.overflow)
+    case .timedOut, .cancelled:
+      return .timedOut
+    case .spawnFailed(let reason):
+      return .spawnFailed(reason: reason)
+    }
+  }
+
+  private func stream(
+    _ launch: ProcessLaunch,
+    timeout: Duration,
+    splitOnCarriageReturn: Bool,
+    onSpawn: @escaping @Sendable (pid_t) -> Void,
+    onLine: @escaping @Sendable (String) -> Void
+  ) async -> CommandStreamOutcome {
+    let stdoutLines = LineSplitter(splitOnCarriageReturn: splitOnCarriageReturn)
+    let stderrLines = LineSplitter(splitOnCarriageReturn: splitOnCarriageReturn)
+    let result = await execute(
+      launch, timeout: timeout,
+      stdout: { pipe in
+        PipeCollector(pipe: pipe, maxBytes: 0) { chunk in stdoutLines.consume(chunk).forEach(onLine) }
+      },
+      stderr: { pipe in
+        PipeCollector(pipe: pipe, maxBytes: Self.streamStderrCap) { chunk in
+          stderrLines.consume(chunk).forEach(onLine)
+        }
+      },
+      onSpawn: onSpawn)
+    // The collectors are done, so no chunk can race these flushes.
+    stdoutLines.flush().forEach(onLine)
+    stderrLines.flush().forEach(onLine)
+    switch result.ending {
+    case .exited(let code):
+      return .exited(
+        code: code, lastStdoutLine: stdoutLines.lastNonEmpty,
+        stderr: String(bytes: result.stderr.data, encoding: .utf8) ?? "")
+    case .timedOut: return .timedOut
+    case .cancelled: return .cancelled
+    case .spawnFailed(let reason): return .spawnFailed(reason: reason)
+    }
+  }
+
+  private enum Ending: Sendable {
+    case exited(Int32)
+    case timedOut
+    case cancelled
+    case spawnFailed(String)
+  }
+
+  private struct Execution {
+    var ending: Ending
+    var stdout: (data: Data, overflow: Bool)
+    var stderr: (data: Data, overflow: Bool)
+  }
+
+  /// Starts one process, waits for its exit, the timeout, or the caller's
+  /// cancel, and collects its output. `stdout` / `stderr` make the
+  /// collectors for the two pipes.
+  private func execute(
+    _ launch: ProcessLaunch,
+    timeout: Duration,
+    stdout makeStdoutCollector: (Pipe) -> PipeCollector,
+    stderr makeStderrCollector: (Pipe) -> PipeCollector,
+    onSpawn: (pid_t) -> Void
+  ) async -> Execution {
     let process = Process()
     process.executableURL = launch.executable
     process.arguments = launch.arguments
@@ -198,56 +371,42 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
       exitCont.finish()
     }
 
-    let stdoutCollector = PipeCollector(pipe: stdoutPipe, maxBytes: maxOutputBytes)
-    let stderrCollector = PipeCollector(pipe: stderrPipe, maxBytes: maxOutputBytes)
+    let stdoutCollector = makeStdoutCollector(stdoutPipe)
+    let stderrCollector = makeStderrCollector(stderrPipe)
     let grace = eofGrace
 
     // Now start the child.
+    let ending: Ending
     do {
       try process.run()
+      onSpawn(process.processIdentifier)
+      ending = await Self.awaitExitOrTimeout(exitStream: exitStream, process: process, timeout: timeout)
     } catch let error as NSError {
       exitCont.finish()
       // Explicitly close pipe write ends so the drains see EOF and complete. Relying on
       // Pipe.deinit to close implicitly is fragile under the task-group lifetimes here.
       try? stdoutPipe.fileHandleForWriting.close()
       try? stderrPipe.fileHandleForWriting.close()
-      _ = await stdoutCollector.finish(grace: grace)
-      _ = await stderrCollector.finish(grace: grace)
       if error.domain == NSPOSIXErrorDomain, error.code == Int(ENOENT) {
-        return .spawnFailed(reason: "binary not found: \(launch.executable.path)")
+        ending = .spawnFailed("binary not found: \(launch.executable.path)")
+      } else {
+        ending = .spawnFailed(error.localizedDescription)
       }
-      return .spawnFailed(reason: error.localizedDescription)
     }
-
-    // Race exit vs. timeout.
-    let outcome = await Self.awaitExitOrTimeout(
-      exitStream: exitStream, process: process, timeout: timeout
-    )
     async let stdoutResult = stdoutCollector.finish(grace: grace)
     async let stderrResult = stderrCollector.finish(grace: grace)
-    let (stdoutData, stdoutOverflow) = await stdoutResult
-    let (stderrData, _) = await stderrResult
-    switch outcome {
-    case .exited(let code):
-      return .exited(code: code, stdout: stdoutData, stderr: stderrData, stdoutOverflow: stdoutOverflow)
-    case .timedOut:
-      return .timedOut
-    }
+    let (stdout, stderr) = await (stdoutResult, stderrResult)
+    return Execution(ending: ending, stdout: stdout, stderr: stderr)
   }
 
-  private enum ExitOrTimeout: Sendable {
-    case exited(Int32)
-    case timedOut
-  }
-
-  /// Consumes `exitStream` with a timeout race. On timeout, sends SIGTERM + grace + SIGKILL
-  /// so no stuck child survives, then returns `.timedOut`.
+  /// Consumes `exitStream` with a timeout race. On timeout or cancel, sends
+  /// SIGTERM + grace + SIGKILL so no stuck child survives.
   private static func awaitExitOrTimeout(
     exitStream: AsyncStream<Int32>,
     process: Process,
     timeout: Duration
-  ) async -> ExitOrTimeout {
-    await withTaskGroup(of: ExitOrTimeout.self) { group in
+  ) async -> Ending {
+    await withTaskGroup(of: Ending.self) { group in
       group.addTask {
         for await code in exitStream { return .exited(code) }
         return .exited(Int32(-1))  // stream finished without value — shouldn't happen
@@ -260,9 +419,10 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
       guard let first = await group.next() else { return .exited(Int32(-1)) }
       // A cancelled caller ends both child tasks at once, and the exit stream
       // can win with a placeholder code while the child still runs.
-      if case .exited(let code) = first, !Task.isCancelled { return .exited(code) }
+      let cancelled = Task.isCancelled
+      if case .exited(let code) = first, !cancelled { return .exited(code) }
       await terminate(process)
-      return .timedOut
+      return cancelled ? .cancelled : .timedOut
     }
   }
 
@@ -317,6 +477,25 @@ actor RecordingCommandRunner: CommandRunner {
       executable: executable, arguments: arguments, env: env,
       cwd: cwd, timeout: timeout, maxOutputBytes: maxOutputBytes, launch: launch
     )
+  }
+
+  /// Records the call like `run` and reports a clean exit with no output.
+  nonisolated func runStream(
+    executable: URL,
+    arguments: [String],
+    env: [String: String],
+    cwd: URL,
+    timeout: Duration,
+    launch: CommandLaunch,
+    splitOnCarriageReturn: Bool,
+    onSpawn: @escaping @Sendable (pid_t) -> Void,
+    onLine: @escaping @Sendable (String) -> Void
+  ) async -> CommandStreamOutcome {
+    _ = await record(
+      executable: executable, arguments: arguments, env: env,
+      cwd: cwd, timeout: timeout, maxOutputBytes: 0, launch: launch
+    )
+    return .exited(code: 0, lastStdoutLine: "", stderr: "")
   }
 
   private func record(

@@ -34,6 +34,14 @@ private actor LocalHostRunner: CommandRunner {
   }
 
   private func count() { calls += 1 }
+
+  nonisolated func runStream(
+    executable: URL, arguments: [String], env: [String: String], cwd: URL, timeout: Duration,
+    launch: CommandLaunch, splitOnCarriageReturn: Bool, onSpawn: @escaping @Sendable (pid_t) -> Void,
+    onLine: @escaping @Sendable (String) -> Void
+  ) async -> CommandStreamOutcome {  // swiftlint:disable:this async_without_await
+    .spawnFailed(reason: "not used")
+  }
 }
 
 struct RemoteSkillReaderTests {
