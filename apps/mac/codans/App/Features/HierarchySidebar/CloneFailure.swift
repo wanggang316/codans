@@ -3,7 +3,8 @@ import Foundation
 /// What the Clone Repository sheet shows for a failed `git clone`. A known
 /// authentication failure gets a short `summary` with the next step and keeps
 /// git's own output as `detail`; any other failure shows git's output as the
-/// summary, with no detail.
+/// summary, with no detail. Only a summary with a detail is Markdown: its
+/// commands are code spans.
 nonisolated struct CloneFailure: Equatable, Sendable {
   var summary: String
   var detail: String?

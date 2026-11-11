@@ -46,7 +46,7 @@ struct CloneRepoSheet: View {
         } footer: {
           if let error = store.errorMessage {
             VStack(alignment: .leading, spacing: 4) {
-              Text(error)
+              Text(Self.attributed(error, markdown: store.errorDetail != nil))
                 .foregroundStyle(.red)
               if let detail = store.errorDetail {
                 Text(detail)
@@ -66,6 +66,15 @@ struct CloneRepoSheet: View {
         }
       },
     )
+  }
+
+  /// A classified failure marks its commands with Markdown code spans. Raw
+  /// git output is not Markdown: a path with `_` or `*` would lose characters.
+  private static func attributed(_ text: String, markdown: Bool) -> AttributedString {
+    guard markdown, let parsed = try? AttributedString(markdown: text) else {
+      return AttributedString(text)
+    }
+    return parsed
   }
 
   private var canClone: Bool {
