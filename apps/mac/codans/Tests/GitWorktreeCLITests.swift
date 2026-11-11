@@ -195,6 +195,56 @@ struct GitWorktreeCLITests {
     #expect(FileManager.default.fileExists(atPath: destination + "/retry"))
   }
 
+  /// Another process that creates the destination while the clone starts
+  /// owns it: a failed clone must not remove it. The stand-in git plays that
+  /// process when it finds the destination missing, then fails.
+  @Test
+  func failedCloneNeverRemovesADestinationAnotherProcessCreated() async throws {
+    let home = try makeExtCloneHome()
+    defer { try? FileManager.default.removeItem(atPath: home) }
+    let destination = home + "/dest"
+    let fakeGit = home + "/fake-git"
+    try """
+    #!/bin/sh
+    if [ ! -d "$3" ]; then mkdir "$3"; touch "$3/other"; touch "$HOME/other-created"; fi
+    echo "fatal: could not read Username for 'http://example.invalid': terminal prompts disabled" >&2
+    exit 128
+    """.write(toFile: fakeGit, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeGit)
+    let cli = GitWorktreeCLI(
+      gitExecutable: URL(fileURLWithPath: fakeGit),
+      parentEnvironment: ["HOME": home, "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
+    await #expect(throws: GitCLIError.self) {
+      try await cli.clone(remoteURL: "http://example.invalid/r.git", destinationPath: destination)
+    }
+    let otherCreated = FileManager.default.fileExists(atPath: home + "/other-created")
+    // The clone claims the destination before git starts, so no other
+    // process can create it in between; its own directory is removed.
+    #expect(!otherCreated)
+    if otherCreated {
+      #expect(FileManager.default.fileExists(atPath: destination + "/other"))
+    } else {
+      #expect(!FileManager.default.fileExists(atPath: destination))
+    }
+  }
+
+  /// git fails against an existing empty destination and leaves it; so must
+  /// the cleanup.
+  @Test
+  func failedCloneKeepsAPreExistingEmptyDestination() async throws {
+    let home = try makeExtCloneHome()
+    defer { try? FileManager.default.removeItem(atPath: home) }
+    let destination = home + "/dest"
+    try FileManager.default.createDirectory(atPath: destination, withIntermediateDirectories: false)
+    let cli = GitWorktreeCLI(parentEnvironment: ["HOME": home, "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
+    await #expect(throws: GitCLIError.self) {
+      try await cli.clone(remoteURL: home + "/no-such-repo", destinationPath: destination)
+    }
+    var isDirectory: ObjCBool = false
+    #expect(FileManager.default.fileExists(atPath: destination, isDirectory: &isDirectory))
+    #expect(isDirectory.boolValue)
+  }
+
   private func cancelStubbornClone(home: String, destination: String) async throws {
     let seconds = "4\(Int.random(in: 10_000...99_999)).5"
     let fakeGit = home + "/fake-git"
