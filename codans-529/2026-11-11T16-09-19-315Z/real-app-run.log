@@ -1,0 +1,33 @@
+self-verify: instance pid 69548 on /tmp/cdv-sv-501-d4f76178.sock
+ok menu File > Clone Repository…
+ok present after 343ms
+ok set-value AXTextField "https://github.com/owner/repo.git" = "http://127.0.0.1:18929/team/private.git" [focused] {ShowMenu,Confirm} @681,522 398x16
+ok set-value AXTextField "Local path" "~/repo" = "/tmp/codans-529-sv/clones/private" [focused] {ShowMenu,Confirm} @662,559 328x16
+ok press AXButton "Clone" {Press} @1030,613 59x24
+== S1 tree
+    AXStaticText = "Clone Repository" @569,429 111x16
+      AXStaticText = "Repository URL" @579,475 94x16
+      AXStaticText = "Local path" @579,512 63x16
+      AXStaticText = "git has no valid credentials for 127.0.0.1:18929. Set up a g" @579,552 497x42
+        AXStaticText = "git has no valid credentials for 127.0.0.1:18929. Set up a g" @579,552 497x42
+      AXStaticText = "Cloning into '/tmp/codans-529-sv/clones/private'...⏎fatal: c" @579,598 483x39
+        AXStaticText = "Cloning into '/tmp/codans-529-sv/clones/private'...⏎fatal: c" @579,598 483x39
+    AXButton "Cancel" {Press} @956,661 66x24
+    AXButton "Clone" {Press} @1030,661 59x24
+S1 dest exists: no
+ok set-value AXTextField "https://github.com/owner/repo.git" = "https://github.com/torvalds/linux.git" [focused] {ShowMenu,Confirm} @681,475 398x16
+ok set-value AXTextField "Local path" "~/repo" = "/tmp/codans-529-sv/clones/linux" [focused] {ShowMenu,Confirm} @662,512 328x16
+ok press AXButton "Clone" {Press} @1030,661 59x24
+== S2 during clone
+    AXStaticText = "Cloning…" @593,617 57x16
+    AXButton "Cancel" {Press} @956,613 66x24
+    AXButton "Clone" [disabled] {Press} @1030,613 59x24
+git during: 1 procs; dest exists: yes
+00:08:54.205639000
+ok press AXButton "Cancel" {Press} @956,613 66x24
+00:08:57.307492000
+== S2 after cancel
+    AXButton "Cancel" {Press} @956,613 66x24
+    AXButton "Clone" {Press} @1030,613 59x24
+git after: 0 procs; dest exists: no
+self-verify: cleanup done
