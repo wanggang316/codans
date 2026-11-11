@@ -126,29 +126,36 @@ struct SSHSharedMasterGuardTests {
 
   @Test
   func runnerTimeoutAlsoStopsTheCreator() async throws {
-    let state = try Self.makeState()
-    try Self.mark(state, "hang")
-    let script = Self.line(host: host, state: state, quiet: true)
-
     // The lock wait can outlast a probe's timeout. `Process` makes the shell
     // a process-group leader and `terminate()` signals that whole group, so
     // `lockf` and the creating `ssh` stop with the probe.
-    let outcome = await FoundationCommandRunner().run(
-      executable: URL(fileURLWithPath: "/bin/sh"),
-      arguments: ["-c", script],
-      env: [:],
-      cwd: state,
-      timeout: .seconds(1),
-      maxOutputBytes: 1024
-    )
+    //
+    // The timeout runs from launch. On a busy machine the line can still be
+    // on its way to the creator when a short timeout ends, and that run shows
+    // nothing. Retry it with a longer timeout until the creator has started.
+    for timeout in [1, 2, 4, 8, 16] {
+      let state = try Self.makeState()
+      try Self.mark(state, "hang")
+      let script = Self.line(host: host, state: state, quiet: true)
 
-    guard case .timedOut = outcome else {
-      Issue.record("expected a timeout, got \(outcome)")
+      let outcome = await FoundationCommandRunner().run(
+        executable: URL(fileURLWithPath: "/bin/sh"),
+        arguments: ["-c", script],
+        env: [:],
+        cwd: state,
+        timeout: .seconds(timeout),
+        maxOutputBytes: 1024
+      )
+
+      guard case .timedOut = outcome else {
+        Issue.record("expected a timeout, got \(outcome)")
+        return
+      }
+      guard let creator = Self.creatorPID(state) else { continue }
+      #expect(await Self.eventually { kill(creator, 0) != 0 })
       return
     }
-    let pidText = try String(contentsOf: state.appending(path: "creator.pid"), encoding: .utf8)
-    let creator = try #require(pid_t(pidText.trimmingCharacters(in: .whitespacesAndNewlines)))
-    #expect(await Self.eventually { kill(creator, 0) != 0 })
+    Issue.record("the creator did not start before any timeout")
   }
 
   @Test
@@ -274,6 +281,13 @@ struct SSHSharedMasterGuardTests {
       return proc.terminationStatus
     }
     return (statuses, errors)
+  }
+
+  /// The pid the hanging creator wrote, or `nil` when it did not start.
+  private static func creatorPID(_ state: URL) -> pid_t? {
+    let url = state.appending(path: "creator.pid")
+    guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+    return pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines))
   }
 
   private static func eventually(_ condition: () -> Bool) async -> Bool {
