@@ -229,18 +229,19 @@ agent 常在用户看过 Pull Request 之后继续向分支 push。codans 只 me
 
 ### 局域网 host 与 macOS 本地网络隐私
 
-结论：remote 在局域网 host 上（例如 `http://192.168.2.x:8929` 的自托管 GitLab）时，徽标和 fetch 正常工作。app 没有 `NSLocalNetworkUsageDescription`，也不对 "network unreachable" 做本地网络专用的提示；这是有意的，不是遗漏。
+观察结果：在下面的实测环境中，remote 在局域网 host 上时，app 启动的 `glab` 和 `git` 能连到该 host。app 没有 `NSLocalNetworkUsageDescription`，也不对 "network unreachable" 做本地网络专用的提示。
 
-原因：macOS 本地网络隐私（[TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy)）把 app 启动的子进程（`gh`、`glab`、`git` 及 git 的 HTTP helper）算到 app 名下，app 的权限状态从 undetermined 开始。实测（#533，macOS 27.0.1，Wi‑Fi）：
+这与 [TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy) 不一致：TN3179 说到局域网地址的出站 TCP 需要 Local Network 权限，app 启动的子进程（`gh`、`glab`、`git` 及 git 的 HTTP helper）算到 app 名下，授权前应被拦截；launchd 的豁免只适用于 daemon，不适用于 app。原因未知，不能当作通用规则，其他 macOS 版本或机器上可能被拦截。
+
+实测（#533，macOS 27.0.1，Wi‑Fi，无 VPN）：
 
 - Release 配置、Developer ID 签名的 `Codans.app`（0.11.0），经 LaunchServices `open` 启动（PPID 1，即 launchd），不从终端启动。
-- app 用 `CommandRunner` 启动的 `glab api graphql` 和建 Worktree 时的 `git fetch` 都连到局域网路由器 `192.168.2.1`：分别得到 TLS 证书错误和 HTTP 404，即 TCP 连接已建立，不是 `no route to host`。pane 内的 `/usr/bin/git`、`glab`、`gh`、`/usr/bin/curl` 结果相同。`192.168.2.158:8929` 上的 GitLab 徽标显示 `!12`，`git fetch` 成功。
-- 系统没有弹出本地网络提示，System Settings › Privacy & Security › Local Network 列表里也没有 Codans。系统的本地网络规则（`/Library/Preferences/com.apple.networkextension.plist` 中 `com.apple.preferences.networkprivacy` 的 `NEPathRule`）对 `com.gumpw.codans` 是默认状态（`MulticastPreferenceSet = false`、`DenyMulticast = true`、`DenyAll = false`），与从未授权的其他 app 相同。对照：同为默认状态的 `Python.app`（`org.python.python`）经 `open` 启动后，自身和子进程 `git` 也能连到 `192.168.2.1:80`。
+- app 用 `CommandRunner` 启动的 `glab api graphql` 和建 Worktree 时的 `git fetch` 都连到局域网路由器 `192.168.2.1`：分别得到 TLS 证书错误和 HTTP 404，即 TCP 连接已建立，不是 `no route to host`。路由器不是 Git 服务器，所以这只证明连通，不证明 Git 操作成功。pane 内的 `/usr/bin/git`、`glab`、`gh`、`/usr/bin/curl` 结果相同。
+- `192.168.2.158:8929` 上的 GitLab 徽标显示 `!12`，`git fetch` 成功。该地址是本机地址，流量走 `lo0`，测不到本地网络隐私。
+- 系统没有弹出本地网络提示，System Settings › Privacy & Security › Local Network 列表里也没有 Codans。`/Library/Preferences/com.apple.networkextension.plist` 中 `com.apple.preferences.networkprivacy` 的 `NEPathRule` 对 `com.gumpw.codans` 是默认状态（`MulticastPreferenceSet = false`、`DenyMulticast = true`、`DenyAll = false`），与从未授权的其他 app 相同。同为默认状态的 `Python.app`（`org.python.python`）经 `open` 启动后，自身和子进程 `git` 也能连到 `192.168.2.1:80`。
+- 未测试：权限被拒绝的状态（Codans 不在列表中，无法关闭），以及对另一台局域网 Git 服务器的完整 Git 操作。
 
-所以在 undetermined 状态下，系统只拒绝 multicast，不拒绝到局域网 host 的单播 TCP，而 Git Platform 和 git 只用单播 TCP。注意两点：
-
-- 自托管 GitLab 跑在本机时，它的局域网 IP 是本机地址，流量走 `lo0`，测不到本地网络隐私。验证时要用另一台局域网设备。
-- 用户在 Local Network 列表中明确关闭 Codans，或以后的 macOS 对 undetermined 状态也拒绝单播时，这些命令会以 `no route to host` / `Couldn't connect to server` 失败，徽标位置显示 `.network` 错误。出现这种报告时，先在另一台局域网设备上按上面的步骤重测，再加 `NSLocalNetworkUsageDescription` 和指向该设置的错误消息。
+被拦截时，这些命令会以 `no route to host` / `Couldn't connect to server` 失败，徽标位置显示 `.network` 错误。收到这类报告时，在另一台局域网设备（不是本机地址）上重测；确认被拦截后，加 `NSLocalNetworkUsageDescription` 和指向该设置的错误消息。
 
 ## GitHub 实现
 
