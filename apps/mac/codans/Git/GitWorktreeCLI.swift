@@ -160,6 +160,11 @@ actor GitWorktreeCLI {
   /// the grace period leaves its partial checkout behind. A destination that
   /// existed before stays.
   ///
+  /// Ownership comes from creating the destination, not from checking for
+  /// it: `mkdir` fails when the path exists, so no other process can create
+  /// it between the check and the clone. git clones into the empty
+  /// directory as it would into a missing one.
+  ///
   /// Clones into one destination run one after another: a retry started
   /// while a cancelled clone is still stopping waits for its cleanup, so that
   /// cleanup cannot remove the retry's checkout.
@@ -182,8 +187,10 @@ actor GitWorktreeCLI {
     if Task.isCancelled { throw GitCLIError.timedOut }
 
     let parent = destination.deletingLastPathComponent()
-    let existedBefore = FileManager.default.fileExists(atPath: destinationPath)
     try? FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+    // Any failure (the path exists, no permission) leaves it unowned; git
+    // then reports the reason.
+    let createdDestination = mkdir(destinationPath, 0o777) == 0
     do {
       _ = try await run(
         arguments: ["clone", remoteURL, destinationPath],
@@ -191,7 +198,7 @@ actor GitWorktreeCLI {
         timeout: Self.cloneTimeout
       )
     } catch {
-      if !existedBefore {
+      if createdDestination {
         try? FileManager.default.removeItem(at: destination)
       }
       throw error
