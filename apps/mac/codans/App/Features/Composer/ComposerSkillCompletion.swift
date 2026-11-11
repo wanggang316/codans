@@ -157,6 +157,18 @@ final class ComposerSkillCompletion {
 
   // MARK: - Rules
 
+  /// Why a composer for `agent` offers no skills, or `nil` when it does.
+  /// `isRemote` is a target whose skills the composer cannot read (the
+  /// Command Queue cannot read an agent process on another host), and an
+  /// agent without a verified call spelling gets none (ADR 0010).
+  nonisolated static func unavailableReason(for agent: AgentDescriptor, isRemote: Bool) -> String? {
+    if isRemote { return "Skill suggestions are not available for remote projects" }
+    guard agent.skillLocation.supportsCompletion else {
+      return "Skill suggestions are not available for \(agent.displayName)"
+    }
+    return nil
+  }
+
   /// The skill call that ends at `caret`: a token that starts with
   /// `prefix` at the prompt start or after whitespace and has no
   /// whitespace up to the caret. `leading` allows only the first token of

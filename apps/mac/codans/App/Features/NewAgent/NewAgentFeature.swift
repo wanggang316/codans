@@ -150,10 +150,10 @@ struct NewAgentFeature {
     var skillsUnavailableReason: String? {
       guard selectedProject != nil else { return "Add a project to see its skills" }
       guard let agent = selectedAgent else { return "Choose an agent to see its skills" }
-      guard agent.descriptor.skillLocation.supportsCompletion else {
-        return "Skill suggestions are not available for \(agent.descriptor.displayName)"
-      }
-      return skillsFailure
+      // Remote projects read skills from the host (#461), so only the
+      // agent can make them unavailable here.
+      return ComposerSkillCompletion.unavailableReason(for: agent.descriptor, isRemote: false)
+        ?? skillsFailure
     }
 
     /// The branch-name field and the worktree options apply.
@@ -411,7 +411,8 @@ struct NewAgentFeature {
       guard scope.isRemote else {
         await send(
           .skillsLoaded(
-            client.load(scope.profile, scope.projectStart, scope.newWorktree), for: scope))
+            client.load(SkillLaunch(profile: scope.profile), scope.projectStart, scope.newWorktree),
+            for: scope))
         return
       }
       guard let host = scope.host else {

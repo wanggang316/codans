@@ -118,6 +118,37 @@ struct HierarchyClientTests {
     #expect(next?.contains(closed) == false)
   }
 
+  /// An agent replaced by another of the same kind changes the process,
+  /// not the pane, and the stream still emits.
+  @Test
+  func paneChangesEmitsForANewForegroundJob() async throws {
+    let (client, manager) = makeLiveClient()
+    let projectID = client.addProject("p", "/tmp", "/tmp")
+    let worktreeID = try client.createWorktree(projectID, "w", "/tmp", "main")
+    let tabID = try client.createTab(worktreeID, projectID, nil)
+    let paneID = try client.createPaneRow(tabID, worktreeID, projectID, "/tmp", nil)
+    func job(_ pid: Int32) -> ForegroundJob {
+      ForegroundJob(
+        processGroupID: pid,
+        processes: [
+          ForegroundProcess(
+            pid: pid, parentPID: 1, processGroupID: pid, argv0: "claude", commandLine: "claude",
+            arguments: ["claude"])
+        ])
+    }
+
+    var iterator = client.paneChanges(paneID).makeAsyncIterator()
+    let initial = await iterator.next()
+    #expect(initial??.id == paneID)
+
+    manager.updateProcessSample(paneID: paneID, job: job(100), now: Date())
+    let first = await iterator.next()
+    #expect(first??.id == paneID)
+    manager.updateProcessSample(paneID: paneID, job: job(200), now: Date())
+    let second = await iterator.next()
+    #expect(second??.id == paneID)
+  }
+
   @Test
   func selectProjectClearedOnRemoveProject() throws {
     let (client, manager) = makeLiveClient()

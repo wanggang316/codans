@@ -24,6 +24,21 @@ struct CommandQueueFeature {
     var repeatEnabled: Bool = false
     var repeatAmount: Int = 30
     var repeatUnit: IntervalUnit = .minutes
+    /// How the draft calls the skills of the agent running in the pane.
+    /// `none` until `onAppear` reads the pane, and while it offers no skills.
+    var skillLocation: SkillLocation = .none
+    /// Agent Skills the pane's agent can call, for draft completion.
+    var skills: [AgentSkillEntry] = []
+    /// What `skills` were read for. The pane's agent can change while the
+    /// panel is open, so the skills of another scope are never shown.
+    var skillsScope: SkillScope?
+    /// Why the draft offers no skills, for the Skills button's tooltip.
+    /// `nil` when typing the call prefix opens the list.
+    var skillsUnavailableReason: String? = Self.noAgentReason
+
+    static let noAgentReason = "Skill suggestions need an agent running in this pane"
+    static let unreadableLaunchReason =
+      "Skill suggestions are not available: codans cannot read how this agent was started"
 
     init(paneID: PaneID, now: Date = Date()) {
       self.paneID = paneID
@@ -71,6 +86,14 @@ struct CommandQueueFeature {
     var canSubmit: Bool { !trimmedDraft.isEmpty }
   }
 
+  /// The agent process a skill scan reads for, and the directory it
+  /// searches project skills from.
+  struct SkillScope: Equatable, Sendable {
+    var pid: Int32
+    var launch: SkillLaunch
+    var projectStart: URL?
+  }
+
   /// Unit for the repeat stepper. Seconds are offered because a "nudge the
   /// agent every 30 s" watchdog is a real use, but the runner's settle window
   /// still throttles anything shorter than a few seconds.
@@ -97,6 +120,9 @@ struct CommandQueueFeature {
   }
 
   enum Action: Equatable {
+    /// Follows the pane, so the skills follow its agent and directory.
+    case onAppear
+    case paneChanged(Pane?)
     case draftChanged(String)
     /// Picked files, and the editor's caret or selection as UTF-16 offsets
     /// (`nil` appends to the end).
@@ -108,6 +134,10 @@ struct CommandQueueFeature {
     case repeatUnitChanged(IntervalUnit)
     /// Commit the draft under the selected mode.
     case submitted
+    case skillsLoaded([AgentSkillEntry], for: SkillScope)
+    /// The Skills button: put the call prefix at the draft's caret or
+    /// selection (UTF-16 offsets, `nil` appends to the end).
+    case skillsButtonTapped(selection: Range<Int>?)
     case delegate(Delegate)
     case removeTapped(QueuedCommand.ID)
     case clearAllTapped
@@ -119,11 +149,40 @@ struct CommandQueueFeature {
 
   @Dependency(HierarchyClient.self) private var hierarchyClient
   @Dependency(TerminalClient.self) private var terminalClient
+  @Dependency(AgentSkillClient.self) private var agentSkillClient
   @Dependency(\.date) private var date
 
   var body: some Reducer<State, Action> {
     Reduce { state, action in
       switch action {
+      case .onAppear:
+        let paneID = state.paneID
+        let client = hierarchyClient
+        return .run { send in
+          for await pane in await client.paneChanges(paneID) {
+            await send(.paneChanged(pane))
+          }
+        }
+        .cancellable(id: CancelID.pane, cancelInFlight: true)
+
+      case .paneChanged(let pane):
+        return updateSkills(for: pane, state: &state)
+
+      case .skillsLoaded(let skills, let scope):
+        // A scan for an agent or directory the pane no longer has is dropped.
+        guard scope == state.skillsScope else { return .none }
+        state.skills = skills
+        return .none
+
+      case .skillsButtonTapped(let selection):
+        let location = state.skillLocation
+        guard state.skillsUnavailableReason == nil, let prefix = location.invocationStyle.prefix,
+          let result = ComposerSkillCompletion.insertingPrefix(
+            prefix, into: state.draft, selection: selection, position: location.invocationPosition)
+        else { return .none }
+        state.draft = result.text
+        return .none
+
       case .draftChanged(let text):
         state.draft = text
         return .none
@@ -199,6 +258,53 @@ struct CommandQueueFeature {
         return .none
       }
     }
+  }
+
+  private nonisolated enum CancelID { case pane, skills }
+
+  /// Reads the skills of the agent that runs in the pane as that agent
+  /// resolves them (ADR 0010): its home, config root, and launch flags
+  /// come from the environment and argv of the running process, whatever
+  /// set them (a profile, the project, the shell), and project skills are
+  /// searched from its current directory. A process codans cannot read
+  /// gets no skills. A new agent or directory drops the old skills at once.
+  private func updateSkills(for pane: Pane?, state: inout State) -> Effect<Action> {
+    guard let pane, let kind = pane.agentKind else {
+      return clearSkills(reason: State.noAgentReason, state: &state)
+    }
+    let descriptor = AgentCatalog.descriptor(for: kind)
+    let catalog = hierarchyClient.snapshot()
+    let isRemote =
+      catalog.projectID(forPane: pane.id)
+      .flatMap { id in catalog.projects.first { $0.id == id } }?.isRemote ?? false
+    if let reason = ComposerSkillCompletion.unavailableReason(for: descriptor, isRemote: isRemote) {
+      return clearSkills(reason: reason, state: &state)
+    }
+    guard let agent = terminalClient.runningAgent(pane.id, kind), let launch = agent.launch else {
+      return clearSkills(reason: State.unreadableLaunchReason, state: &state)
+    }
+    let projectStart =
+      agent.workingDirectory
+      ?? (pane.workingDirectory.isEmpty ? nil : URL(fileURLWithPath: pane.workingDirectory, isDirectory: true))
+    let scope = SkillScope(pid: agent.pid, launch: launch, projectStart: projectStart)
+    state.skillLocation = descriptor.skillLocation
+    state.skillsUnavailableReason = nil
+    guard scope != state.skillsScope else { return .none }
+    state.skills = []
+    state.skillsScope = scope
+    let client = agentSkillClient
+    return .run { send in
+      await send(.skillsLoaded(client.load(launch, projectStart, nil), for: scope))
+    }
+    .cancellable(id: CancelID.skills, cancelInFlight: true)
+  }
+
+  private func clearSkills(reason: String, state: inout State) -> Effect<Action> {
+    state.skillLocation = .none
+    state.skills = []
+    state.skillsScope = nil
+    state.skillsUnavailableReason = reason
+    return .cancel(id: CancelID.skills)
   }
 
   /// Read-modify-write against the live catalog rather than a snapshot: the

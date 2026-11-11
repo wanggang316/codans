@@ -20,6 +20,41 @@ Before 1.0, a breaking change bumps the minor version. Releases are dated.
 
 ### Security
 
+## [0.12.0] - 2026-11-11
+
+### Added
+
+- **Pick skills in New Agent for local and remote projects.** Browse from
+  the Skills button or while typing. Suggestions follow the selected agent
+  and worktree, including the files a new worktree will receive.
+- **Pin worktrees from the keyboard.** Use ⌘⌥P, the Worktree menu, or the
+  Command Palette to pin or unpin the current worktree. Agents View also
+  has a button to switch its display mode.
+
+### Changed
+
+- **Project menus and Settings are easier to navigate.** New Agent and
+  Workspace Add Project share Recent and Host groups. Settings groups
+  Projects by Host; the sidebar footer opens Settings and Help.
+- **Archive and Delete Worktree have new shortcuts.** Use ⌃⌘⌫ to archive
+  and ⌃⌘⇧⌫ to delete from the main window. Interactive archive actions
+  now ask for confirmation. Refresh All Projects is in the Command Palette.
+
+### Fixed
+
+- **Git actions find your installed tools.** Fetch, push, and Git platform
+  commands now use your shell's search path, fixing missing credential
+  helpers when codans starts from the Dock or Finder.
+- **Remote sessions reconnect more reliably.** SSH drops no longer leave
+  keyboard input in the wrong mode. New remote macOS sessions can use the
+  login keychain when the host has zmx and an active desktop login.
+- **Pull requests stay current and merge safely.** New Projects fetch PRs
+  at once, merges stop when new commits arrive, and GitLab approval status
+  no longer treats an incomplete reviewer list as complete.
+- **CLI send waits for the command to run.** `codans pane send` no longer
+  completes a wait before the shell runs the submitted text, and captures
+  output reliably when a pane has just attached.
+
 ## [0.11.0] - 2026-11-09
 
 ### Changed
