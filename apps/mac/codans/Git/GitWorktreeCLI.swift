@@ -151,15 +151,28 @@ actor GitWorktreeCLI {
   /// leaf. Throws `GitCLIError.exitCode` carrying git's stderr on failure
   /// (bad URL, auth, existing non-empty dir) so callers can surface the
   /// reason verbatim.
+  ///
+  /// On failure, timeout, or cancellation the destination is removed when
+  /// this clone created it: git cleans up on SIGTERM, but a git killed after
+  /// the grace period leaves its partial checkout behind. A destination that
+  /// existed before stays.
   func clone(remoteURL: String, destinationPath: String) async throws {
     let destination = URL(fileURLWithPath: destinationPath)
     let parent = destination.deletingLastPathComponent()
+    let existedBefore = FileManager.default.fileExists(atPath: destinationPath)
     try? FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
-    _ = try await run(
-      arguments: ["clone", remoteURL, destinationPath],
-      cwd: parent.path,
-      timeout: Self.cloneTimeout
-    )
+    do {
+      _ = try await run(
+        arguments: ["clone", remoteURL, destinationPath],
+        cwd: parent.path,
+        timeout: Self.cloneTimeout
+      )
+    } catch {
+      if !existedBefore {
+        try? FileManager.default.removeItem(at: destination)
+      }
+      throw error
+    }
   }
 
   // MARK: - Private

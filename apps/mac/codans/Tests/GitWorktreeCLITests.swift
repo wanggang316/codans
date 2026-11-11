@@ -117,17 +117,88 @@ struct GitWorktreeCLITests {
   }
 
   /// A clone that hangs (here an `ext::` remote that sleeps) stops when the
-  /// caller's task is cancelled, and leaves no child process.
+  /// caller's task is cancelled, and leaves no child process and no
+  /// destination directory.
   @Test
   func cancellingAHungCloneStopsIt() async throws {
+    let home = try makeExtCloneHome()
+    defer { try? FileManager.default.removeItem(atPath: home) }
+    let destination = home + "/dest"
+    try await cancelHungClone(home: home, destination: destination)
+    #expect(!FileManager.default.fileExists(atPath: destination))
+  }
+
+  /// A destination that existed before the clone is not the clone's to remove.
+  @Test
+  func cancellingAHungCloneKeepsAPreExistingDestination() async throws {
+    let home = try makeExtCloneHome()
+    defer { try? FileManager.default.removeItem(atPath: home) }
+    let destination = home + "/dest"
+    try FileManager.default.createDirectory(atPath: destination, withIntermediateDirectories: true)
+    try await cancelHungClone(home: home, destination: destination)
+    var isDirectory: ObjCBool = false
+    #expect(FileManager.default.fileExists(atPath: destination, isDirectory: &isDirectory))
+    #expect(isDirectory.boolValue)
+  }
+
+  /// git removes its partial clone on SIGTERM; a git that does not stop
+  /// within the grace period is killed and cannot. A stand-in git that
+  /// creates the destination and ignores SIGTERM models that case.
+  @Test
+  func cancellingACloneThatIgnoresSIGTERMRemovesTheDestinationItCreated() async throws {
+    let home = try makeExtCloneHome()
+    defer { try? FileManager.default.removeItem(atPath: home) }
+    let destination = home + "/dest"
+    try await cancelStubbornClone(home: home, destination: destination)
+    #expect(!FileManager.default.fileExists(atPath: destination))
+  }
+
+  @Test
+  func cancellingACloneThatIgnoresSIGTERMKeepsAPreExistingDestination() async throws {
+    let home = try makeExtCloneHome()
+    defer { try? FileManager.default.removeItem(atPath: home) }
+    let destination = home + "/dest"
+    try FileManager.default.createDirectory(atPath: destination, withIntermediateDirectories: true)
+    try await cancelStubbornClone(home: home, destination: destination)
+    #expect(FileManager.default.fileExists(atPath: destination))
+  }
+
+  private func cancelStubbornClone(home: String, destination: String) async throws {
+    let seconds = "4\(Int.random(in: 10_000...99_999)).5"
+    let fakeGit = home + "/fake-git"
+    try "#!/bin/sh\nmkdir -p \"$3\"\ntouch \"$3/partial\"\ntrap '' TERM\nsleep \(seconds)\n".write(
+      toFile: fakeGit, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeGit)
+    let cli = GitWorktreeCLI(
+      gitExecutable: URL(fileURLWithPath: fakeGit),
+      parentEnvironment: ["HOME": home, "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
+    let task = Task {
+      try await cli.clone(remoteURL: "http://example.invalid/r.git", destinationPath: destination)
+    }
+    for _ in 0..<200 where pgrep("sleep \(seconds)").isEmpty {
+      try await Task.sleep(for: .milliseconds(50))
+    }
+    #expect(!pgrep("sleep \(seconds)").isEmpty)
+    task.cancel()
+    await #expect(throws: GitCLIError.timedOut) { try await task.value }
+    #expect(pgrep("sleep \(seconds)").isEmpty)
+  }
+
+  private func makeExtCloneHome() throws -> String {
     let home = NSTemporaryDirectory() + "codans-clone-home-\(UUID().uuidString)"
     try FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
     try "[protocol \"ext\"]\n\tallow = always\n".write(
       toFile: home + "/.gitconfig", atomically: true, encoding: .utf8)
+    return home
+  }
+
+  /// Starts a clone from an `ext::` remote that sleeps, cancels it once the
+  /// remote runs, and checks that it stops quickly and leaves no process.
+  private func cancelHungClone(home: String, destination: String) async throws {
     let seconds = "4\(Int.random(in: 10_000...99_999)).5"
     let cli = GitWorktreeCLI(parentEnvironment: ["HOME": home, "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
     let task = Task {
-      try await cli.clone(remoteURL: "ext::sh -c sleep% \(seconds)", destinationPath: home + "/dest")
+      try await cli.clone(remoteURL: "ext::sh -c sleep% \(seconds)", destinationPath: destination)
     }
     for _ in 0..<200 where pgrep("sleep \(seconds)").isEmpty {
       try await Task.sleep(for: .milliseconds(50))
