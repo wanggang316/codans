@@ -130,32 +130,42 @@ struct SSHSharedMasterGuardTests {
     // a process-group leader and `terminate()` signals that whole group, so
     // `lockf` and the creating `ssh` stop with the probe.
     //
-    // The timeout runs from launch. On a busy machine the line can still be
-    // on its way to the creator when a short timeout ends, and that run shows
-    // nothing. Retry it with a longer timeout until the creator has started.
-    for timeout in [1, 2, 4, 8, 16] {
+    // The timeout runs from launch, and when it ends first the runner stops
+    // the line before the creator exists. How long the line takes to start
+    // the creator depends on the load on the machine, so the wait for the
+    // creator has its own deadline. A run that timed out before the creator
+    // started shows nothing; it runs again with a longer timeout.
+    let startDeadline = ContinuousClock.now + .seconds(30)
+    var timeout = Duration.seconds(1)
+    while ContinuousClock.now < startDeadline {
       let state = try Self.makeState()
       try Self.mark(state, "hang")
       let script = Self.line(host: host, state: state, quiet: true)
+      let run = Task { [timeout] in
+        await FoundationCommandRunner().run(
+          executable: URL(fileURLWithPath: "/bin/sh"),
+          arguments: ["-c", script],
+          env: [:],
+          cwd: state,
+          timeout: timeout,
+          maxOutputBytes: 1024
+        )
+      }
 
-      let outcome = await FoundationCommandRunner().run(
-        executable: URL(fileURLWithPath: "/bin/sh"),
-        arguments: ["-c", script],
-        env: [:],
-        cwd: state,
-        timeout: .seconds(timeout),
-        maxOutputBytes: 1024
-      )
-
+      let creator = await Self.creatorPID(state, until: startDeadline, while: run)
+      let outcome = await run.value
       guard case .timedOut = outcome else {
         Issue.record("expected a timeout, got \(outcome)")
         return
       }
-      guard let creator = Self.creatorPID(state) else { continue }
+      guard let creator else {
+        timeout *= 2
+        continue
+      }
       #expect(await Self.eventually { kill(creator, 0) != 0 })
       return
     }
-    Issue.record("the creator did not start before any timeout")
+    Issue.record("the creator did not start within 30 seconds")
   }
 
   @Test
@@ -283,8 +293,30 @@ struct SSHSharedMasterGuardTests {
     return (statuses, errors)
   }
 
-  /// The pid the hanging creator wrote, or `nil` when it did not start.
-  private static func creatorPID(_ state: URL) -> pid_t? {
+  /// The pid the hanging creator wrote, polled until `deadline` while `run`
+  /// is in progress. `nil` when the run ended or the deadline passed first.
+  private static func creatorPID(
+    _ state: URL, until deadline: ContinuousClock.Instant, while run: Task<CommandOutcome, Never>
+  ) async -> pid_t? {
+    await withTaskGroup(of: pid_t?.self) { group in
+      group.addTask {
+        _ = await run.value
+        // The creator can write its pid just before the runner stops it.
+        return readCreatorPID(state)
+      }
+      group.addTask {
+        while ContinuousClock.now < deadline, !Task.isCancelled {
+          if let pid = readCreatorPID(state) { return pid }
+          try? await Task.sleep(for: .milliseconds(20))
+        }
+        return readCreatorPID(state)
+      }
+      defer { group.cancelAll() }
+      return await group.next() ?? nil
+    }
+  }
+
+  private static func readCreatorPID(_ state: URL) -> pid_t? {
     let url = state.appending(path: "creator.pid")
     guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
     return pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines))
