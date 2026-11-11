@@ -19,8 +19,10 @@ struct CloneRepoFeature {
     /// remote-URL edits stop auto-deriving the path out from under them.
     var localPathEditedManually: Bool = false
     var isCloning: Bool = false
-    /// Clone failure or validation message, rendered in the sheet header.
+    /// Clone failure or validation message, rendered in the sheet footer.
     var errorMessage: String?
+    /// git's own output under a classified failure's `errorMessage`.
+    var errorDetail: String?
   }
 
   enum Action: Equatable {
@@ -29,7 +31,7 @@ struct CloneRepoFeature {
     case browseTapped
     case browseFolderPicked(URL?)
     case cloneButtonTapped
-    case cloneFailed(String)
+    case cloneFailed(CloneFailure)
     case cloneSucceeded(localPath: String)
     case cancelButtonTapped
     case delegate(Delegate)
@@ -42,6 +44,8 @@ struct CloneRepoFeature {
       case cloned(localPath: String)
     }
   }
+
+  private nonisolated enum CancelID: Sendable { case clone }
 
   @Dependency(GitWorktreeCLI.self) private var gitCLI
   @Dependency(FolderPickerClient.self) private var folderPicker
@@ -81,6 +85,7 @@ struct CloneRepoFeature {
       case .cloneButtonTapped:
         let remote = state.remoteURLDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         let dest = state.localPathDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        state.errorDetail = nil
         guard !remote.isEmpty else {
           state.errorMessage = "Enter a repository URL."
           return .none
@@ -101,13 +106,15 @@ struct CloneRepoFeature {
             try await cli.clone(remoteURL: remote, destinationPath: expanded)
             await send(.cloneSucceeded(localPath: expanded))
           } catch {
-            await send(.cloneFailed(Self.message(for: error)))
+            await send(.cloneFailed(Self.failure(for: error, remoteURL: remote)))
           }
         }
+        .cancellable(id: CancelID.clone, cancelInFlight: true)
 
-      case .cloneFailed(let message):
+      case .cloneFailed(let failure):
         state.isCloning = false
-        state.errorMessage = message
+        state.errorMessage = failure.summary
+        state.errorDetail = failure.detail
         return .none
 
       case .cloneSucceeded(let localPath):
@@ -115,7 +122,12 @@ struct CloneRepoFeature {
         return .send(.delegate(.cloned(localPath: localPath)))
 
       case .cancelButtonTapped:
-        return .send(.delegate(.dismissed))
+        // Cancel during a clone stops git (the runner ends its process
+        // group) and keeps the sheet open so the user can retry; cancelling
+        // the effect drops the clone's late success or failure.
+        guard state.isCloning else { return .send(.delegate(.dismissed)) }
+        state.isCloning = false
+        return .cancel(id: CancelID.clone)
 
       case .delegate:
         return .none
@@ -144,22 +156,22 @@ extension CloneRepoFeature {
       .path(percentEncoded: false)
   }
 
-  /// Maps a clone error to a user-facing string, preferring git's own
-  /// stderr so the reason (auth, unreachable host, existing dir) is exact.
-  static func message(for error: Error) -> String {
+  /// Maps a clone error to what the sheet shows: a next step for a known
+  /// authentication failure, otherwise git's own stderr so the reason
+  /// (unreachable host, existing dir) is exact.
+  static func failure(for error: Error, remoteURL: String) -> CloneFailure {
     guard let cliError = error as? GitCLIError else {
-      return "Clone failed: \(error.localizedDescription)"
+      return CloneFailure(summary: "Clone failed: \(error.localizedDescription)")
     }
     switch cliError {
     case .exitCode(_, let stderr):
-      let trimmed = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-      return trimmed.isEmpty ? "git clone failed." : trimmed
+      return CloneFailure(stderr: stderr, remoteURL: remoteURL)
     case .executableNotFound:
-      return "Could not find the git executable."
+      return CloneFailure(summary: "Could not find the git executable.")
     case .invalidUTF8:
-      return "git produced output that could not be decoded."
+      return CloneFailure(summary: "git produced output that could not be decoded.")
     case .timedOut:
-      return "git clone did not finish in time."
+      return CloneFailure(summary: "git clone did not finish in time.")
     }
   }
 }
