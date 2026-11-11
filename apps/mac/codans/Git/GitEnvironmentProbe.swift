@@ -47,15 +47,17 @@ actor GitEnvironmentProbe {
   }
 
   private func probe() async -> GitEnvironmentStatus {
+    let arguments = ["--version"]
     let outcome = await runner.run(
       executable: gitExecutable,
-      arguments: ["--version"],
+      arguments: arguments,
       env: GitProcessEnv.build(),
       // `--version` needs no repository; the home directory is the one path guaranteed to
       // exist and to be readable by the user running the app.
       cwd: FileManager.default.homeDirectoryForCurrentUser,
       timeout: .seconds(5),
-      maxOutputBytes: 4096
+      maxOutputBytes: 4096,
+      launch: GitLaunch.mode(for: arguments)
     )
     return GitEnvironmentStatus.classify(outcome)
   }

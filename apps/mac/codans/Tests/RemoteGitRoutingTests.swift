@@ -38,6 +38,8 @@ struct RemoteGitRoutingTests {
       #expect(call.cwd.path != "/srv/app")
       // Fail fast instead of hanging on an auth prompt.
       #expect(call.arguments.contains("BatchMode=yes"))
+      // The remote login shell sets the environment; the local ssh starts directly.
+      #expect(call.launch == .direct)
     }
     // The remote command runs bare `git` under the login shell (PATH-resolved,
     // so a Homebrew-only git still works), cd'd into the remote repo.
@@ -63,6 +65,8 @@ struct RemoteGitRoutingTests {
     let calls = await runner.calls
     #expect(calls.allSatisfy { $0.executable.path == "/usr/bin/git" })
     #expect(calls.allSatisfy { $0.cwd.path == "/tmp" })
+    // A status refresh is local: direct, no rc cost (retry only on a missing command).
+    #expect(calls.allSatisfy { $0.launch == .directThenLoginShell })
   }
 
   @Test

@@ -388,7 +388,8 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
     let cmd = GlabCommand.authStatus()
     let outcome = await runner.run(
       executable: exec, arguments: cmd.arguments, env: Self.makeEnv(host: nil),
-      cwd: Self.homeDirectory, timeout: timeout, maxOutputBytes: maxOutputBytes)
+      cwd: Self.homeDirectory, timeout: timeout, maxOutputBytes: maxOutputBytes,
+      launch: .loginShell)
     switch outcome {
     case .exited(let code, let stdout, let stderr, _) where cmd.expectedExitCodes.contains(code):
       let hosts: [GitLabJSONParsers.AuthHost]
@@ -425,7 +426,8 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
     let cap = maxOutputBytes ?? self.maxOutputBytes
     let outcome = await runner.run(
       executable: exec, arguments: command.arguments, env: Self.makeEnv(host: host),
-      cwd: Self.homeDirectory, timeout: timeout, maxOutputBytes: cap)
+      cwd: Self.homeDirectory, timeout: timeout, maxOutputBytes: cap,
+      launch: .loginShell)
     switch outcome {
     case .exited(let code, let stdout, let stderr, let overflow):
       if overflow { throw GitPlatformError.oversizeResponse(bytes: cap) }

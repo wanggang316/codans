@@ -158,8 +158,9 @@ final class ComposerSkillCompletion {
   // MARK: - Rules
 
   /// Why a composer for `agent` offers no skills, or `nil` when it does.
-  /// Skills are not read on a remote host, and an agent without a verified
-  /// call spelling gets none (ADR 0010).
+  /// `isRemote` is a target whose skills the composer cannot read (the
+  /// Command Queue cannot read an agent process on another host), and an
+  /// agent without a verified call spelling gets none (ADR 0010).
   nonisolated static func unavailableReason(for agent: AgentDescriptor, isRemote: Bool) -> String? {
     if isRemote { return "Skill suggestions are not available for remote projects" }
     guard agent.skillLocation.supportsCompletion else {

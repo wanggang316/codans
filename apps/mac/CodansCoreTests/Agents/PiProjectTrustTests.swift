@@ -150,6 +150,25 @@ struct PiProjectTrustTests {
     #expect(names("--theme 'dark'").isEmpty)
   }
 
+  /// The user-only list (a new worktree whose files are unknown) follows
+  /// the same flags: Pi with `--no-skills` loads no user skill either.
+  @Test
+  func noSkillsFlagOffersNoPiUserSkills() throws {
+    let home = root.appending(path: "home")
+    try write("---\nname: mine\n---\n", to: home.appending(path: ".agents/skills/mine/SKILL.md"))
+    func names(_ arguments: String) -> [String] {
+      SkillScanner.scanSync(
+        SkillLocationResolver.userDirectories(
+          for: AgentProfile(kind: .pi, extraArguments: arguments), userHome: home,
+          stateDirectory: root.appending(path: "state"))
+      ).map(\.name)
+    }
+    #expect(names("") == ["mine"])
+    #expect(names("-ns").isEmpty)
+    #expect(names("--no-skills").isEmpty)
+    #expect(names("--no-skills 2>/dev/null").isEmpty)
+  }
+
   @Test
   func symlinkedStartMatchesTheRealPath() throws {
     try trust([(project, true)])

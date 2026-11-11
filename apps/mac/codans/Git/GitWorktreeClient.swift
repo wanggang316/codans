@@ -477,7 +477,10 @@ nonisolated final class CreateWorktreeProcessBox: @unchecked Sendable {
     let captured = process
     lock.unlock()
     guard let captured, captured.isRunning else { return }
-    captured.terminate()
+    // `Process` starts the child in its own process group; signal the group
+    // so the login shell's rc commands and git's helpers stop as well.
+    let pid = captured.processIdentifier
+    kill(getpgid(pid) == pid ? -pid : pid, SIGTERM)
   }
 }
 
@@ -507,13 +510,12 @@ nonisolated enum GitWorktreeShell {
   static let defaultTimeout: Duration = .seconds(60)
   static let maxOutputBytes = 4 * 1024 * 1024
 
-  /// The process environment with credential prompts disabled, for git
-  /// commands that talk to a remote: a missing credential must fail the
-  /// command, not hang it on a prompt nobody can answer.
+  /// The environment of every git and `wt` command here
+  /// (`GitProcessEnv.inheriting`): no parent `GIT_*` key, `LC_ALL` and
+  /// `GIT_TERMINAL_PROMPT=0` forced, so a missing credential fails the
+  /// command instead of hanging it on a prompt nobody can answer.
   static var nonInteractiveEnvironment: [String: String] {
-    var env = ProcessInfo.processInfo.environment
-    env["GIT_TERMINAL_PROMPT"] = "0"
-    return env
+    GitProcessEnv.inheriting()
   }
 
   /// One-shot invocation returning captured stdout/stderr.
@@ -523,11 +525,17 @@ nonisolated enum GitWorktreeShell {
     await runner.run(
       executable: executable,
       arguments: arguments,
-      env: ProcessInfo.processInfo.environment,
+      env: nonInteractiveEnvironment,
       cwd: cwd,
       timeout: defaultTimeout,
-      maxOutputBytes: maxOutputBytes
+      maxOutputBytes: maxOutputBytes,
+      launch: launch(executable: executable, arguments: arguments)
     )
+  }
+
+  /// git by `GitLaunch`; the bundled `wt` direct with the login-shell retry.
+  static func launch(executable: URL, arguments: [String]) -> CommandLaunch {
+    executable == gitURL ? GitLaunch.mode(for: arguments) : .directThenLoginShell
   }
 
   /// Decodes stdout bytes to UTF-8, returning `""` on decode failure so
@@ -584,27 +592,65 @@ nonisolated enum GitWorktreeShell {
   /// for external cancellation (see `createWorktreeStream`'s
   /// `continuation.onTermination` wiring). Default
   /// is a no-op so existing callers stay source-compatible.
+  ///
+  /// `launch` picks direct or login-shell start (`CommandLaunch`), with
+  /// `environment` as the command's environment. A retry streams the lines
+  /// of both attempts and calls `onSpawn` for each process.
   static func runStream(
     executable: URL,
     arguments: [String],
     cwd: URL,
-    environment: [String: String] = ProcessInfo.processInfo.environment,
+    environment: [String: String],
+    launch mode: CommandLaunch,
+    loginShell: LoginShell? = nil,
     splitOnCarriageReturn: Bool = false,
     onSpawn: @Sendable (Process) -> Void = { _ in },
     onStdout: @escaping @Sendable (String) -> Void,
     onStderr: @escaping @Sendable (String) -> Void
-  ) async -> (exitCode: Int32, stdoutLast: String, stderrCollected: String, spawnFailedReason: String?) {
+  ) async -> StreamResult {
     // Same guard as `FoundationCommandRunner`: a non-file cwd makes
     // `Process` raise an Objective-C exception.
     guard cwd.isFileURL else {
       return (-1, "", "", FoundationCommandRunner.nonLocalDirectoryReason(cwd))
     }
-    return await withCheckedContinuation { cont in
+    var result: StreamResult = (-1, "", "", "no launch")
+    for viaLoginShell in mode.attemptsViaLoginShell {
+      let launch: ProcessLaunch
+      do {
+        launch = try ProcessLaunch.make(
+          executable: executable, arguments: arguments, env: environment, cwd: cwd,
+          loginShell: viaLoginShell ? (loginShell ?? .current()) : nil)
+      } catch {
+        return (-1, "", "", error.reason)
+      }
+      result = await runStreamOnce(
+        launch, splitOnCarriageReturn: splitOnCarriageReturn, onSpawn: onSpawn,
+        onStdout: onStdout, onStderr: onStderr)
+      guard result.spawnFailedReason == nil,
+        LoginShellLaunch.reportsMissingCommand(exitCode: result.exitCode, stderr: result.stderrCollected),
+        !Task.isCancelled
+      else { break }
+    }
+    return result
+  }
+
+  typealias StreamResult = (
+    exitCode: Int32, stdoutLast: String, stderrCollected: String, spawnFailedReason: String?
+  )
+
+  private static func runStreamOnce(
+    _ launch: ProcessLaunch,
+    splitOnCarriageReturn: Bool,
+    onSpawn: @Sendable (Process) -> Void,
+    onStdout: @escaping @Sendable (String) -> Void,
+    onStderr: @escaping @Sendable (String) -> Void
+  ) async -> StreamResult {
+    await withCheckedContinuation { cont in
       let process = Process()
-      process.executableURL = executable
-      process.arguments = arguments
-      process.currentDirectoryURL = cwd
-      process.environment = environment
+      process.executableURL = launch.executable
+      process.arguments = launch.arguments
+      process.currentDirectoryURL = launch.currentDirectory
+      process.environment = launch.environment
       process.standardInput = FileHandle.nullDevice
 
       let stdoutPipe = Pipe.closeOnExec()
@@ -860,13 +906,15 @@ nonisolated extension GitWorktreeClient {
       },
 
       lsRemoteHeads: { remoteURL in
+        let arguments = ["ls-remote", "--symref", "--", remoteURL, "HEAD", "refs/heads/*"]
         let outcome = await GitWorktreeShell.runner.run(
           executable: GitWorktreeShell.gitURL,
-          arguments: ["ls-remote", "--symref", "--", remoteURL, "HEAD", "refs/heads/*"],
+          arguments: arguments,
           env: GitWorktreeShell.nonInteractiveEnvironment,
           cwd: URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true),
           timeout: .seconds(30),
-          maxOutputBytes: GitWorktreeShell.maxOutputBytes
+          maxOutputBytes: GitWorktreeShell.maxOutputBytes,
+          launch: GitLaunch.mode(for: arguments)
         )
         let stdout = try extractStdout(outcome, command: "git ls-remote \(remoteURL)")
         return RemoteHeads.parse(lsRemoteOutput: stdout)
@@ -1031,6 +1079,10 @@ nonisolated extension GitWorktreeClient {
       executable: URL(fileURLWithPath: "/bin/bash"),
       arguments: ["-lc", command],
       cwd: directory,
+      // The user's script, not git: it keeps the app's environment.
+      environment: ProcessInfo.processInfo.environment,
+      // A user script that starts its own login bash.
+      launch: .direct,
       onSpawn: onSpawn,
       onStdout: onLine,
       onStderr: onLine
@@ -1141,6 +1193,7 @@ nonisolated extension GitWorktreeClient {
           arguments: arguments,
           cwd: parent,
           environment: GitWorktreeShell.nonInteractiveEnvironment,
+          launch: GitLaunch.mode(for: arguments),
           splitOnCarriageReturn: true,
           onSpawn: { process in processBox.set(process) },
           onStdout: { line in continuation.yield(line) },
@@ -1221,6 +1274,8 @@ nonisolated extension GitWorktreeClient {
             executable: wt,
             arguments: args,
             cwd: spec.repoRoot,
+            environment: GitWorktreeShell.nonInteractiveEnvironment,
+            launch: GitWorktreeShell.launch(executable: wt, arguments: args),
             onSpawn: { process in
               processBox.set(process)
               onCreateWorktreeSpawn?(process)

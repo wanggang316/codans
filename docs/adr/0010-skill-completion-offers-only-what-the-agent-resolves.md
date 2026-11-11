@@ -34,8 +34,10 @@ and call:
 4. An agent kind gets completion only after a probe skill test on a real
    CLI shows that its Invocation Style works in the first prompt. Until then
    its Invocation Style is `none` and the dialog offers no completion.
-5. A remote project gets no completion until skills can be read on the
-   remote host.
+5. In a remote project the same rules apply on the remote host: codans
+   reads the host's files over the project's SSH connection, resolved
+   against the host's `HOME`. A read that fails gives no completion, and
+   the Skills button shows why.
 
 ## Reasons
 

@@ -198,6 +198,116 @@ struct RemoteSurfaceCommandTests {
   }
 
   @Test
+  func connectScriptSpawnsHostSessionBeforeAttaching() throws {
+    let script = RemoteSurfaceCommand.connectScript(
+      hostSession: "codans-x", paneUUID: paneID.raw.uuidString, remotePath: "/srv/app",
+      hostPersistence: true
+    )
+    let spawn = try #require(script.range(of: "launchctl submit"))
+    let attach = try #require(script.range(of: "zmx attach codans-x"))
+    #expect(spawn.lowerBound < attach.lowerBound)
+  }
+
+  @Test
+  func guiSessionSpawnCreatesTheSessionThroughLaunchdWhenKeychainIsLocked() throws {
+    let run = try Self.runGUISessionSpawn(uname: "Darwin", keychainLocked: true)
+    #expect(run.log.contains("submit -l com.codans.zmx-spawn.codans-x --"))
+    // Through a terminal from `script`, whose input never ends.
+    #expect(run.log.contains("tail -f /dev/null\n"))
+    #expect(run.log.contains("script -q /dev/null\n"))
+    #expect(run.log.contains("zmx attach codans-x /bin/sh -l -c cd -- /srv/app"))
+    #expect(run.log.contains("TMPDIR=/tmp/codans-test-tmp"))
+    #expect(run.log.hasSuffix("remove com.codans.zmx-spawn.codans-x\n"))
+    #expect(run.sessions == "codans-x\n")
+  }
+
+  @Test
+  func guiSessionSpawnIsSkippedWhenLaunchdIsNotNeeded() throws {
+    // Unlocked keychain, non-macOS host, no console login, or a session that
+    // already exists: the attach that follows handles it, launchd never runs
+    // the daemon.
+    for (uname, locked, guiDomain, existing) in [
+      ("Darwin", false, true, false), ("Linux", true, true, false),
+      ("Darwin", true, false, false), ("Darwin", true, true, true),
+    ] {
+      let run = try Self.runGUISessionSpawn(
+        uname: uname, keychainLocked: locked, guiDomain: guiDomain, sessionExists: existing)
+      #expect(
+        !run.log.contains("submit"),
+        "uname=\(uname) locked=\(locked) guiDomain=\(guiDomain) existing=\(existing)")
+    }
+  }
+
+  @Test
+  func guiSessionSpawnFallsThroughWhenSubmitFails() throws {
+    let run = try Self.runGUISessionSpawn(uname: "Darwin", keychainLocked: true, submitFails: true)
+    #expect(run.log.contains("submit"))
+    #expect(run.sessions.isEmpty)
+    #expect(run.exitStatus == 0)
+  }
+
+  /// Run `guiSessionSpawn` under `/bin/sh` with fake `uname` / `security` /
+  /// `launchctl` / `tail` / `script` / `zmx`. The fake `launchctl submit`
+  /// runs its command at once, as launchd would in the GUI session; the fake
+  /// `zmx attach` records the session so `zmx list --short` reports it.
+  private static func runGUISessionSpawn(
+    uname: String, keychainLocked: Bool, guiDomain: Bool = true, sessionExists: Bool = false,
+    submitFails: Bool = false
+  ) throws -> (log: String, sessions: String, exitStatus: Int32) {
+    let dir = FileManager.default.temporaryDirectory
+      .appendingPathComponent("codans-gui-spawn-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let log = dir.appendingPathComponent("log")
+    let sessions = dir.appendingPathComponent("sessions")
+    try (sessionExists ? "codans-x\n" : "").write(to: sessions, atomically: true, encoding: .utf8)
+    let tools = [
+      "uname": "echo \(uname)",
+      "security": "exit \(keychainLocked ? 1 : 0)",
+      "launchctl": """
+      echo "$*" >> '\(log.path)'
+      [ "$1" = print ] && exit \(guiDomain ? 0 : 113)
+      [ "$1" = submit ] || exit 0
+      \(submitFails ? "exit 1" : "")
+      shift 4; "$@"
+      """,
+      "tail": "echo \"tail $*\" >> '\(log.path)'",
+      "script": """
+      echo "script $1 $2" >> '\(log.path)'
+      shift 2; "$@"
+      """,
+      "zmx": """
+      case "$1" in
+      list) cat '\(sessions.path)' ;;
+      attach) echo "zmx $*" >> '\(log.path)'; echo "$2" >> '\(sessions.path)' ;;
+      esac
+      """,
+    ]
+    for (name, body) in tools {
+      let tool = dir.appendingPathComponent(name)
+      try "#!/bin/sh\n\(body)\n".write(to: tool, atomically: true, encoding: .utf8)
+      try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tool.path)
+    }
+    let proc = Process()
+    proc.executableURL = URL(fileURLWithPath: "/bin/sh")
+    proc.arguments = [
+      "-c",
+      RemoteSurfaceCommand.guiSessionSpawn(
+        hostSession: "codans-x", sessionCommand: "\"$SHELL\" -l -c 'cd -- /srv/app'"),
+    ]
+    proc.environment = [
+      "PATH": dir.path + ":/usr/bin:/bin", "SHELL": "/bin/sh", "TMPDIR": "/tmp/codans-test-tmp",
+    ]
+    try proc.run()
+    proc.waitUntilExit()
+    return (
+      (try? String(contentsOf: log, encoding: .utf8)) ?? "",
+      try String(contentsOf: sessions, encoding: .utf8),
+      proc.terminationStatus
+    )
+  }
+
+  @Test
   func everyRemoteScriptRunsTheTerminfoFallbackFirst() {
     for persistence in [true, false] {
       for script in [

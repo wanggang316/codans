@@ -15,8 +15,54 @@ nonisolated protocol CommandRunner: Sendable {
     env: [String: String],
     cwd: URL,
     timeout: Duration,
-    maxOutputBytes: Int
+    maxOutputBytes: Int,
+    launch: CommandLaunch
   ) async -> CommandOutcome
+}
+
+extension CommandRunner {
+  /// Starts `executable` directly (`.direct`).
+  func run(
+    executable: URL,
+    arguments: [String],
+    env: [String: String],
+    cwd: URL,
+    timeout: Duration,
+    maxOutputBytes: Int
+  ) async -> CommandOutcome {
+    await run(
+      executable: executable, arguments: arguments, env: env, cwd: cwd,
+      timeout: timeout, maxOutputBytes: maxOutputBytes, launch: .direct)
+  }
+}
+
+/// How the runner starts a command. See `docs/design-docs/environment.md`.
+nonisolated enum CommandLaunch: Equatable, Sendable {
+  /// Start the executable with exactly `env`. For `ssh` (the remote login
+  /// shell sets the environment), bundled internal binaries, and commands
+  /// that start their own shell.
+  case direct
+  /// Start it through the user's login shell (`LoginShellLaunch`), so the
+  /// command and what it starts get the login `PATH`. Each run pays for the
+  /// user's rc. For git that reaches a remote (it may start credential, LFS,
+  /// or ssh helpers), `gh`, and `glab`.
+  case loginShell
+  /// Start it directly; run it once more through the login shell only when
+  /// the direct run reports a missing command (`LoginShellLaunch.reportsMissingCommand`).
+  /// For local git and the bundled `wt`, which run often and rarely need the
+  /// user's `PATH`.
+  case directThenLoginShell
+
+  /// One entry per attempt, in order: `true` when that attempt goes through
+  /// the login shell. A later attempt runs only when the one before it
+  /// reported a missing command.
+  var attemptsViaLoginShell: [Bool] {
+    switch self {
+    case .direct: [false]
+    case .loginShell: [true]
+    case .directThenLoginShell: [false, true]
+    }
+  }
 }
 
 nonisolated enum CommandOutcome: Equatable, Sendable {
@@ -81,31 +127,49 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
   /// How long to keep reading output after the child exits.
   var eofGrace: Duration = PipeCollector.defaultGrace
 
+  /// The shell for `.loginShell` launches; `nil` reads the user's login shell
+  /// on every run.
+  var loginShell: LoginShell?
+
   func run(
     executable: URL,
     arguments: [String],
     env: [String: String],
     cwd: URL,
     timeout: Duration,
-    maxOutputBytes: Int
+    maxOutputBytes: Int,
+    launch mode: CommandLaunch
   ) async -> CommandOutcome {
     // `Process.currentDirectoryURL` raises an Objective-C exception for a
     // non-file URL (a Remote Project's `codans-host://` location). Return an
     // error instead: a location that reaches this runner unresolved is a
     // routing bug, not a reason to stop the app.
     guard cwd.isFileURL else { return .spawnFailed(reason: Self.nonLocalDirectoryReason(cwd)) }
+    var outcome = CommandOutcome.spawnFailed(reason: "no launch")
+    for viaLoginShell in mode.attemptsViaLoginShell {
+      let launch: ProcessLaunch
+      do {
+        launch = try ProcessLaunch.make(
+          executable: executable, arguments: arguments, env: env, cwd: cwd,
+          loginShell: viaLoginShell ? (loginShell ?? .current()) : nil)
+      } catch {
+        return .spawnFailed(reason: error.reason)
+      }
+      outcome = await runGated(launch, timeout: timeout, maxOutputBytes: maxOutputBytes)
+      guard case .exited(let code, _, let stderr, _) = outcome,
+        LoginShellLaunch.reportsMissingCommand(exitCode: code, stderr: String(bytes: stderr, encoding: .utf8) ?? ""),
+        !Task.isCancelled
+      else { break }
+    }
+    return outcome
+  }
+
+  private func runGated(_ launch: ProcessLaunch, timeout: Duration, maxOutputBytes: Int) async -> CommandOutcome {
     await Self.gate.acquire()
     // `defer` can't await, so release on a detached task — this still runs if
     // the surrounding task is cancelled or `launch` returns early.
     defer { Task { await Self.gate.release() } }
-    return await launch(
-      executable: executable,
-      arguments: arguments,
-      env: env,
-      cwd: cwd,
-      timeout: timeout,
-      maxOutputBytes: maxOutputBytes
-    )
+    return await run(launch, timeout: timeout, maxOutputBytes: maxOutputBytes)
   }
 
   /// The `.spawnFailed` reason for a working directory that is not on This Mac.
@@ -113,19 +177,12 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
     "working directory is not a local path: \(cwd.absoluteString)"
   }
 
-  private func launch(
-    executable: URL,
-    arguments: [String],
-    env: [String: String],
-    cwd: URL,
-    timeout: Duration,
-    maxOutputBytes: Int
-  ) async -> CommandOutcome {
+  private func run(_ launch: ProcessLaunch, timeout: Duration, maxOutputBytes: Int) async -> CommandOutcome {
     let process = Process()
-    process.executableURL = executable
-    process.arguments = arguments
-    process.currentDirectoryURL = cwd
-    process.environment = env
+    process.executableURL = launch.executable
+    process.arguments = launch.arguments
+    process.currentDirectoryURL = launch.currentDirectory
+    process.environment = launch.environment
     process.standardInput = FileHandle.nullDevice
 
     let stdoutPipe = Pipe.closeOnExec()
@@ -157,7 +214,7 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
       _ = await stdoutCollector.finish(grace: grace)
       _ = await stderrCollector.finish(grace: grace)
       if error.domain == NSPOSIXErrorDomain, error.code == Int(ENOENT) {
-        return .spawnFailed(reason: "binary not found: \(executable.path)")
+        return .spawnFailed(reason: "binary not found: \(launch.executable.path)")
       }
       return .spawnFailed(reason: error.localizedDescription)
     }
@@ -201,18 +258,27 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
       }
       defer { group.cancelAll() }
       guard let first = await group.next() else { return .exited(Int32(-1)) }
-      switch first {
-      case .exited(let code):
-        return .exited(code)
-      case .timedOut:
-        process.terminate()
-        try? await Task.sleep(for: .seconds(1))
-        if process.isRunning {
-          kill(process.processIdentifier, SIGKILL)
-        }
-        return .timedOut
-      }
+      // A cancelled caller ends both child tasks at once, and the exit stream
+      // can win with a placeholder code while the child still runs.
+      if case .exited(let code) = first, !Task.isCancelled { return .exited(code) }
+      await terminate(process)
+      return .timedOut
     }
+  }
+
+  /// SIGTERM, a grace second, then SIGKILL. `Process` starts each child in its
+  /// own process group, so the signals also reach what it started: a login
+  /// shell's rc commands, git's credential helper or `ssh`.
+  private static func terminate(_ process: Process) async {
+    let pid = process.processIdentifier
+    let target = getpgid(pid) == pid ? -pid : pid
+    kill(target, SIGTERM)
+    // Detached: a cancelled caller's `Task.sleep` returns at once, and the
+    // grace must still pass.
+    await Task.detached {
+      try? await Task.sleep(for: .seconds(1))
+    }.value
+    kill(target, SIGKILL)
   }
 }
 
@@ -226,6 +292,7 @@ actor RecordingCommandRunner: CommandRunner {
     var cwd: URL
     var timeout: Duration
     var maxOutputBytes: Int
+    var launch: CommandLaunch
   }
 
   private var _calls: [Recorded] = []
@@ -243,11 +310,12 @@ actor RecordingCommandRunner: CommandRunner {
     env: [String: String],
     cwd: URL,
     timeout: Duration,
-    maxOutputBytes: Int
+    maxOutputBytes: Int,
+    launch: CommandLaunch
   ) async -> CommandOutcome {
     await record(
       executable: executable, arguments: arguments, env: env,
-      cwd: cwd, timeout: timeout, maxOutputBytes: maxOutputBytes
+      cwd: cwd, timeout: timeout, maxOutputBytes: maxOutputBytes, launch: launch
     )
   }
 
@@ -257,7 +325,8 @@ actor RecordingCommandRunner: CommandRunner {
     env: [String: String],
     cwd: URL,
     timeout: Duration,
-    maxOutputBytes: Int
+    maxOutputBytes: Int,
+    launch: CommandLaunch
   ) -> CommandOutcome {
     _calls.append(
       Recorded(
@@ -266,7 +335,8 @@ actor RecordingCommandRunner: CommandRunner {
         env: env,
         cwd: cwd,
         timeout: timeout,
-        maxOutputBytes: maxOutputBytes
+        maxOutputBytes: maxOutputBytes,
+        launch: launch
       ))
     if let outcome = outcomes.first {
       if outcomes.count > 1 { outcomes.removeFirst() }
