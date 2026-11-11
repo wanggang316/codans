@@ -24,9 +24,9 @@ Before 1.0, a breaking change bumps the minor version. Releases are dated.
 
 ### Added
 
-- **Pick skills in New Agent.** For supported local agents, browse skills
-  from the Skills button or while typing. The list follows the selected
-  agent, project, and worktree, with descriptions beside each skill.
+- **Pick skills in New Agent for local and remote projects.** Browse from
+  the Skills button or while typing. Suggestions follow the selected agent
+  and worktree, including the files a new worktree will receive.
 - **Pin worktrees from the keyboard.** Use ⌘⌥P, the Worktree menu, or the
   Command Palette to pin or unpin the current worktree. Agents View also
   has a button to switch its display mode.
