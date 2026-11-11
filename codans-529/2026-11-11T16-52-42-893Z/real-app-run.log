@@ -1,0 +1,14 @@
+self-verify: instance pid 82635 on /tmp/cdv-sv-501-d4f76178.sock
+== S1 credentials failure
+      AXStaticText = "git has no valid credentials for 127.0.0.1:18929. Set up a g" @579,552 497x42
+        AXStaticText = "git has no valid credentials for 127.0.0.1:18929. Set up a g" @579,552 497x42
+dest exists: no
+== S2 cancel large clone
+during: git procs [86134 /Applications/Xcode.app/Contents/Developer/usr/bin/git clone https://github.com/torvalds/linux.git /tmp/codans-529-sv/clones3/linux;] dest exists: yes
+    AXStaticText = "Cancelling…" @593,617 74x16
+after: git procs [] dest exists: no
+== S3 successful clone
+sheet open: 0
+checkout: master README
+project: Hello-World /tmp/codans-529-sv/clones3/Hello-World
+self-verify: cleanup done
