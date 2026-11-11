@@ -3,7 +3,9 @@ import SwiftUI
 
 /// SwiftUI sheet for `CloneRepoFeature`, on the shared `FormSheet` frame:
 /// a remote-URL row and a local-path row with a folder picker, the clone
-/// error in the section footer, and "Cloning…" in the bottom bar.
+/// error in the section footer (git's raw output under a classified
+/// message), and "Cloning…" in the bottom bar. Cancel stays enabled while
+/// cloning: it stops the clone.
 struct CloneRepoSheet: View {
   @Bindable var store: StoreOf<CloneRepoFeature>
 
@@ -12,7 +14,6 @@ struct CloneRepoSheet: View {
       "Clone Repository",
       primaryTitle: "Clone",
       canSubmit: canClone,
-      canCancel: !store.isCloning,
       onCancel: { store.send(.cancelButtonTapped) },
       onSubmit: { store.send(.cloneButtonTapped) },
       content: {
@@ -44,10 +45,17 @@ struct CloneRepoSheet: View {
           }
         } footer: {
           if let error = store.errorMessage {
-            Text(error)
-              .foregroundStyle(.red)
-              .textSelection(.enabled)
-              .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 4) {
+              Text(error)
+                .foregroundStyle(.red)
+              if let detail = store.errorDetail {
+                Text(detail)
+                  .font(.caption.monospaced())
+                  .foregroundStyle(.secondary)
+              }
+            }
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
           }
         }
         .disabled(store.isCloning)
