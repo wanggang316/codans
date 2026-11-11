@@ -10,6 +10,9 @@ nonisolated enum ClaudePluginRegistry {
   static let managedSettings = URL(
     fileURLWithPath: "/Library/Application Support/ClaudeCode/managed-settings.json")
 
+  /// Managed settings on Linux, for a remote host.
+  static let linuxManagedSettings = URL(fileURLWithPath: "/etc/claude-code/managed-settings.json")
+
   /// What the profile's extra arguments do to the settings Claude Code loads.
   enum LaunchSettings: Equatable {
     /// Plain arguments without a settings flag.
@@ -102,20 +105,19 @@ nonisolated enum ClaudePluginRegistry {
   /// `--settings` file `launchSettings`.
   static func skillDirectories(
     configRoot: URL, home: URL, projectStart: URL?, launchSettings: URL? = nil,
-    managedSettings: URL = managedSettings
+    managedSettings: URL = managedSettings, fileSystem: any SkillFileSystem = LocalSkillFileSystem()
   ) -> [SkillDirectory] {
     let registry = configRoot.appending(path: "plugins/installed_plugins.json", directoryHint: .notDirectory)
-    let fileManager = FileManager.default
-    guard let registryData = fileManager.contents(atPath: registry.path(percentEncoded: false)) else {
+    guard let registryData = fileSystem.contents(of: registry) else {
       return []
     }
     let settings = settingsFiles(
       configRoot: configRoot, projectStart: projectStart, launchSettings: launchSettings,
       managedSettings: managedSettings
     )
-    .compactMap { fileManager.contents(atPath: $0.path(percentEncoded: false)) }
+    .compactMap { fileSystem.contents(of: $0) }
     return enabledPlugins(registry: registryData, settings: settings, home: home).flatMap { plugin in
-      skillDirectories(of: plugin).map { url, layout in
+      skillDirectories(of: plugin, fileSystem: fileSystem).map { url, layout in
         SkillDirectory(url: url, source: .plugin, namespace: plugin.name, layout: layout)
       }
     }
@@ -126,29 +128,30 @@ nonisolated enum ClaudePluginRegistry {
   /// field, also `.claude/skills/`, which some plugins use. A plugin that
   /// declares its paths gets only those, because Claude Code then loads
   /// only the declared skills of `.claude/skills/` (ADR 0010).
-  static func skillDirectories(of plugin: Plugin) -> [(URL, SkillDirectory.Layout)] {
+  static func skillDirectories(
+    of plugin: Plugin, fileSystem: any SkillFileSystem = LocalSkillFileSystem()
+  ) -> [(URL, SkillDirectory.Layout)] {
     let root = plugin.installPath
     let defaults = root.appending(path: "skills", directoryHint: .isDirectory)
-    guard let declared = declaredSkillPaths(installPath: root) else {
+    guard let declared = declaredSkillPaths(installPath: root, fileSystem: fileSystem) else {
       return [
         (defaults, .skillFolders),
         (root.appending(path: ".claude/skills", directoryHint: .isDirectory), .skillFolders),
       ]
     }
-    let fileManager = FileManager.default
     return [(defaults, .skillFolders)]
       + declared.map { url in
         let file = url.appending(path: "SKILL.md", directoryHint: .notDirectory)
-        return (url, fileManager.fileExists(atPath: file.path(percentEncoded: false)) ? .skill : .skillFolders)
+        return (url, fileSystem.fileExists(at: file) ? .skill : .skillFolders)
       }
   }
 
   /// The `skills` paths of the plugin manifest, resolved in the install
   /// path, or `nil` when the manifest declares none or cannot be read.
   /// A path that leaves the install path is dropped.
-  private static func declaredSkillPaths(installPath: URL) -> [URL]? {
+  private static func declaredSkillPaths(installPath: URL, fileSystem: any SkillFileSystem) -> [URL]? {
     let manifest = installPath.appending(path: ".claude-plugin/plugin.json", directoryHint: .notDirectory)
-    guard let data = FileManager.default.contents(atPath: manifest.path(percentEncoded: false)),
+    guard let data = fileSystem.contents(of: manifest),
       let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     else { return nil }
     let paths: [String]

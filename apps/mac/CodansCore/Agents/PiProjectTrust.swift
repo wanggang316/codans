@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 
 /// Whether Pi will trust the project it starts in. Pi loads project skills
@@ -17,15 +16,18 @@ nonisolated enum PiProjectTrust {
   /// when `start` stands in for a new worktree whose own path is not known
   /// yet, so no saved decision can be matched to it.
   static func trusts(
-    agentDirectory: URL, extraArguments: String, start: URL, startExists: Bool
+    agentDirectory: URL, extraArguments: String, start: URL, startExists: Bool,
+    fileSystem: any SkillFileSystem = LocalSkillFileSystem()
   ) -> Bool {
     guard let launch = PiLaunchArguments(extraArguments) else { return false }
     if let approve = launch.approve { return approve }
     if launch.loadsExtensionFile { return false }
-    guard let settings = readSettings(agentDirectory) else { return false }
-    if !launch.noExtensions, hasUserExtensions(agentDirectory, settings: settings) { return false }
+    guard let settings = readSettings(agentDirectory, fileSystem: fileSystem) else { return false }
+    if !launch.noExtensions, hasUserExtensions(agentDirectory, settings: settings, fileSystem: fileSystem) {
+      return false
+    }
     guard startExists else { return false }
-    switch savedDecision(agentDirectory, start: start) {
+    switch savedDecision(agentDirectory, start: start, fileSystem: fileSystem) {
     case .trusted: return true
     case .untrusted, .unreadable: return false
     case .none: return settings["defaultProjectTrust"] as? String == "always"
@@ -34,23 +36,25 @@ nonisolated enum PiProjectTrust {
 
   /// `<agent dir>/settings.json` as an object, `[:]` when it is missing,
   /// `nil` when it cannot be read.
-  private static func readSettings(_ agentDirectory: URL) -> [String: Any]? {
+  private static func readSettings(_ agentDirectory: URL, fileSystem: any SkillFileSystem) -> [String: Any]? {
     let file = agentDirectory.appending(path: "settings.json", directoryHint: .notDirectory)
-    guard let data = FileManager.default.contents(atPath: file.path(percentEncoded: false)) else {
-      return FileManager.default.fileExists(atPath: file.path(percentEncoded: false)) ? nil : [:]
+    guard let data = fileSystem.contents(of: file) else {
+      return fileSystem.fileExists(at: file) ? nil : [:]
     }
     return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
   }
 
   /// A user extension or package can decide trust, and codans cannot run
   /// it to see how.
-  private static func hasUserExtensions(_ agentDirectory: URL, settings: [String: Any]) -> Bool {
+  private static func hasUserExtensions(
+    _ agentDirectory: URL, settings: [String: Any], fileSystem: any SkillFileSystem
+  ) -> Bool {
     for key in ["extensions", "packages"] {
       if let list = settings[key] as? [Any], !list.isEmpty { return true }
       if settings[key] != nil, !(settings[key] is [Any]), !(settings[key] is NSNull) { return true }
     }
     let directory = agentDirectory.appending(path: "extensions", directoryHint: .isDirectory)
-    let children = (try? FileManager.default.contentsOfDirectory(atPath: directory.path(percentEncoded: false))) ?? []
+    let children = fileSystem.contentsOfDirectory(atPath: directory.path(percentEncoded: false)) ?? []
     return children.contains { !$0.hasPrefix(".") }
   }
 
@@ -61,11 +65,12 @@ nonisolated enum PiProjectTrust {
   /// The decision saved for the canonical `start` or its nearest parent
   /// that has one. Pi stops with an error on a store that is not an object
   /// of `true`, `false`, or `null`.
-  private static func savedDecision(_ agentDirectory: URL, start: URL) -> SavedDecision {
+  private static func savedDecision(
+    _ agentDirectory: URL, start: URL, fileSystem: any SkillFileSystem
+  ) -> SavedDecision {
     let file = agentDirectory.appending(path: "trust.json", directoryHint: .notDirectory)
-    let path = file.path(percentEncoded: false)
-    guard let data = FileManager.default.contents(atPath: path) else {
-      return FileManager.default.fileExists(atPath: path) ? .unreadable : .none
+    guard let data = fileSystem.contents(of: file) else {
+      return fileSystem.fileExists(at: file) ? .unreadable : .none
     }
     guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return .unreadable }
     var decisions: [String: Bool] = [:]
@@ -76,7 +81,7 @@ nonisolated enum PiProjectTrust {
       }
       decisions[normalized(key)] = number.boolValue
     }
-    var current = canonicalPath(start)
+    var current = canonicalPath(start, fileSystem: fileSystem)
     while true {
       if let decision = decisions[current] { return decision ? .trusted : .untrusted }
       let parent = (current as NSString).deletingLastPathComponent
@@ -87,11 +92,9 @@ nonisolated enum PiProjectTrust {
 
   /// The real path, as Pi's `realpathSync`, or the standardized path when
   /// it does not exist.
-  private static func canonicalPath(_ url: URL) -> String {
+  private static func canonicalPath(_ url: URL, fileSystem: any SkillFileSystem) -> String {
     let path = url.standardizedFileURL.path(percentEncoded: false)
-    guard let resolved = realpath(path, nil) else { return normalized(path) }
-    defer { free(resolved) }
-    return String(cString: resolved)
+    return fileSystem.realPath(path) ?? normalized(path)
   }
 
   /// `path` without a trailing `/`. `NSString.standardizingPath` is not

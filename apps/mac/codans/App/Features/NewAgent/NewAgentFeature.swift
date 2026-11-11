@@ -34,6 +34,12 @@ struct NewAgentFeature {
     /// and the project files are read from a view of the new worktree
     /// (ADR 0010).
     var newWorktree: NewWorktreeSource?
+    /// The project is on another host. `projectStart` is then a path on
+    /// that host, and the skills are read over SSH (`RemoteSkillReader`).
+    var isRemote = false
+    /// The connection of a remote project, `nil` when its Host record is
+    /// missing: then no skills are read (never this Mac's files).
+    var host: RemoteHost?
   }
 
   /// The sidebar's Add Project menu, offered while no project exists.
@@ -88,6 +94,9 @@ struct NewAgentFeature {
     /// the directory the agent starts in decide which skills exist, so the
     /// skills of another scope are never shown.
     var skillsScope: SkillScope?
+    /// Why the skills of `skillsScope` could not be read: a remote host that
+    /// did not answer. The Skills button is then disabled with this reason.
+    var skillsFailure: String?
     var submitError: String?
     /// Draft to restore on appear. The worktree part waits until the form's
     /// options load: the base ref, the branch-name checks, and the branch
@@ -130,9 +139,9 @@ struct NewAgentFeature {
     }
 
     /// How the prompt calls the selected agent's skills. `none` without an
-    /// agent and in a remote project (ADR 0010).
+    /// agent (ADR 0010).
     var skillLocation: SkillLocation {
-      guard let agent = selectedAgent, selectedProject?.isRemote == false else { return .none }
+      guard let agent = selectedAgent, selectedProject != nil else { return .none }
       return agent.descriptor.skillLocation
     }
 
@@ -141,13 +150,10 @@ struct NewAgentFeature {
     var skillsUnavailableReason: String? {
       guard selectedProject != nil else { return "Add a project to see its skills" }
       guard let agent = selectedAgent else { return "Choose an agent to see its skills" }
-      if selectedProject?.isRemote == true {
-        return "Skill suggestions are not available for remote projects"
-      }
       guard agent.descriptor.skillLocation.supportsCompletion else {
         return "Skill suggestions are not available for \(agent.descriptor.displayName)"
       }
-      return nil
+      return skillsFailure
     }
 
     /// The branch-name field and the worktree options apply.
@@ -201,6 +207,8 @@ struct NewAgentFeature {
     /// (`nil` appends to the end).
     case filesSelected([URL], selection: Range<Int>?)
     case skillsLoaded([AgentSkillEntry], for: SkillScope)
+    /// The skills of a remote project could not be read, with the reason.
+    case skillsFailed(String, for: SkillScope)
     /// The Skills button: put the call prefix at the prompt's caret or
     /// selection (UTF-16 offsets, `nil` for the end), so the list opens.
     case skillsButtonTapped(selection: Range<Int>?)
@@ -290,6 +298,16 @@ struct NewAgentFeature {
         }
         state.skills = skills
         state.skillsScope = scope
+        state.skillsFailure = nil
+        return .none
+
+      case .skillsFailed(let reason, let scope):
+        guard state.skillLocation.supportsCompletion, skillScope(state: state) == scope else {
+          return .none
+        }
+        state.skills = []
+        state.skillsScope = scope
+        state.skillsFailure = reason
         return .none
 
       case .skillsButtonTapped(let selection):
@@ -380,17 +398,34 @@ struct NewAgentFeature {
     guard state.skillLocation.supportsCompletion, let scope = skillScope(state: state) else {
       state.skills = []
       state.skillsScope = nil
+      state.skillsFailure = nil
       return .cancel(id: CancelID.skills)
     }
     if state.skillsScope != scope {
       state.skills = []
       state.skillsScope = nil
+      state.skillsFailure = nil
     }
     let client = agentSkillClient
     return .run { send in
-      await send(
-        .skillsLoaded(
-          client.load(scope.profile, scope.projectStart, scope.newWorktree), for: scope))
+      guard scope.isRemote else {
+        await send(
+          .skillsLoaded(
+            client.load(scope.profile, scope.projectStart, scope.newWorktree), for: scope))
+        return
+      }
+      guard let host = scope.host else {
+        await send(.skillsFailed("The host of this remote project is not available", for: scope))
+        return
+      }
+      // The dialog stays usable while the host answers; the list fills in
+      // when the read ends.
+      let result = await client.loadRemote(
+        scope.profile, host, scope.projectStart?.path(percentEncoded: false), scope.newWorktree)
+      switch result {
+      case .success(let skills): await send(.skillsLoaded(skills, for: scope))
+      case .failure(let error): await send(.skillsFailed(error.reason, for: scope))
+      }
     }
     .cancellable(id: CancelID.skills, cancelInFlight: true)
   }
@@ -422,7 +457,9 @@ struct NewAgentFeature {
       projectStart: project.flatMap {
         SkillLocationResolver.projectStartDirectory(in: $0, branch: branch)
       },
-      newWorktree: newWorktree)
+      newWorktree: newWorktree,
+      isRemote: project.map { !$0.isOnThisMac } ?? false,
+      host: project?.remoteHost)
   }
 
   /// Puts back what `onAppear` can set at once. The form is seeded fresh, so

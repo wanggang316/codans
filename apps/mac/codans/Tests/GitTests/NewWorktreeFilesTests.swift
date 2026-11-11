@@ -174,6 +174,33 @@ struct NewWorktreeFilesTests {
 
   /// A tracked settings file is in every new worktree. Here the local file
   /// turns the tracked plugin off, which counts only when it is copied.
+  /// `export-ignore` changes what `git archive` writes, not what
+  /// `git worktree add` checks out.
+  @Test
+  func exportIgnoredTrackedFilesAreInTheView() async throws {
+    try await fixture(local: "{}")
+    try write(".claude export-ignore\n", to: repo.appending(path: ".gitattributes"))
+    try await commit("export-ignore", [".gitattributes"])
+    #expect(await names(copyIgnored: false, copyUntracked: false) == ["shared", "tracked:run"])
+  }
+
+  /// A new worktree takes its attributes from the ref, not from the main
+  /// checkout: a `.gitattributes` only there must not filter the view.
+  @Test
+  func attributesOfTheMainCheckoutDoNotFilterTheView() async throws {
+    try await fixture(local: "{}")
+    try await git(["config", "filter.upper.smudge", "tr a-z A-Z"])
+    try write("*.md filter=upper\n", to: repo.appending(path: ".gitattributes"))
+    let view = try #require(
+      await NewWorktreeFiles.makeView(
+        repoRoot: repo, ref: "HEAD", copyIgnored: false, copyUntracked: false,
+        paths: SkillLocationResolver.projectFilePaths(for: AgentProfile(kind: .claudeCode))))
+    defer { try? FileManager.default.removeItem(at: view) }
+    let text = try String(
+      contentsOf: view.appending(path: ".claude/skills/shared/SKILL.md"), encoding: .utf8)
+    #expect(text == "---\nname: shared\n---\n")
+  }
+
   @Test
   func trackedSettingsAreReadWhateverTheCopyOptions() async throws {
     try await fixture(local: #"{"enabledPlugins": {"tracked@market": false}}"#)

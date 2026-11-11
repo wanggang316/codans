@@ -43,13 +43,15 @@ public nonisolated enum SkillScanner {
   /// `precedence` comes last. The result is sorted by name.
   @concurrent
   public static func scan(
-    _ directories: [SkillDirectory], precedence: [AgentSkillSource] = []
+    _ directories: [SkillDirectory], precedence: [AgentSkillSource] = [],
+    fileSystem: any SkillFileSystem = LocalSkillFileSystem()
   ) async -> [AgentSkillEntry] {
-    scanSync(directories, precedence: precedence)
+    scanSync(directories, precedence: precedence, fileSystem: fileSystem)
   }
 
-  static func scanSync(
-    _ directories: [SkillDirectory], precedence: [AgentSkillSource] = []
+  public static func scanSync(
+    _ directories: [SkillDirectory], precedence: [AgentSkillSource] = [],
+    fileSystem: any SkillFileSystem = LocalSkillFileSystem()
   ) -> [AgentSkillEntry] {
     let rank = { (source: AgentSkillSource) in precedence.firstIndex(of: source) ?? precedence.count }
     let ordered = directories.enumerated()
@@ -58,7 +60,7 @@ public nonisolated enum SkillScanner {
     var seen = Set<String>()
     var entries: [AgentSkillEntry] = []
     for directory in ordered {
-      for entry in skills(in: directory) where seen.insert(entry.name).inserted {
+      for entry in skills(in: directory, fileSystem: fileSystem) where seen.insert(entry.name).inserted {
         entries.append(entry)
       }
     }
@@ -66,24 +68,22 @@ public nonisolated enum SkillScanner {
   }
 
   private static func skills(
-    in directory: SkillDirectory
+    in directory: SkillDirectory, fileSystem: any SkillFileSystem
   ) -> [AgentSkillEntry] {
-    let fileManager = FileManager.default
     // Skill folders are often symlinks into a skill source tree, so the
     // listing resolves each child rather than trusting its own type.
     let folders: [URL]
     switch directory.layout {
     case .skill: folders = [directory.url]
     case .skillFolders:
-      guard
-        let children = try? fileManager.contentsOfDirectory(
-          at: directory.url, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
+      guard let names = fileSystem.contentsOfDirectory(atPath: directory.url.path(percentEncoded: false))
       else { return [] }
-      folders = children
+      folders = names.filter { !$0.hasPrefix(".") }.sorted()
+        .map { directory.url.appending(path: $0, directoryHint: .isDirectory) }
     }
     return folders.compactMap { folder in
       let file = folder.appending(path: "SKILL.md", directoryHint: .notDirectory)
-      guard let data = fileManager.contents(atPath: file.path(percentEncoded: false)) else {
+      guard let data = fileSystem.contents(of: file) else {
         return nil
       }
       let folderName = folder.lastPathComponent
