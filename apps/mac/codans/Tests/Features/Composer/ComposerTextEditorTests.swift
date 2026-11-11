@@ -13,6 +13,7 @@ struct ComposerTextEditorTests {
     #expect(!harness.selection.hasMarkedText)
 
     harness.compose("a")
+    await harness.settle()
     #expect(harness.selection.hasMarkedText)
 
     harness.textView.insertText("啊", replacementRange: Self.noReplacement)

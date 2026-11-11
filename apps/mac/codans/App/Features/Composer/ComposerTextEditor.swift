@@ -201,10 +201,10 @@ private final class MarkedTextProbeView: NSView {
 
   @objc private func textInputChanged(_ notification: Notification) {
     guard let textView = notification.object as? NSTextView, isBehind(textView) else { return }
-    onChange?(textView.hasMarkedText())
-    // The text view can post its last notification before it clears the
-    // marked range (a cancelled composition), so read the state again
-    // after the current event.
+    // Publish after the input event finishes. A synchronous observation
+    // update can make SwiftUI write the old binding back before TextEditor
+    // commits the IME candidate, which erases the confirmed text. Waiting
+    // also lets cancellation clear the marked range before we read it.
     DispatchQueue.main.async { [weak self, weak textView] in
       guard let self, let textView else { return }
       self.onChange?(textView.hasMarkedText())
