@@ -98,6 +98,29 @@ struct ComposerSkillCompletionKeyTests {
   private static let escapeKey: (UInt16, String) = (53, "\u{1b}")
   private static let downKey: (UInt16, String) = (125, String(UnicodeScalar(NSDownArrowFunctionKey)!))
 
+  @Test(arguments: ["", "fix "])
+  func compositionSurvivesViewUpdatesAndCommitsChineseText(prefix: String) throws {
+    let textView = try show()
+    defer { window.close() }
+    type(prefix, in: textView)
+    let noReplacement = NSRange(location: NSNotFound, length: 0)
+    for marked in ["n", "ni", "nihao"] {
+      textView.setMarkedText(
+        marked, selectedRange: NSRange(location: marked.utf16.count, length: 0),
+        replacementRange: noReplacement)
+      settle()
+      #expect(textView.hasMarkedText())
+      #expect(textView.string == prefix + marked)
+      #expect(owner.text == prefix)
+    }
+    textView.insertText("你好", replacementRange: noReplacement)
+    settle()
+    #expect(owner.text == prefix + "你好")
+    #expect(!textView.hasMarkedText())
+    #expect(owner.sent == 0)
+    #expect(owner.closed == 0)
+  }
+
   @Test
   func openListTakesReturnAndEscapeBeforeTheOwner() throws {
     let textView = try show()
