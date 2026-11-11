@@ -193,13 +193,17 @@ struct LoginShellRunnerIntegrationTests {
     try sandbox.write("#!/bin/sh\necho start\ncodans-test-helper\n", to: "bin/fake-wt")
     let script = sandbox.home.appendingPathComponent("bin/fake-wt")
     try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
-    let result = await GitWorktreeShell.runStream(
-      executable: script, arguments: [], cwd: sandbox.work, environment: sandbox.gitEnv,
-      launch: GitWorktreeShell.launch(executable: script, arguments: []), loginShell: shellCase.shell,
-      onStdout: { _ in }, onStderr: { _ in })
-    #expect(result.spawnFailedReason == nil)
-    #expect(result.exitCode == 0)
-    #expect(result.stdoutLast == "helper-ran")
+    let lines = LockedLines()
+    let result = await runner(shellCase.shell).runStream(
+      executable: script, arguments: [], env: sandbox.gitEnv, cwd: sandbox.work, timeout: .seconds(30),
+      launch: GitWorktreeShell.launch(executable: script, arguments: []), onLine: { lines.append($0) })
+    guard case .exited(0, let lastStdoutLine, _) = result else {
+      Issue.record("expected exit 0, got \(result)")
+      return
+    }
+    #expect(lastStdoutLine == "helper-ran")
+    // Both attempts stream: the direct one stops at the missing tool.
+    #expect(lines.all.filter { $0 == "start" }.count == 2)
     #expect(rcRuns(sandbox) == 1)
   }
 
