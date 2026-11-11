@@ -45,6 +45,33 @@ struct ForegroundJobReaderTests {
   }
 
   @Test
+  func procargs2ReadsTheEnvironmentAfterTheArguments() throws {
+    var buffer = Self.procargsBuffer(execPath: "/usr/local/bin/claude", argv: ["claude", "--x"])
+    for entry in ["HOME=/srv/home", "EMPTY=", "A=b=c", "HOME=/second", "NOEQUALS"] {
+      buffer.append(contentsOf: entry.utf8)
+      buffer.append(0)
+    }
+    // The environment ends at an empty string; what follows is not part of it.
+    buffer.append(0)
+    buffer.append(contentsOf: "executable_path=/x".utf8)
+    buffer.append(0)
+    let result = try #require(ForegroundJobReader.procargs2(buffer))
+    #expect(result.argv == ["claude", "--x"])
+    // The first of two entries wins, as `getenv` reads it.
+    #expect(result.environment == ["HOME": "/srv/home", "EMPTY": "", "A": "b=c"])
+  }
+
+  @Test
+  func processEnvironmentAndDirectoryReadCurrentProcess() {
+    let environment = ForegroundJobReader.processEnvironment(pid: getpid())
+    #expect(environment?["HOME"] == ProcessInfo.processInfo.environment["HOME"])
+    let directory = ForegroundJobReader.processWorkingDirectory(pid: getpid())
+    #expect(
+      directory.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }
+        == URL(fileURLWithPath: FileManager.default.currentDirectoryPath).resolvingSymlinksInPath().path)
+  }
+
+  @Test
   func processGroupPIDsRejectsInvalidGroups() {
     #expect(ForegroundJobReader.processGroupPIDs(0).isEmpty)
     #expect(ForegroundJobReader.processGroupPIDs(-1).isEmpty)

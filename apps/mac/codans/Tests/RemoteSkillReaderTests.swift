@@ -17,7 +17,7 @@ private actor LocalHostRunner: CommandRunner {
 
   nonisolated func run(
     executable: URL, arguments: [String], env: [String: String], cwd: URL, timeout: Duration,
-    maxOutputBytes: Int
+    maxOutputBytes: Int, launch: CommandLaunch
   ) async -> CommandOutcome {
     await count()
     // The last ssh argument is the command the host's login shell runs.
@@ -28,7 +28,9 @@ private actor LocalHostRunner: CommandRunner {
         "HOME": home.path(percentEncoded: false), "SHELL": "/bin/sh", "PATH": "/usr/bin:/bin",
         "TMPDIR": home.deletingLastPathComponent().appending(path: "tmp").path(percentEncoded: false),
       ],
-      cwd: home, timeout: timeout, maxOutputBytes: maxOutputBytes)
+      // `/bin/sh` with a fixture environment stands in for the host's
+      // login shell, so it starts with exactly that environment.
+      cwd: home, timeout: timeout, maxOutputBytes: maxOutputBytes, launch: .direct)
   }
 
   private func count() { calls += 1 }

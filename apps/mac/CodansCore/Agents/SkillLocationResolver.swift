@@ -57,6 +57,23 @@ public nonisolated enum SkillLocationResolver {
     fileSystem: any SkillFileSystem = LocalSkillFileSystem(),
     isRepositoryRoot: ((URL) -> Bool)? = nil
   ) -> [SkillDirectory] {
+    pluginDirectories(
+      for: SkillLaunch(profile: profile), projectStart: projectStart, projectStartExists: projectStartExists,
+      userHome: userHome, stateDirectory: stateDirectory, managedSettings: managedSettings,
+      fileSystem: fileSystem, isRepositoryRoot: isRepositoryRoot)
+  }
+
+  static func pluginDirectories(
+    for launch: SkillLaunch,
+    projectStart: URL?,
+    projectStartExists: Bool = true,
+    userHome: URL,
+    stateDirectory: URL,
+    managedSettings: URL = ClaudePluginRegistry.managedSettings,
+    fileSystem: any SkillFileSystem = LocalSkillFileSystem(),
+    isRepositoryRoot: ((URL) -> Bool)? = nil
+  ) -> [SkillDirectory] {
+    let profile = launch.profile
     let isRepositoryRoot = isRepositoryRoot ?? fileSystem.hasGitEntry
     let location = profile.descriptor.skillLocation
     guard location.supportsCompletion, let plugins = location.plugins,
@@ -67,14 +84,14 @@ public nonisolated enum SkillLocationResolver {
       // A relative `--settings` file outside a new worktree is somewhere
       // codans cannot place: the worktree's own directory is not known yet.
       if !projectStartExists,
-        let relative = ClaudePluginRegistry.relativeLaunchSettingsPath(extraArguments: profile.extraArguments),
+        let relative = ClaudePluginRegistry.relativeLaunchSettingsPath(arguments: launch.arguments),
         pathInside(relative) == nil
       {
         return []
       }
       let launchSettings: URL?
       let flags = ClaudePluginRegistry.launchSettings(
-        extraArguments: profile.extraArguments, projectStart: projectStart, userHome: userHome)
+        arguments: launch.arguments, projectStart: projectStart, userHome: userHome)
       switch flags {
       case .none: launchSettings = nil
       case .file(let url): launchSettings = url
@@ -87,7 +104,7 @@ public nonisolated enum SkillLocationResolver {
     case .codex:
       let searched = projectStart.map { searchedDirectories(from: $0, isRepositoryRoot: isRepositoryRoot) } ?? []
       return CodexPluginRegistry.skillDirectories(
-        configRoot: root, extraArguments: profile.extraArguments, projectDirectories: searched,
+        configRoot: root, arguments: launch.arguments, projectDirectories: searched,
         fileSystem: fileSystem)
     }
   }
@@ -114,8 +131,19 @@ public nonisolated enum SkillLocationResolver {
     userHome: URL = FileManager.default.homeDirectoryForCurrentUser,
     stateDirectory: URL = AppDirectories.stateDirectory()
   ) -> [SkillDirectory] {
+    userDirectories(for: SkillLaunch(profile: profile), userHome: userHome, stateDirectory: stateDirectory)
+  }
+
+  /// `userDirectories(for:userHome:stateDirectory:)` for a launch whose
+  /// arguments are known as words, such as an agent that runs now.
+  public static func userDirectories(
+    for launch: SkillLaunch,
+    userHome: URL = FileManager.default.homeDirectoryForCurrentUser,
+    stateDirectory: URL = AppDirectories.stateDirectory()
+  ) -> [SkillDirectory] {
+    let profile = launch.profile
     let location = profile.descriptor.skillLocation
-    guard location.supportsCompletion, loadsSkills(profile) else { return [] }
+    guard location.supportsCompletion, loadsSkills(launch) else { return [] }
     let home = effectiveHome(for: profile, userHome: userHome, stateDirectory: stateDirectory)
     return location.userDirectories.compactMap { relative in
       var base = home
@@ -150,21 +178,40 @@ public nonisolated enum SkillLocationResolver {
     fileSystem: any SkillFileSystem = LocalSkillFileSystem(),
     isRepositoryRoot: ((URL) -> Bool)? = nil
   ) -> [SkillDirectory] {
+    directories(
+      for: SkillLaunch(profile: profile), projectStart: projectStart, projectStartExists: projectStartExists,
+      userHome: userHome, stateDirectory: stateDirectory, managedSettings: managedSettings,
+      fileSystem: fileSystem, isRepositoryRoot: isRepositoryRoot)
+  }
+
+  /// `directories(for:projectStart:...)` for a launch whose arguments are
+  /// known as words, such as an agent that runs now.
+  public static func directories(
+    for launch: SkillLaunch,
+    projectStart: URL?,
+    projectStartExists: Bool = true,
+    userHome: URL = FileManager.default.homeDirectoryForCurrentUser,
+    stateDirectory: URL = AppDirectories.stateDirectory(),
+    managedSettings: URL? = nil,
+    fileSystem: any SkillFileSystem = LocalSkillFileSystem(),
+    isRepositoryRoot: ((URL) -> Bool)? = nil
+  ) -> [SkillDirectory] {
+    let profile = launch.profile
     let isRepositoryRoot = isRepositoryRoot ?? fileSystem.hasGitEntry
     let managedSettings = managedSettings ?? ClaudePluginRegistry.managedSettings
-    guard loadsSkills(profile) else { return [] }
+    guard loadsSkills(launch) else { return [] }
     let project: [SkillDirectory] =
       projectStart.map { start in
         guard
           trustsProject(
-            profile, start: start, startExists: projectStartExists, userHome: userHome,
+            launch, start: start, startExists: projectStartExists, userHome: userHome,
             stateDirectory: stateDirectory, fileSystem: fileSystem)
         else { return [] }
         return projectDirectories(for: profile, startDirectory: start, isRepositoryRoot: isRepositoryRoot)
       } ?? []
-    return project + userDirectories(for: profile, userHome: userHome, stateDirectory: stateDirectory)
+    return project + userDirectories(for: launch, userHome: userHome, stateDirectory: stateDirectory)
       + pluginDirectories(
-        for: profile, projectStart: projectStart, projectStartExists: projectStartExists, userHome: userHome,
+        for: launch, projectStart: projectStart, projectStartExists: projectStartExists, userHome: userHome,
         stateDirectory: stateDirectory, managedSettings: managedSettings, fileSystem: fileSystem,
         isRepositoryRoot: isRepositoryRoot)
   }
@@ -173,11 +220,11 @@ public nonisolated enum SkillLocationResolver {
   /// `--no-skills` loads none and expands no `/skill:name` call. Pi
   /// arguments that are not plain words can hide that flag from codans
   /// (`--no-skills 2>/dev/null`), so they give no skills (ADR 0010).
-  static func loadsSkills(_ profile: AgentProfile) -> Bool {
-    switch profile.descriptor.skillLocation.projectTrust {
+  static func loadsSkills(_ launch: SkillLaunch) -> Bool {
+    switch launch.profile.descriptor.skillLocation.projectTrust {
     case nil: return true
     case .pi:
-      guard let launch = PiLaunchArguments(profile.extraArguments) else { return false }
+      guard let launch = PiLaunchArguments(words: launch.arguments) else { return false }
       return !launch.noSkills
     }
   }
@@ -185,9 +232,10 @@ public nonisolated enum SkillLocationResolver {
   /// `true` when the agent of `profile` reads project skills in `start`.
   /// `startExists` is `false` when `start` stands in for a new worktree.
   static func trustsProject(
-    _ profile: AgentProfile, start: URL, startExists: Bool, userHome: URL, stateDirectory: URL,
+    _ launch: SkillLaunch, start: URL, startExists: Bool, userHome: URL, stateDirectory: URL,
     fileSystem: any SkillFileSystem = LocalSkillFileSystem()
   ) -> Bool {
+    let profile = launch.profile
     switch profile.descriptor.skillLocation.projectTrust {
     case nil: return true
     case .pi:
@@ -196,7 +244,7 @@ public nonisolated enum SkillLocationResolver {
           for: profile, userHome: userHome, stateDirectory: stateDirectory)
       else { return false }
       return PiProjectTrust.trusts(
-        agentDirectory: agentDirectory, extraArguments: profile.extraArguments, start: start,
+        agentDirectory: agentDirectory, arguments: launch.arguments, start: start,
         startExists: startExists, fileSystem: fileSystem)
     }
   }

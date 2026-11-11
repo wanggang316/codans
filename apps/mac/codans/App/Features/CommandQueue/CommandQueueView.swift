@@ -4,6 +4,8 @@ import SwiftUI
 
 /// Sheet-hosted command composer. Queued commands appear in the pane overlay.
 /// Return submits; Shift-Return inserts a line break; Escape closes the sheet.
+/// While the skill list is open, Return and Tab insert the highlighted skill
+/// and Escape closes only the list.
 struct CommandQueueView: View {
   @Bindable var store: StoreOf<CommandQueueFeature>
   /// Sent when Escape lands in the composer. Dismissal is "parent nils the
@@ -14,6 +16,7 @@ struct CommandQueueView: View {
   @State private var showsScheduleEditor = false
   @State private var showsFilePicker = false
   @State private var draftSelection = ComposerSelection()
+  @State private var skillCompletion = ComposerSkillCompletion()
 
   private static let width: CGFloat = 560
   private static let editorHeight: CGFloat = 110
@@ -34,7 +37,16 @@ struct CommandQueueView: View {
       .scrollBounceBehavior(.basedOnSize)
     }
     .frame(width: Self.width)
-    .onAppear { draftFocused = true }
+    .onAppear {
+      draftFocused = true
+      store.send(.onAppear)
+    }
+    .onChange(of: store.skillLocation, initial: true) { _, location in
+      skillCompletion.location = location
+    }
+    .onChange(of: store.skills, initial: true) { _, skills in
+      skillCompletion.skills = skills
+    }
     .onExitCommand(perform: onDismiss)
     .composerFilePicker(isPresented: $showsFilePicker) { urls in
       draftSelection.insertPaths(urls, into: store.draft) { store.send(.filesSelected(urls, selection: $0)) }
@@ -51,6 +63,9 @@ struct CommandQueueView: View {
       editor
       HStack(spacing: 8) {
         ComposerFilePickerButton { showsFilePicker = true }
+        ComposerSkillsButton(unavailableReason: store.skillsUnavailableReason) {
+          insertSkillPrefix()
+        }
         Spacer()
         HStack(spacing: 8) {
           if store.mode == .scheduled {
@@ -92,28 +107,29 @@ struct CommandQueueView: View {
     .focusEffectDisabled()
     .frame(height: Self.editorHeight)
     .focused($draftFocused)
-    .onKeyPress(.return, phases: .down) { press in
-      // Return sends; ⇧Return and ⌥Return break a line — the chat
-      // convention the layout borrows. An empty draft swallows Return
-      // rather than opening with a blank line. During composition Return
-      // confirms the input method's text.
-      if press.modifiers.contains(.shift) || press.modifiers.contains(.option)
-        || draftSelection.hasMarkedText
-      {
-        return .ignored
-      }
-      if store.canSubmit {
-        store.send(.submitted)
-      }
-      return .handled
-    }
-    .onKeyPress(.escape) {
-      // During composition Escape cancels the input method's text.
-      if draftSelection.hasMarkedText { return .ignored }
-      onDismiss()
-      return .handled
-    }
+    // Owns Return and Escape too, so an open skill list gets them before
+    // they submit or close the sheet. With the list closed, Return submits
+    // (an empty draft swallows it rather than opening with a blank line),
+    // ⇧Return and ⌥Return break a line, and Escape closes the sheet; during
+    // composition the keys belong to the input method.
+    .composerSkillCompletion(
+      skillCompletion, text: store.draft, selection: draftSelection,
+      onInsert: { store.send(.draftChanged($0)) },
+      onSubmit: { if store.canSubmit { store.send(.submitted) } },
+      onCancel: onDismiss
+    )
     .accessibilityLabel("Command")
+  }
+
+  /// Puts the agent's call prefix at the caret and gives the editor focus,
+  /// so the skill list opens as if the user typed the prefix.
+  private func insertSkillPrefix() {
+    let location = store.skillLocation
+    guard let prefix = location.invocationStyle.prefix else { return }
+    draftSelection.insertSkillPrefix(
+      prefix, position: location.invocationPosition, into: store.draft
+    ) { store.send(.skillsButtonTapped(selection: $0)) }
+    draftFocused = true
   }
 
   private var scheduleSummary: String {

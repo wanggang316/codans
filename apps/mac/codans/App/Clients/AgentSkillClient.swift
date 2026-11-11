@@ -13,16 +13,28 @@ nonisolated struct NewWorktreeSource: Equatable, Sendable {
   var copyUntracked: Bool
 }
 
+/// The agent that runs in a pane now, as skill completion reads it.
+nonisolated struct RunningAgent: Equatable, Sendable {
+  var pid: Int32
+  /// How it started: its argv (after the executable, or after the agent
+  /// script of a wrapper such as `node`) and the environment that places
+  /// its skills. `nil` when the kernel does not give its environment.
+  var launch: SkillLaunch?
+  /// Its current directory, `nil` when it cannot be read.
+  var workingDirectory: URL?
+}
+
 /// Reads the Agent Skills a profile's launched agent can call: its Skill
 /// Location resolved against the profile's home and environment and the
 /// directory the agent starts in, then scanned off the main actor.
 nonisolated struct AgentSkillClient: Sendable {
-  /// `projectStart` is `nil` when the agent has no local project directory.
+  /// `launch` is a profile (`SkillLaunch(profile:)`) or an agent that runs
+  /// now. `projectStart` is `nil` when the agent has no local project directory.
   /// `newWorktree` is set when the agent starts in a worktree that does not
   /// exist yet: `projectStart` is then the main checkout, and the project
   /// files are read from a view of the new worktree (`NewWorktreeFiles`).
   var load:
-    @Sendable (_ profile: AgentProfile, _ projectStart: URL?, _ newWorktree: NewWorktreeSource?)
+    @Sendable (_ launch: SkillLaunch, _ projectStart: URL?, _ newWorktree: NewWorktreeSource?)
       async -> [AgentSkillEntry]
   /// The skills in a remote project on `host`: `projectStart` is a path on
   /// the host, `newWorktree` is set as for `load`; its copy options do not
@@ -37,11 +49,12 @@ nonisolated struct AgentSkillClient: Sendable {
 
 extension AgentSkillClient: DependencyKey {
   static let liveValue = AgentSkillClient(
-    load: { profile, projectStart, newWorktree in
+    load: { launch, projectStart, newWorktree in
+      let profile = launch.profile
       let precedence = profile.descriptor.skillLocation.precedence
       guard let projectStart, let newWorktree else {
         return await SkillScanner.scan(
-          SkillLocationResolver.directories(for: profile, projectStart: projectStart),
+          SkillLocationResolver.directories(for: launch, projectStart: projectStart),
           precedence: precedence)
       }
       // Without the new worktree's files, its project skills and the
@@ -58,7 +71,7 @@ extension AgentSkillClient: DependencyKey {
       }
       defer { try? FileManager.default.removeItem(at: view) }
       return await SkillScanner.scan(
-        SkillLocationResolver.directories(for: profile, projectStart: view, projectStartExists: false),
+        SkillLocationResolver.directories(for: launch, projectStart: view, projectStartExists: false),
         precedence: precedence)
     },
     loadRemote: { profile, host, projectStart, newWorktree in

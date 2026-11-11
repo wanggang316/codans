@@ -51,6 +51,42 @@ public nonisolated enum AgentKindPatterns {
     return best.map { ($0.kind, $0.score) }
   }
 
+  /// The process of `job` that runs the `kind` agent, and the arguments
+  /// the agent got: argv after the executable, or after the agent's script
+  /// for a wrapper (`node /path/claude --flag`). A process named as the
+  /// agent wins over a wrapper; among equals the one started first, the
+  /// one that the others descend from. `nil` when no process with a
+  /// readable argv runs the agent.
+  public static func agentLaunch(
+    of kind: AgentKind, in job: ForegroundJob
+  ) -> (pid: Int32, arguments: [String])? {
+    var best: (pid: Int32, arguments: [String], direct: Bool, startedAt: Date)?
+    for process in job.processes {
+      guard let argv = process.arguments, !argv.isEmpty else { continue }
+      let direct =
+        matchProcessCandidate(process.argv0) == kind || matchProcessCandidate(process.processName) == kind
+      let arguments: [String]
+      if direct {
+        arguments = Array(argv.dropFirst())
+      } else if wrapperProcessNames.contains(process.processName.lowercased()),
+        let script = argv.indices.dropFirst().first(where: { matchProcessCandidate(argv[$0]) == kind })
+      {
+        arguments = Array(argv[(script + 1)...])
+      } else {
+        continue
+      }
+      let startedAt = process.startedAt ?? .distantFuture
+      if let current = best {
+        let better =
+          direct != current.direct
+          ? direct : (startedAt, process.pid) < (current.startedAt, current.pid)
+        guard better else { continue }
+      }
+      best = (process.pid, arguments, direct, startedAt)
+    }
+    return best.map { ($0.pid, $0.arguments) }
+  }
+
   private static func processCandidates(
     _ process: ForegroundProcess
   ) -> [(value: String, score: Int)] {
