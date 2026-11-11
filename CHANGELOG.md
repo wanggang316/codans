@@ -20,6 +20,22 @@ Before 1.0, a breaking change bumps the minor version. Releases are dated.
 
 ### Security
 
+## [0.12.1] - 2026-11-11
+
+### Added
+
+- **Pick skills in the Command Queue.** Use the Skills button or type a
+  skill prefix for a supported agent running in a local pane. Suggestions
+  follow that agent and its working directory as you switch panes.
+
+### Fixed
+
+- **Input method text stays after confirmation.** New Agent and Command
+  Queue preserve confirmed text, and skill suggestions no longer take
+  keys meant for input method composition or candidate selection.
+- **Sidebar footer buttons have more space.** Extra spacing separates the
+  controls at the bottom of the sidebar.
+
 ## [0.12.0] - 2026-11-11
 
 ### Added
