@@ -6,12 +6,15 @@ import Observation
 /// pane reads it to grey out profiles whose binary cannot be found, so the
 /// list distinguishes "configured" from "runnable".
 ///
-/// Resolution asks the user's login shell: one `/bin/sh` runs `command -v`
-/// over every known agent, started through the shared login-shell launch
-/// (`CommandLaunch.loginShell`). It gets the same shell, rc handling, and
-/// `PATH` as the background commands, so a Finder-launched app with launchd's
-/// minimal `PATH` still sees what the rc adds. One spawn answers for every
-/// agent.
+/// Resolution asks the user's login shell the same question a pane would:
+/// the account's shell runs `command -v` over every known agent as an
+/// interactive shell (`-i`), started through the shared login-shell launch
+/// (`CommandLaunch.loginShell`). The launch gives it the account shell and
+/// the login `PATH`, so a Finder-launched app with launchd's minimal `PATH`
+/// still sees what the rc adds; `-i` loads the rc again in that shell, so
+/// `command -v` also sees the aliases and functions a pane would, because
+/// codans types the agent command into an interactive pane shell. One spawn
+/// answers for every agent.
 ///
 /// The result is advisory, not a gate. The shell codans probes and the shell
 /// a pane ends up with can still differ (per-project environment, a version
@@ -32,18 +35,21 @@ final class AgentInstallationStore {
   @ObservationIgnored private let fileManager: FileManager
   @ObservationIgnored private let environment: [String: String]
   @ObservationIgnored private let home: URL
+  @ObservationIgnored private let loginShell: @Sendable () -> LoginShell
   @ObservationIgnored private var scan: Task<Void, Never>?
 
   init(
     runner: any CommandRunner = FoundationCommandRunner(),
     fileManager: FileManager = .default,
     environment: [String: String] = ProcessInfo.processInfo.environment,
-    home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+    home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true),
+    loginShell: @escaping @Sendable () -> LoginShell = { LoginShell.current() }
   ) {
     self.runner = runner
     self.fileManager = fileManager
     self.environment = environment
     self.home = home
+    self.loginShell = loginShell
   }
 
   // Explicit (nonisolated) deinit so the compiler emits the standard
@@ -68,8 +74,9 @@ final class AgentInstallationStore {
   /// shows up without a relaunch.
   func rescan() async {
     scan?.cancel()
-    let task = Task { [runner, fileManager, environment, home] in
-      var found = await Self.shellResolved(runner: runner, environment: environment, home: home)
+    let task = Task { [runner, fileManager, environment, home, loginShell] in
+      var found = await Self.shellResolved(
+        runner: runner, shell: loginShell(), environment: environment, home: home)
       if found == nil {
         // Shell unavailable / hung / exotic. Fall back to walking the
         // well-known install roots so the pane still says something useful.
@@ -116,19 +123,22 @@ final class AgentInstallationStore {
 
   // MARK: - Resolution
 
-  /// Batch `command -v` with the login shell's `PATH` — the closest
+  /// Batch `command -v` in an interactive account shell with the login
+  /// shell's `PATH` — the closest
   /// approximation of what a pane will resolve. Returns `nil` (not an empty
   /// set) when the shell could not be asked, so the caller can tell "nothing
   /// installed" from "could not tell".
   private nonisolated static func shellResolved(
     runner: any CommandRunner,
+    shell: LoginShell,
     environment: [String: String],
     home: URL
   ) async -> Set<AgentKind>? {
     let descriptors = AgentCatalog.all
     // Each answer echoes the executable back and tab-separates the result, so
-    // parsing keys on the name rather than on line position. A one-line shift
-    // would silently map every agent onto its neighbour's answer.
+    // parsing keys on the name rather than on line position. The interactive
+    // rc writes to the same stdout (a banner, a version-manager notice), and a
+    // one-line shift would map every agent onto its neighbour's answer.
     let script =
       descriptors
       .map { descriptor -> String in
@@ -137,8 +147,8 @@ final class AgentInstallationStore {
       }
       .joined(separator: "; ")
     let outcome = await runner.run(
-      executable: URL(fileURLWithPath: "/bin/sh"),
-      arguments: ["-c", script],
+      executable: shell.url,
+      arguments: ["-i", "-c", script],
       env: environment,
       cwd: home,
       timeout: .seconds(10),

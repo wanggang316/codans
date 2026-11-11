@@ -572,3 +572,10 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
     }
   }
 }
+
+extension CLIExecutableResolver {
+  /// Looks up `glab` with the environment `glab` itself runs with, so the login shell sees
+  /// the same rc inputs (`HOME`, `XDG_CONFIG_HOME`) and builds the same `PATH`.
+  static let glab = CLIExecutableResolver(
+    prober: livePathProbe(command: "glab", launchEnvironment: { GitLabGitPlatform.makeEnv(host: nil) }))
+}

@@ -61,7 +61,30 @@ struct LoginShellLookupTests {
     let sandbox = try sandbox(shellCase, tools: [command])
     let env = environment(sandbox, shell: stale.value(for: shellCase.shell))
     let probe = CLIExecutableResolver.livePathProbe(
-      command: command, env: FixedEnvironment(values: env), runner: runner(shellCase.shell), home: sandbox.home)
+      command: command, launchEnvironment: { env }, env: FixedEnvironment(values: env),
+      runner: runner(shellCase.shell), home: sandbox.home)
+
+    let found = await probe()
+
+    #expect(found?.path == sandbox.home.appendingPathComponent("tools/\(command)").path)
+  }
+
+  /// The app's `PATH` has another copy of the CLI; the login shell's `PATH`
+  /// decides which one runs, so the lookup returns that one.
+  @Test(arguments: LoginShellRunnerIntegrationTests.shells)
+  func cliLookupPrefersTheLoginShellPathOverTheAppPath(_ shellCase: ShellCase) async throws {
+    let command = "codans-test-cli-\(UUID().uuidString.prefix(8))"
+    let sandbox = try sandbox(shellCase, tools: [command])
+    try sandbox.write("#!/bin/sh\nexit 0\n", to: "app-path/\(command)")
+    let appPath = sandbox.home.appendingPathComponent("app-path", isDirectory: true)
+    try FileManager.default.setAttributes(
+      [.posixPermissions: 0o755], ofItemAtPath: appPath.appendingPathComponent(command).path)
+    var env = environment(sandbox, shell: nil)
+    env["PATH"] = appPath.path + ":/usr/bin:/bin"
+    let launchEnv = env
+    let probe = CLIExecutableResolver.livePathProbe(
+      command: command, launchEnvironment: { launchEnv }, env: FixedEnvironment(values: env),
+      runner: runner(shellCase.shell), home: sandbox.home)
 
     let found = await probe()
 
@@ -69,32 +92,62 @@ struct LoginShellLookupTests {
   }
 
   @Test
-  func cliLookupStartsWhichThroughTheLoginShell() async {
+  func cliLookupStartsWhichThroughTheLoginShellWithTheCLIEnvironment() async {
     let recorder = RecordingCommandRunner(outcomes: [
       .exited(code: 0, stdout: Data("/opt/tools/gh\n".utf8), stderr: Data(), stdoutOverflow: false)
     ])
-    let home = URL(fileURLWithPath: "/tmp/home", isDirectory: true)
+    let launchEnv = ["HOME": "/tmp/home", "XDG_CONFIG_HOME": "/tmp/xdg", "PATH": "/usr/bin:/bin"]
+    let probe = CLIExecutableResolver.livePathProbe(
+      command: "gh", launchEnvironment: { launchEnv }, env: FixedEnvironment(values: [:]),
+      runner: recorder, home: URL(fileURLWithPath: "/tmp/home", isDirectory: true))
 
-    let found = await CLIExecutableResolver.loginShellWhich("gh", runner: recorder, home: home)
+    let found = await probe()
 
     #expect(found?.path == "/opt/tools/gh")
     let calls = await recorder.calls
     #expect(calls.map(\.launch) == [.loginShell])
     #expect(calls.map(\.executable.path) == ["/usr/bin/which"])
     #expect(calls.map(\.arguments) == [["gh"]])
-    #expect(calls.first?.env["SHELL"] == nil)
+    #expect(calls.map(\.env) == [launchEnv])
+  }
+
+  @Test
+  func cliLookupFallsBackToTheAppPathWhenTheLoginShellCannotAnswer() async throws {
+    let command = "codans-test-cli-\(UUID().uuidString.prefix(8))"
+    let dir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+      .appendingPathComponent("codans-lookup-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let cli = dir.appendingPathComponent(command)
+    try "#!/bin/sh\nexit 0\n".write(to: cli, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: cli.path)
+    let recorder = RecordingCommandRunner(outcomes: [
+      .exited(code: 1, stdout: Data(), stderr: Data(), stdoutOverflow: false)
+    ])
+    let probe = CLIExecutableResolver.livePathProbe(
+      command: command, launchEnvironment: { [:] }, env: FixedEnvironment(values: ["PATH": dir.path]),
+      runner: recorder, home: URL(fileURLWithPath: "/tmp/home", isDirectory: true))
+
+    let found = await probe()
+
+    #expect(found?.path == cli.path)
+    #expect(await recorder.calls.count == 1)
   }
 
   // MARK: - Agent installation check
+
+  @MainActor
+  private func agentStore(_ shellCase: ShellCase, sandbox: Sandbox, shell: String?) -> AgentInstallationStore {
+    let loginShell = shellCase.shell
+    return AgentInstallationStore(
+      runner: runner(shellCase.shell), environment: environment(sandbox, shell: shell),
+      home: sandbox.home, loginShell: { loginShell })
+  }
 
   @Test(arguments: LoginShellRunnerIntegrationTests.shells, StaleShell.allCases)
   @MainActor
   func agentCheckFindsAnAgentOnlyOnTheLoginShellPath(_ shellCase: ShellCase, stale: StaleShell) async throws {
     let sandbox = try sandbox(shellCase, tools: [AgentCatalog.descriptor(for: .droid).executable])
-    let store = AgentInstallationStore(
-      runner: runner(shellCase.shell),
-      environment: environment(sandbox, shell: stale.value(for: shellCase.shell)),
-      home: sandbox.home)
+    let store = agentStore(shellCase, sandbox: sandbox, shell: stale.value(for: shellCase.shell))
 
     await store.rescan()
 
@@ -102,22 +155,40 @@ struct LoginShellLookupTests {
     #expect(store.installed == [.droid])
   }
 
+  /// A pane runs the agent command in an interactive shell, so an alias the
+  /// rc defines launches the agent; the check sees it too.
+  @Test(arguments: LoginShellRunnerIntegrationTests.shells.filter { !$0.isFish })
+  @MainActor
+  func agentCheckSeesAnAgentAliasFromTheRc(_ shellCase: ShellCase) async throws {
+    let sandbox = try sandbox(shellCase, tools: [])
+    let rc = sandbox.home.appendingPathComponent(shellCase.rcName)
+    let text = try String(contentsOf: rc, encoding: .utf8)
+    try sandbox.write(text + "alias droid='echo droid-alias'\n", to: shellCase.rcName)
+    let store = agentStore(shellCase, sandbox: sandbox, shell: "/bin/sh")
+
+    await store.rescan()
+
+    #expect(store.installed == [.droid])
+  }
+
   @Test
   @MainActor
-  func agentCheckStartsThroughTheLoginShell() async {
+  func agentCheckRunsTheAccountShellThroughTheLoginShellLaunch() async {
     let recorder = RecordingCommandRunner(outcomes: [
       .exited(code: 0, stdout: Data("claude\t/opt/tools/claude\n".utf8), stderr: Data(), stdoutOverflow: false)
     ])
     let store = AgentInstallationStore(
       runner: recorder, environment: ["HOME": "/tmp/home", "SHELL": "/bin/bash"],
-      home: URL(fileURLWithPath: "/tmp/home", isDirectory: true))
+      home: URL(fileURLWithPath: "/tmp/home", isDirectory: true),
+      loginShell: { .zsh(URL(fileURLWithPath: "/bin/zsh")) })
 
     await store.rescan()
 
     #expect(store.installed == [.claudeCode])
     let calls = await recorder.calls
     #expect(calls.map(\.launch) == [.loginShell])
-    #expect(calls.map(\.executable.path) == ["/bin/sh"])
+    #expect(calls.map(\.executable.path) == ["/bin/zsh"])
+    #expect(calls.first?.arguments.prefix(2) == ["-i", "-c"])
   }
 }
 
