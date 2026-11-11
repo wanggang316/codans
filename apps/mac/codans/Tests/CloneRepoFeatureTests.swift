@@ -29,11 +29,30 @@ struct CloneRepoFeatureTests {
 
     await store.send(.cloneButtonTapped) { $0.isCloning = true }
     await runner.waitUntilStarted()
-    await store.send(.cancelButtonTapped) { $0.isCloning = false }
+    // The sheet leaves the cloning state but stays busy until the cancelled
+    // clone has stopped and cleaned up, so a retry cannot race that cleanup.
+    await store.send(.cancelButtonTapped) {
+      $0.isCloning = false
+      $0.isCancelling = true
+    }
     // The cancelled runner reports a failure; the cancelled effect must drop
-    // it, so the store receives nothing (TestStore fails on any action).
+    // it, so the only action is the end of the cancel.
+    await store.receive(\.cloneCancelled) { $0.isCancelling = false }
     await store.finish()
     #expect(await runner.wasCancelled)
+  }
+
+  @Test
+  func cloneAndCancelDoNothingWhileCancelling() async {
+    var state = CloneRepoFeature.State(remoteURLDraft: remote, localPathDraft: destination)
+    state.isCancelling = true
+    let store = TestStore(initialState: state) {
+      CloneRepoFeature()
+    } withDependencies: {
+      $0[GitWorktreeCLI.self] = GitWorktreeCLI(runner: RecordingCommandRunner(), parentEnvironment: [:])
+    }
+    await store.send(.cloneButtonTapped)
+    await store.send(.cancelButtonTapped)
   }
 
   @Test

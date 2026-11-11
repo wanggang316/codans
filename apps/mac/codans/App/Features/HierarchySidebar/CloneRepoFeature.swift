@@ -19,6 +19,9 @@ struct CloneRepoFeature {
     /// remote-URL edits stop auto-deriving the path out from under them.
     var localPathEditedManually: Bool = false
     var isCloning: Bool = false
+    /// Cancel was pressed; the clone is stopping and removing what it made.
+    /// Clone and Cancel wait for it, so a retry cannot race that cleanup.
+    var isCancelling: Bool = false
     /// Clone failure or validation message, rendered in the sheet footer.
     var errorMessage: String?
     /// git's own output under a classified failure's `errorMessage`.
@@ -33,6 +36,7 @@ struct CloneRepoFeature {
     case cloneButtonTapped
     case cloneFailed(CloneFailure)
     case cloneSucceeded(localPath: String)
+    case cloneCancelled
     case cancelButtonTapped
     case delegate(Delegate)
 
@@ -83,6 +87,7 @@ struct CloneRepoFeature {
         return .none
 
       case .cloneButtonTapped:
+        guard !state.isCloning, !state.isCancelling else { return .none }
         let remote = state.remoteURLDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         let dest = state.localPathDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         state.errorDetail = nil
@@ -94,7 +99,7 @@ struct CloneRepoFeature {
           state.errorMessage = "Choose a local destination path."
           return .none
         }
-        let expanded = (dest as NSString).expandingTildeInPath
+        let expanded = Self.expandedPath(dest)
         guard !FileManager.default.fileExists(atPath: expanded) else {
           state.errorMessage = "A file or folder already exists at \(expanded)."
           return .none
@@ -121,13 +126,28 @@ struct CloneRepoFeature {
         state.isCloning = false
         return .send(.delegate(.cloned(localPath: localPath)))
 
+      case .cloneCancelled:
+        state.isCancelling = false
+        return .none
+
       case .cancelButtonTapped:
+        guard !state.isCancelling else { return .none }
+        guard state.isCloning else { return .send(.delegate(.dismissed)) }
         // Cancel during a clone stops git (the runner ends its process
         // group) and keeps the sheet open so the user can retry; cancelling
-        // the effect drops the clone's late success or failure.
-        guard state.isCloning else { return .send(.delegate(.dismissed)) }
+        // the effect drops the clone's late success or failure. The draft
+        // cannot change while cloning, so it still names the destination.
         state.isCloning = false
-        return .cancel(id: CancelID.clone)
+        state.isCancelling = true
+        let destination = Self.expandedPath(
+          state.localPathDraft.trimmingCharacters(in: .whitespacesAndNewlines))
+        return .concatenate(
+          .cancel(id: CancelID.clone),
+          .run { [cli = gitCLI] send in
+            await cli.waitForClones(at: destination)
+            await send(.cloneCancelled)
+          }
+        )
 
       case .delegate:
         return .none
@@ -145,6 +165,10 @@ extension CloneRepoFeature {
   /// Returns nil when nothing usable remains.
   static func repoName(fromRemoteURL raw: String) -> String? {
     WorkspaceLayout.repositoryName(fromRemoteURL: raw)
+  }
+
+  static func expandedPath(_ path: String) -> String {
+    (path as NSString).expandingTildeInPath
   }
 
   /// Suggested destination under the user's home directory, named after the

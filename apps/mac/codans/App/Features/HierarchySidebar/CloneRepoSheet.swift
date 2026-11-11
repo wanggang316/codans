@@ -5,7 +5,8 @@ import SwiftUI
 /// a remote-URL row and a local-path row with a folder picker, the clone
 /// error in the section footer (git's raw output under a classified
 /// message), and "Cloning…" in the bottom bar. Cancel stays enabled while
-/// cloning: it stops the clone.
+/// cloning: it stops the clone, and the sheet shows "Cancelling…" until the
+/// clone has cleaned up.
 struct CloneRepoSheet: View {
   @Bindable var store: StoreOf<CloneRepoFeature>
 
@@ -14,6 +15,7 @@ struct CloneRepoSheet: View {
       "Clone Repository",
       primaryTitle: "Clone",
       canSubmit: canClone,
+      canCancel: !store.isCancelling,
       onCancel: { store.send(.cancelButtonTapped) },
       onSubmit: { store.send(.cloneButtonTapped) },
       content: {
@@ -58,11 +60,13 @@ struct CloneRepoSheet: View {
             .frame(maxWidth: .infinity, alignment: .leading)
           }
         }
-        .disabled(store.isCloning)
+        .disabled(store.isCloning || store.isCancelling)
       },
       status: {
         if store.isCloning {
           FormSheetProgress(text: "Cloning…")
+        } else if store.isCancelling {
+          FormSheetProgress(text: "Cancelling…")
         }
       },
     )
@@ -78,7 +82,7 @@ struct CloneRepoSheet: View {
   }
 
   private var canClone: Bool {
-    !store.isCloning
+    !store.isCloning && !store.isCancelling
       && !store.remoteURLDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       && !store.localPathDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }

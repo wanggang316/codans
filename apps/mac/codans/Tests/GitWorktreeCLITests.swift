@@ -163,6 +163,38 @@ struct GitWorktreeCLITests {
     #expect(FileManager.default.fileExists(atPath: destination))
   }
 
+  /// A retry that starts while a cancelled clone is still stopping must not
+  /// lose its checkout to the cancelled clone's cleanup.
+  @Test
+  func retryAfterCancelKeepsTheRetrysCheckout() async throws {
+    let home = try makeExtCloneHome()
+    defer { try? FileManager.default.removeItem(atPath: home) }
+    let destination = home + "/dest"
+    let seconds = "4\(Int.random(in: 10_000...99_999)).5"
+    // `hang` creates the destination and ignores SIGTERM, so the cancelled
+    // clone is killed after the grace period; any other remote clones at once.
+    let fakeGit = home + "/fake-git"
+    try """
+    #!/bin/sh
+    mkdir -p "$3"
+    if [ "$2" = hang ]; then trap '' TERM; sleep \(seconds); fi
+    touch "$3/$2"
+    """.write(toFile: fakeGit, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeGit)
+    let cli = GitWorktreeCLI(
+      gitExecutable: URL(fileURLWithPath: fakeGit),
+      parentEnvironment: ["HOME": home, "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
+    let cancelled = Task { try await cli.clone(remoteURL: "hang", destinationPath: destination) }
+    for _ in 0..<200 where pgrep("sleep \(seconds)").isEmpty {
+      try await Task.sleep(for: .milliseconds(50))
+    }
+    #expect(!pgrep("sleep \(seconds)").isEmpty)
+    cancelled.cancel()
+    try await cli.clone(remoteURL: "retry", destinationPath: destination)
+    _ = try? await cancelled.value
+    #expect(FileManager.default.fileExists(atPath: destination + "/retry"))
+  }
+
   private func cancelStubbornClone(home: String, destination: String) async throws {
     let seconds = "4\(Int.random(in: 10_000...99_999)).5"
     let fakeGit = home + "/fake-git"
