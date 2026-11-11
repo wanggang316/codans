@@ -20,8 +20,34 @@ struct CloneFailureTests {
   func httpCredentialFailureOnGitHubSuggestsGhAuthLogin(stderr: String) {
     let failure = classify(stderr, remote: "https://github.com/o/r.git")
     #expect(failure.summary.contains("github.com"))
-    #expect(failure.summary.contains("gh auth login"))
+    #expect(failure.summary.contains("Run `gh auth login` in a terminal"))
     #expect(failure.detail == stderr)
+  }
+
+  /// `gh auth login` without `--hostname` signs in to github.com only.
+  @Test
+  func httpCredentialFailureOnGitHubEnterpriseNamesTheHost() {
+    let stderr = "fatal: Authentication failed for 'https://github.example.com/o/r.git/'"
+    let failure = classify(stderr, remote: "https://github.example.com/o/r.git")
+    #expect(failure.summary.contains("gh auth login --hostname github.example.com"))
+  }
+
+  @Test
+  func terminalPromptsDisabledAloneIsACredentialFailure() {
+    let stderr = "fatal: unable to get password from user: terminal prompts disabled"
+    let failure = classify(stderr, remote: "https://git.example.com/o/r.git")
+    #expect(failure.summary.contains("git.example.com"))
+    #expect(failure.summary.contains("credential helper"))
+    #expect(failure.detail == stderr)
+  }
+
+  /// Same rule as `GitPlatformResolver.kind(byName:)`: a host that names both
+  /// platforms is neither.
+  @Test
+  func hostNamingBothPlatformsGetsTheCredentialHelperStep() {
+    let stderr = "fatal: Authentication failed for 'https://github-gitlab-mirror.example.com/o/r.git/'"
+    let failure = classify(stderr, remote: "https://github-gitlab-mirror.example.com/o/r.git")
+    #expect(failure.summary.contains("credential helper"))
   }
 
   @Test
