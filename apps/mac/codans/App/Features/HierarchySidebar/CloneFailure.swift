@@ -1,3 +1,4 @@
+import CodansCore
 import Foundation
 
 /// What the Clone Repository sheet shows for a failed `git clone`. A known
@@ -50,12 +51,14 @@ nonisolated struct CloneFailure: Equatable, Sendable {
   private static func httpCredentialSummary(_ remote: CloneRemote) -> String {
     let host = remote.hostAndPort ?? "this host"
     let nextStep: String
-    switch remote.platform {
+    switch remote.host.flatMap(GitPlatformResolver.kind(byName:)) {
     case .github:
-      nextStep = "Run `gh auth login` in a terminal, then clone again."
+      // Without `--hostname`, gh signs in to github.com only.
+      let hostname = remote.host == GitPlatformKind.github.publicHost ? "" : " --hostname \(host)"
+      nextStep = "Run `gh auth login\(hostname)` in a terminal, then clone again."
     case .gitlab:
       nextStep = "Run `glab auth login --hostname \(host)` in a terminal, then clone again."
-    case .other:
+    case nil:
       nextStep =
         "Set up a git credential helper for \(host) (for example `git config --global credential.helper osxkeychain`), sign in once in a terminal, then clone again."
     }
@@ -83,8 +86,6 @@ nonisolated struct CloneFailure: Equatable, Sendable {
 /// (`https://host:port/owner/repo`, `ssh://user@host:port/owner/repo`) and
 /// scp-style (`user@host:owner/repo`).
 private nonisolated struct CloneRemote {
-  enum Platform { case github, gitlab, other }
-
   var user: String?
   var host: String?
   var port: Int?
@@ -111,12 +112,5 @@ private nonisolated struct CloneRemote {
   var hostAndPort: String? {
     guard let host else { return nil }
     return port.map { "\(host):\($0)" } ?? host
-  }
-
-  var platform: Platform {
-    let name = host?.lowercased() ?? ""
-    if name.contains("github") { return .github }
-    if name.contains("gitlab") { return .gitlab }
-    return .other
   }
 }
