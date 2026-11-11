@@ -414,3 +414,10 @@ nonisolated struct GitHubGitPlatform: GitPlatform {
       .map(String.init) ?? text
   }
 }
+
+extension CLIExecutableResolver {
+  /// Looks up `gh` with the environment `gh` itself runs with, so the login shell sees
+  /// the same rc inputs (`HOME`, `XDG_CONFIG_HOME`) and builds the same `PATH`.
+  static let gh = CLIExecutableResolver(
+    prober: livePathProbe(command: "gh", launchEnvironment: { GitHubGitPlatform.makeEnv() }))
+}

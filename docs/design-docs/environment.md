@@ -172,7 +172,7 @@ git 的选择集中在 `GitLaunch.mode(for:)`（`codans/Git/`）：跳过 `-C`�
 | 终端 | 不包装 | Ghostty 已经以 login shell 启动 |
 | 内置二进制（`zmx`、编辑器 CLI 等） | 直接 | 路径是绝对的，不依赖用户 `PATH` |
 | 远程命令（`ssh`，含远程 git、`ssh -G`） | 直接 | 远端已在远程 login shell 里执行；本地 ssh 需要的是 launchd 的 `SSH_AUTH_SOCK` |
-| `gh`、`glab` 与 Agent CLI 的查找（`CLIExecutableResolver` 的 `/usr/bin/which`、`AgentInstallationStore` 的 `/bin/sh -c 'command -v …'`） | login shell | 与之后运行这些 CLI 的命令用同一个 shell 与 `PATH`；不读 app 环境里的 `$SHELL`，否则 Dock 启动的 app 可能查错 shell |
+| `gh`、`glab` 与 Agent CLI 的查找（`CLIExecutableResolver` 的 `/usr/bin/which`、`AgentInstallationStore` 的 `<账户 shell> -i -c 'command -v …'`） | login shell | 与之后运行这些 CLI 的命令用同一个 shell 与 `PATH`；不读 app 环境里的 `$SHELL`，否则 Dock 启动的 app 可能查错 shell。`which` 用该 CLI 自己运行时的环境（`makeEnv`），login shell 的结果优先，查不到才回退到 app 的 `PATH` 与 Homebrew 路径。Agent 探测在 login shell 里再起交互式账户 shell，看得到 rc 定义的 alias 与函数（pane 里输入的 agent 命令同样看得到） |
 | 自己启动 shell 的命令（workflow 的 `/bin/sh -c`） | 直接 | 由调用方决定 shell |
 
 **代价**：每条经 login shell 的命令多一次 shell 启动和一次 rc 执行，耗时取决于用户的 rc；这正是本地命令不包装的原因。在一台 Apple Silicon Mac mini 上，`git --version` 21 次的中位数：直接启动 6.7 ms，空 rc 14.2 ms（约 +7 ms，含外层 `/bin/sh`），加载 oh-my-zsh、pyenv、starship、nvm 的 rc 667.5 ms（约 +660 ms；机器繁忙时约 2 秒）。rc 越重，后台 git 越慢。

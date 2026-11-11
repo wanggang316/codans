@@ -24,12 +24,10 @@ nonisolated struct LiveEnvironment: EnvironmentVariableProvider {
 /// pane's "Re-check" button and when a `gh` / `glab` command finishes in a pane.
 ///
 /// The prober is injected at init time so tests can assert single-flight behaviour by
-/// counting invocations. The production path uses `Self.livePathProbe()` which iterates
-/// `$PATH` components and checks each for an executable file of the command's name.
+/// counting invocations. The production path is `Self.livePathProbe()`; each Git Platform
+/// implementation defines its shared resolver (`.gh`, `.glab`) with the environment its
+/// CLI runs with.
 actor CLIExecutableResolver {
-  static let gh = CLIExecutableResolver(prober: livePathProbe(command: "gh"))
-  static let glab = CLIExecutableResolver(prober: livePathProbe(command: "glab"))
-
   typealias Prober = @Sendable () async -> URL?
 
   private enum CacheState {
@@ -74,31 +72,35 @@ actor CLIExecutableResolver {
     cache = .empty
   }
 
-  /// Live prober with three fallback layers, matching how a GUI-launched macOS app
-  /// actually sees its environment:
+  /// Live prober. The login shell decides first, so the path is the one the background
+  /// commands that run the CLI would pick:
   ///
-  ///   1. `$PATH` walk — cheapest, but GUI apps inherit a stripped PATH
-  ///      (`/usr/bin:/bin:/usr/sbin:/sbin`) that almost never contains Homebrew
-  ///      or user-added directories, so this usually misses on a real user box.
-  ///   2. Known Homebrew install paths (`/opt/homebrew/bin/<command>` on Apple Silicon,
-  ///      `/usr/local/bin/<command>` on Intel). Covers the `brew install` case
-  ///      without spawning a subprocess.
-  ///   3. `/usr/bin/which <command>` started through the user's login shell
-  ///      (`CommandLaunch.loginShell`): the same shell, rc handling, and `PATH`
-  ///      as the background commands that later run the CLI. Final catch-all.
+  ///   1. `/usr/bin/which <command>` started through the user's login shell
+  ///      (`CommandLaunch.loginShell`) with `launchEnvironment`, the environment the CLI
+  ///      itself runs with: the same shell, rc inputs, and `PATH`.
+  ///   2. `$PATH` walk of the app's environment, when the login shell cannot answer
+  ///      (no such CLI on its `PATH`, a broken rc, a timeout).
+  ///   3. Known Homebrew install paths (`/opt/homebrew/bin/<command>` on Apple Silicon,
+  ///      `/usr/local/bin/<command>` on Intel).
   ///
   /// `FileManager` is constructed inside the closure rather than captured, because
   /// `FileManager` is not `Sendable` in Swift 6 strict-concurrency mode.
   static func livePathProbe(
     command: String,
+    launchEnvironment: @escaping @Sendable () -> [String: String],
     env: any EnvironmentVariableProvider = LiveEnvironment(),
     runner: any CommandRunner = FoundationCommandRunner(),
     home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
   ) -> Prober {
     return {
+      // 1. Login shell.
+      if let found = await loginShellWhich(command, env: launchEnvironment(), runner: runner, home: home) {
+        return found
+      }
+
       let fileManager = FileManager.default
 
-      // 1. $PATH walk.
+      // 2. $PATH walk.
       if let pathValue = env.value(for: "PATH"), !pathValue.isEmpty {
         for component in pathValue.split(separator: ":", omittingEmptySubsequences: true) {
           let candidate = URL(fileURLWithPath: String(component))
@@ -109,26 +111,28 @@ actor CLIExecutableResolver {
         }
       }
 
-      // 2. Hardcoded Homebrew paths — GUI-launched apps rarely inherit these in $PATH.
+      // 3. Hardcoded Homebrew paths.
       for hardcoded in ["/opt/homebrew/bin/\(command)", "/usr/local/bin/\(command)"]
       where fileManager.isExecutableFile(atPath: hardcoded) {
         return URL(fileURLWithPath: hardcoded)
       }
-
-      // 3. Login-shell fallback. Final catch-all for non-standard installs.
-      return await loginShellWhich(command, runner: runner, home: home)
+      return nil
     }
   }
 
   /// Runs `/usr/bin/which <command>` with the login shell's `PATH`. Returns the
   /// resolved absolute URL, or `nil` when `which` fails or prints nothing. The
   /// shared launch keeps rc output (a banner) out of stdout.
-  static func loginShellWhich(_ command: String, runner: any CommandRunner, home: URL) async -> URL? {
+  static func loginShellWhich(
+    _ command: String, env: [String: String], runner: any CommandRunner, home: URL
+  ) async -> URL? {
+    // `HOME` locates the rc.
+    var env = env
+    if env["HOME"] == nil { env["HOME"] = home.path }
     let outcome = await runner.run(
       executable: URL(fileURLWithPath: "/usr/bin/which"),
       arguments: [command],
-      // `HOME` locates the rc; the login shell builds `PATH` itself.
-      env: ["HOME": home.path],
+      env: env,
       cwd: home,
       timeout: .seconds(10),
       maxOutputBytes: 64 * 1024,
