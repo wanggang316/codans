@@ -1,0 +1,26 @@
+# git procs = pgrep -fl 'clone.*torvalds', minus the harness shell whose own command line contains the pattern
+self-verify: instance pid 81418 on /tmp/cdv-sv-501-d4f76178.sock
+== during clone
+    AXStaticText = "Cloning…" @593,617 57x16
+    AXButton "Cancel" {Press} @956,613 66x24
+    AXButton "Clone" [disabled] {Press} @1030,613 59x24
+git procs: [83058 /Applications/Xcode.app/Contents/Developer/usr/bin/git clone https://github.com/torvalds/linux.git /tmp/codans-529-sv/clones/linux;]; dest exists: yes
+== just after Cancel
+    AXStaticText = "Cancelling…" @593,617 74x16
+    AXButton "Cancel" [disabled] {Press} @956,613 66x24
+    AXButton "Clone" [disabled] {Press} @1030,613 59x24
+== after cleanup
+    AXButton "Cancel" {Press} @956,613 66x24
+    AXButton "Clone" {Press} @1030,613 59x24
+git procs: []; dest exists: no
+== retry running
+    AXStaticText = "Cloning…" @593,617 57x16
+    AXButton "Cancel" {Press} @956,613 66x24
+    AXButton "Clone" [disabled] {Press} @1030,613 59x24
+git procs: [85224 /Applications/Xcode.app/Contents/Developer/usr/bin/git clone https://github.com/torvalds/linux.git /tmp/codans-529-sv/clones/linux;]; dest exists: yes
+== after second cancel
+    AXButton "Cancel" {Press} @956,613 66x24
+    AXButton "Clone" {Press} @1030,613 59x24
+git procs: []; dest exists: no
+3 s later git procs: []
+self-verify: cleanup done
