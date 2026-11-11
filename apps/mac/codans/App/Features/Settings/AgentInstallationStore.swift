@@ -6,12 +6,12 @@ import Observation
 /// pane reads it to grey out profiles whose binary cannot be found, so the
 /// list distinguishes "configured" from "runnable".
 ///
-/// Resolution asks the user's shell the same question the pane would: one
-/// interactive login shell runs `command -v` over every known agent. That
-/// spelling matters — a Finder-launched app inherits launchd's minimal
-/// `PATH`, a `-l`-only shell misses anything exported from `.zshrc`, and
-/// `command -v` also sees functions and aliases, which a filesystem walk
-/// never would. One spawn answers for every agent (~0.3 s here).
+/// Resolution asks the user's login shell: one `/bin/sh` runs `command -v`
+/// over every known agent, started through the shared login-shell launch
+/// (`CommandLaunch.loginShell`). It gets the same shell, rc handling, and
+/// `PATH` as the background commands, so a Finder-launched app with launchd's
+/// minimal `PATH` still sees what the rc adds. One spawn answers for every
+/// agent.
 ///
 /// The result is advisory, not a gate. The shell codans probes and the shell
 /// a pane ends up with can still differ (per-project environment, a version
@@ -69,7 +69,7 @@ final class AgentInstallationStore {
   func rescan() async {
     scan?.cancel()
     let task = Task { [runner, fileManager, environment, home] in
-      var found = await Self.shellResolved(runner: runner, environment: environment)
+      var found = await Self.shellResolved(runner: runner, environment: environment, home: home)
       if found == nil {
         // Shell unavailable / hung / exotic. Fall back to walking the
         // well-known install roots so the pane still says something useful.
@@ -116,20 +116,19 @@ final class AgentInstallationStore {
 
   // MARK: - Resolution
 
-  /// Batch `command -v` under one interactive login shell — the closest
+  /// Batch `command -v` with the login shell's `PATH` — the closest
   /// approximation of what a pane will resolve. Returns `nil` (not an empty
   /// set) when the shell could not be asked, so the caller can tell "nothing
   /// installed" from "could not tell".
   private nonisolated static func shellResolved(
     runner: any CommandRunner,
-    environment: [String: String]
+    environment: [String: String],
+    home: URL
   ) async -> Set<AgentKind>? {
     let descriptors = AgentCatalog.all
     // Each answer echoes the executable back and tab-separates the result, so
-    // parsing keys on the name rather than on line position. Positional
-    // parsing breaks on anything that also writes to stdout — a login banner,
-    // a version-manager notice, even the trailing newline — and a one-line
-    // shift silently maps every agent onto its neighbour's answer.
+    // parsing keys on the name rather than on line position. A one-line shift
+    // would silently map every agent onto its neighbour's answer.
     let script =
       descriptors
       .map { descriptor -> String in
@@ -137,17 +136,16 @@ final class AgentInstallationStore {
         return "printf '%s\\t%s\\n' \(name) \"$(command -v -- \(name) 2>/dev/null)\""
       }
       .joined(separator: "; ")
-    let shell = environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? "/bin/zsh"
     let outcome = await runner.run(
-      executable: URL(fileURLWithPath: shell),
-      arguments: ["-l", "-i", "-c", script],
+      executable: URL(fileURLWithPath: "/bin/sh"),
+      arguments: ["-c", script],
       env: environment,
-      cwd: URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true),
+      cwd: home,
       timeout: .seconds(10),
-      maxOutputBytes: 256 * 1024
+      maxOutputBytes: 256 * 1024,
+      launch: .loginShell
     )
-    // A non-zero exit is fine — a noisy rc file can leave `$?` set while
-    // still having produced every line we asked for.
+    // A non-zero exit is fine: every line we asked for is parsed by name.
     guard case .exited(_, let stdout, _, _) = outcome,
       let raw = String(data: stdout, encoding: .utf8)
     else {

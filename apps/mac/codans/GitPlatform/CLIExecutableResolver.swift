@@ -83,15 +83,17 @@ actor CLIExecutableResolver {
   ///   2. Known Homebrew install paths (`/opt/homebrew/bin/<command>` on Apple Silicon,
   ///      `/usr/local/bin/<command>` on Intel). Covers the `brew install` case
   ///      without spawning a subprocess.
-  ///   3. Login-shell `which <command>`. Loads the user's shell startup files
-  ///      (`.zprofile`, `.bash_profile`, …), so any custom PATH entries
-  ///      resolve. Final catch-all.
+  ///   3. `/usr/bin/which <command>` started through the user's login shell
+  ///      (`CommandLaunch.loginShell`): the same shell, rc handling, and `PATH`
+  ///      as the background commands that later run the CLI. Final catch-all.
   ///
   /// `FileManager` is constructed inside the closure rather than captured, because
   /// `FileManager` is not `Sendable` in Swift 6 strict-concurrency mode.
   static func livePathProbe(
     command: String,
-    env: any EnvironmentVariableProvider = LiveEnvironment()
+    env: any EnvironmentVariableProvider = LiveEnvironment(),
+    runner: any CommandRunner = FoundationCommandRunner(),
+    home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
   ) -> Prober {
     return {
       let fileManager = FileManager.default
@@ -114,57 +116,31 @@ actor CLIExecutableResolver {
       }
 
       // 3. Login-shell fallback. Final catch-all for non-standard installs.
-      return await Self.loginShellWhich(command)
+      return await loginShellWhich(command, runner: runner, home: home)
     }
   }
 
-  /// Runs `<user-shell> -l -c 'exec "$@"' -- /usr/bin/which <command>` so the user's
-  /// shell rc is sourced and any custom `PATH` entries are visible. Returns the
-  /// resolved absolute URL, or `nil` if the child exited non-zero / stdout was empty /
-  /// `Process.run()` threw.
-  ///
-  /// `Process`/`waitUntilExit()` are synchronous-blocking; the call is detached onto a
-  /// utility Task so Swift's cooperative pool isn't starved while the shell spins up.
-  private static func loginShellWhich(_ command: String) async -> URL? {
-    await withCheckedContinuation { (cont: CheckedContinuation<URL?, Never>) in
-      Task.detached(priority: .utility) {
-        let shellPath = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        let shellURL = URL(fileURLWithPath: shellPath)
-        let exec =
-          shellURL.lastPathComponent == "fish"
-          ? "exec $argv"
-          : "exec \"$@\""
-
-        let process = Process()
-        process.executableURL = shellURL
-        process.arguments = ["-l", "-c", exec, "--", "/usr/bin/which", command]
-        let stdoutPipe = Pipe.closeOnExec()
-        process.standardOutput = stdoutPipe
-        process.standardError = FileHandle.nullDevice
-        process.standardInput = FileHandle.nullDevice
-        // A login shell's rc files can start daemons that inherit stdout.
-        let stdoutCollector = PipeCollector(pipe: stdoutPipe)
-
-        do {
-          try process.run()
-        } catch {
-          try? stdoutPipe.fileHandleForWriting.close()
-          _ = stdoutCollector.finishBlocking()
-          cont.resume(returning: nil)
-          return
-        }
-        process.waitUntilExit()
-        let data = stdoutCollector.finishBlocking().data
-        guard process.terminationStatus == 0,
-          let text = String(data: data, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-          !text.isEmpty
-        else {
-          cont.resume(returning: nil)
-          return
-        }
-        cont.resume(returning: URL(fileURLWithPath: text))
-      }
+  /// Runs `/usr/bin/which <command>` with the login shell's `PATH`. Returns the
+  /// resolved absolute URL, or `nil` when `which` fails or prints nothing. The
+  /// shared launch keeps rc output (a banner) out of stdout.
+  static func loginShellWhich(_ command: String, runner: any CommandRunner, home: URL) async -> URL? {
+    let outcome = await runner.run(
+      executable: URL(fileURLWithPath: "/usr/bin/which"),
+      arguments: [command],
+      // `HOME` locates the rc; the login shell builds `PATH` itself.
+      env: ["HOME": home.path],
+      cwd: home,
+      timeout: .seconds(10),
+      maxOutputBytes: 64 * 1024,
+      launch: .loginShell
+    )
+    guard case .exited(0, let stdout, _, _) = outcome,
+      let text = String(data: stdout, encoding: .utf8)?
+        .trimmingCharacters(in: .whitespacesAndNewlines),
+      text.hasPrefix("/")
+    else {
+      return nil
     }
+    return URL(fileURLWithPath: text)
   }
 }
