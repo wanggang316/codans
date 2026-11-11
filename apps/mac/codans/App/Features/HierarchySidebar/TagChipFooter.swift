@@ -35,7 +35,7 @@ struct TagFilterPopoverFooter: View {
   var agentStatePanelOpen: Bool = false
 
   var body: some View {
-    HStack(spacing: 0) {
+    HStack(spacing: 6) {
       // Tag-filter button is intentionally hidden — TagFilterList and the
       // wired callbacks stay around so the feature can be re-mounted
       // without rewiring the call site. Projects are reordered by direct
