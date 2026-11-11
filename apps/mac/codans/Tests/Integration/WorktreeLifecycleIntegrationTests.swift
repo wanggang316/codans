@@ -252,178 +252,142 @@ struct WorktreeLifecycleIntegrationTests {
     #expect(!after.contains { URL(fileURLWithPath: $0.path).standardizedFileURL == worktreePath })
   }
 
-  /// Exercises cancelling a `createWorktreeStream`
-  /// consumer must terminate the spawned `wt` child. The invariant we
-  /// test is the direct one master called out: "cancel 后 Process 不
-  /// 再活着". We capture a weak reference to the `wt` Process via the
-  /// `onCreateWorktreeSpawn` seam on `makeLive`, then cancel the
-  /// consuming Task and assert `!process.isRunning` within a short
-  /// deadline. No dependency on wt's runtime size, no probing the
-  /// filesystem for a partial copy — flake-free.
+  /// Spec for a creation in `repo` named `name`, no fetch, no copies.
+  private func spec(_ repo: URL, name: String) throws -> CreateWorktreeSpec {
+    let baseDir = repo.appending(path: ".worktrees", directoryHint: .isDirectory)
+    try fm.createDirectory(at: baseDir, withIntermediateDirectories: true)
+    return CreateWorktreeSpec(
+      repoRoot: repo, baseDirectory: baseDir, name: name, baseRef: "HEAD",
+      fetchOrigin: false, copyIgnored: false, copyUntracked: false)
+  }
+
+  /// A `post-checkout` hook that hangs keeps `git worktree add`, and so
+  /// `wt sw`, running.
+  private func installHangingCheckoutHook(_ repo: URL) throws {
+    let hook = repo.appending(path: ".git/hooks/post-checkout")
+    try "#!/bin/sh\nsleep 30\n".write(to: hook, atomically: true, encoding: .utf8)
+    try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook.path)
+  }
+
+  /// Cancelling a `createWorktreeStream` consumer stops the `wt` child and
+  /// everything it started (here git and its hanging hook).
   @Test(.enabled(if: WorktreeLifecycleIntegrationTests.wtBundled))
   func createStreamCancellationTerminatesWtProcess() async throws {
     let repo = try makeTempRepo()
     defer { try? fm.removeItem(at: repo) }
-    let baseDir = repo.appending(path: ".worktrees", directoryHint: .isDirectory)
-    try fm.createDirectory(at: baseDir, withIntermediateDirectories: true)
-
-    // Weak box so we don't keep the Process alive beyond natural exit.
-    final class WeakProcess: @unchecked Sendable {
-      private let lock = NSLock()
-      weak var process: Process?
-      func capture(_ p: Process) {
-        lock.lock()
-        process = p
-        lock.unlock()
-      }
-      func isAlive() -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return process?.isRunning ?? false
-      }
-    }
-    let weakBox = WeakProcess()
-
-    let client = GitWorktreeClient.makeLive(
-      onCreateWorktreeSpawn: { process in weakBox.capture(process) }
-    )
-
-    let spec = CreateWorktreeSpec(
-      repoRoot: repo,
-      baseDirectory: baseDir,
-      name: "cancelled",
-      baseRef: "HEAD",
-      fetchOrigin: false,
-      copyIgnored: false,
-      copyUntracked: false
-    )
+    try installHangingCheckoutHook(repo)
+    let spawns = SpawnRecorder()
+    let client = GitWorktreeClient.makeLive(onSpawn: { spawns.record($0) })
+    let spec = try spec(repo, name: "cancelled")
 
     let consumer = Task<Void, Error> {
-      for try await _ in client.createWorktreeStream(spec) {
-        // Don't care about events — we just want the stream to start
-        // so the Process has been spawned, then we cancel from outside.
-      }
+      for try await _ in client.createWorktreeStream(spec) {}
     }
-
-    // Wait for wt to actually start (capture() fires immediately
-    // before process.run()). 500 ms is generous on this machine;
-    // bump if flaky. `weakBox.process` becomes non-nil once onSpawn
-    // fires from within `runStream`.
-    let spawnDeadline = ContinuousClock.now.advanced(by: .milliseconds(1000))
-    while weakBox.process == nil, ContinuousClock.now < spawnDeadline {
-      try await Task.sleep(for: .milliseconds(10))
-    }
-    #expect(weakBox.process != nil, "wt should have spawned")
-
+    try await spawns.waitForSpawns(1)
+    let pid = try #require(spawns.all.first, "wt should have spawned")
     consumer.cancel()
 
-    // The real assertion: once cancel propagates through
-    // onTermination → processBox.terminateIfRunning(), the wt child
-    // exits within SIGTERM's normal window. 2 s is well over the
-    // measured time (< 100 ms locally).
-    let deadline = ContinuousClock.now.advanced(by: .seconds(2))
-    while weakBox.isAlive(), ContinuousClock.now < deadline {
-      try await Task.sleep(for: .milliseconds(20))
-    }
-    #expect(!weakBox.isAlive(), "wt process must be terminated after cancellation")
-
-    // Drain the consumer's failure (CancellationError or similar)
-    // so the task leaves cleanly without trip-wiring the Swift
-    // Testing harness for unhandled throws.
+    #expect(spawns.allLeadTheirGroup)
+    #expect(await processGroupEnds(pid), "wt and its children must stop after cancellation")
     _ = try? await consumer.value
   }
 
-  /// Setup-phase sibling of `createStreamCancellationTerminatesWtProcess`:
-  /// the cancellation invariant must extend to the setup child too. A
-  /// setup script that blocks (`sleep 30`) keeps the run inside the setup
-  /// phase; cancelling the consumer must terminate THAT bash child, not
-  /// just the already-exited `wt` one — otherwise a cancelled creation
-  /// leaks the orphaned setup process.
-  ///
-  /// `onCreateWorktreeSpawn` fires twice here — once for the `wt sw` child,
-  /// once for the setup `bash` child — so we capture the LATEST spawn and
-  /// gate on the SECOND fire (`spawnCount >= 2`) to be sure we hold the
-  /// setup child, not the wt one, before cancelling.
+  /// A `wt sw` that hangs ends at the deadline with the timeout error, and
+  /// leaves no process behind.
+  @Test(.enabled(if: WorktreeLifecycleIntegrationTests.wtBundled))
+  func hungWtCreationTimesOut() async throws {
+    let repo = try makeTempRepo()
+    defer { try? fm.removeItem(at: repo) }
+    try installHangingCheckoutHook(repo)
+    let spawns = SpawnRecorder()
+    var timeouts = GitWorktreeClient.StreamTimeouts()
+    timeouts.createWorktree = .seconds(2)
+    let client = GitWorktreeClient.makeLive(onSpawn: { spawns.record($0) }, streamTimeouts: timeouts)
+    let spec = try spec(repo, name: "hung")
+
+    await #expect {
+      for try await _ in client.createWorktreeStream(spec) {}
+    } throws: { error in
+      guard case .commandFailed(let command, let stderr) = error as? GitWorktreeError else { return false }
+      return command.hasPrefix("wt ") && command.contains(" sw ") && stderr == "did not finish in 2 seconds"
+    }
+    let pid = try #require(spawns.all.first)
+    #expect(await processGroupEnds(pid))
+  }
+
+  /// Cancelling during the setup phase stops the setup `bash` child, not
+  /// only the already-exited `wt` one.
   @Test(.enabled(if: WorktreeLifecycleIntegrationTests.wtBundled))
   func cancellationTerminatesSetupChild() async throws {
     let repo = try makeTempRepo()
     defer { try? fm.removeItem(at: repo) }
-    let baseDir = repo.appending(path: ".worktrees", directoryHint: .isDirectory)
-    try fm.createDirectory(at: baseDir, withIntermediateDirectories: true)
-
-    // Weak box that tracks the spawn count (wt child, then setup child) and
-    // keeps a weak reference to the LATEST spawned Process. Mirrors the
-    // `WeakProcess` helper in `createStreamCancellationTerminatesWtProcess`
-    // but adds the count so the test can wait for the SECOND spawn.
-    final class WeakSpawnTracker: @unchecked Sendable {
-      private let lock = NSLock()
-      private weak var latest: Process?
-      private var count = 0
-      func capture(_ p: Process) {
-        lock.lock()
-        latest = p
-        count += 1
-        lock.unlock()
-      }
-      var spawnCount: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return count
-      }
-      func isLatestAlive() -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return latest?.isRunning ?? false
-      }
-    }
-    let tracker = WeakSpawnTracker()
-
-    let client = GitWorktreeClient.makeLive(
-      onCreateWorktreeSpawn: { process in tracker.capture(process) }
-    )
-
-    var spec = CreateWorktreeSpec(
-      repoRoot: repo,
-      baseDirectory: baseDir,
-      name: "setup-cancel",
-      baseRef: "HEAD",
-      fetchOrigin: false,
-      copyIgnored: false,
-      copyUntracked: false
-    )
-    // A blocking setup command keeps the run pinned in the setup phase so the
-    // cancel lands while the bash child is alive.
+    let spawns = SpawnRecorder()
+    let client = GitWorktreeClient.makeLive(onSpawn: { spawns.record($0) })
+    var spec = try spec(repo, name: "setup-cancel")
     spec.setupCommand = "sleep 30"
 
     let consumer = Task<Void, Error> {
-      for try await _ in client.createWorktreeStream(spec) {
-        // Drain events; we just need the stream to reach the setup phase.
-      }
+      for try await _ in client.createWorktreeStream(spec) {}
     }
-
-    // Wait for the SECOND spawn (the setup bash child). The wt child spawns
-    // first and exits quickly; the setup child is the one we must catch
-    // alive. 5 s covers a cold `wt sw` (git worktree add) on this machine.
-    let spawnDeadline = ContinuousClock.now.advanced(by: .seconds(5))
-    while tracker.spawnCount < 2, ContinuousClock.now < spawnDeadline {
-      try await Task.sleep(for: .milliseconds(20))
-    }
-    #expect(tracker.spawnCount >= 2, "setup bash child should have spawned")
-    #expect(tracker.isLatestAlive(), "setup child should be alive before cancel")
-
+    // The wt child spawns first; the second spawn is the setup child.
+    try await spawns.waitForSpawns(2)
+    let setupPID = try #require(spawns.all.dropFirst().first, "setup bash child should have spawned")
+    #expect(kill(setupPID, 0) == 0, "setup child should be alive before cancel")
     consumer.cancel()
 
-    // The real assertion: cancelling propagates through
-    // `continuation.onTermination → processBox.terminateIfRunning()`, which
-    // now targets the setup child (the latest `set(_:)`). It must exit
-    // within SIGTERM's normal window — well under 2 s for `sleep`.
-    let deadline = ContinuousClock.now.advanced(by: .seconds(2))
-    while tracker.isLatestAlive(), ContinuousClock.now < deadline {
-      try await Task.sleep(for: .milliseconds(20))
-    }
-    #expect(!tracker.isLatestAlive(), "setup child must be terminated after cancellation")
-
+    #expect(await processGroupEnds(setupPID), "setup child must stop after cancellation")
     _ = try? await consumer.value
+  }
+
+  /// A setup script inside a creation that hangs is stopped at its deadline;
+  /// setup is best-effort, so the creation still finishes and says why.
+  @Test(.enabled(if: WorktreeLifecycleIntegrationTests.wtBundled))
+  func hungSetupScriptInCreationTimesOut() async throws {
+    let repo = try makeTempRepo()
+    defer { try? fm.removeItem(at: repo) }
+    let spawns = SpawnRecorder()
+    var timeouts = GitWorktreeClient.StreamTimeouts()
+    timeouts.setupScript = .seconds(1)
+    let client = GitWorktreeClient.makeLive(onSpawn: { spawns.record($0) }, streamTimeouts: timeouts)
+    var spec = try spec(repo, name: "setup-hung")
+    spec.setupCommand = "sleep 30"
+
+    var lines: [String] = []
+    var createdPath: URL?
+    for try await event in client.createWorktreeStream(spec) {
+      if case .progressLine(let line) = event { lines.append(line) }
+      if case .finished(let path) = event { createdPath = path }
+    }
+    #expect(lines.last == "setup script did not finish in 1 second")
+    let worktreePath = try #require(createdPath)
+    let setupPID = try #require(spawns.all.last)
+    #expect(await processGroupEnds(setupPID))
+    try await client.removeWorktree(repo, worktreePath)
+  }
+
+  /// `runSetupScript` (the Workspace member path): a hung script ends with
+  /// the timeout outcome, and a cancelled caller leaves no process.
+  @Test
+  func runSetupScriptTimesOutAndStopsOnCancel() async throws {
+    let directory = fm.temporaryDirectory
+    let spawns = SpawnRecorder()
+    var timeouts = GitWorktreeClient.StreamTimeouts()
+    timeouts.setupScript = .seconds(1)
+    let client = GitWorktreeClient.makeLive(onSpawn: { spawns.record($0) }, streamTimeouts: timeouts)
+
+    let outcome = await client.runSetupScript(directory, "sleep 30") { _ in }
+    #expect(outcome == .timedOut(after: .seconds(1)))
+    #expect(outcome.failureReason == "setup script did not finish in 1 second")
+    let timedOutPID = try #require(spawns.all.first)
+    #expect(await processGroupEnds(timedOutPID))
+
+    let longClient = GitWorktreeClient.makeLive(onSpawn: { spawns.record($0) })
+    let caller = Task { await longClient.runSetupScript(directory, "sleep 30") { _ in } }
+    try await spawns.waitForSpawns(2)
+    let cancelledPID = try #require(spawns.all.last)
+    caller.cancel()
+    #expect(await caller.value == .cancelled)
+    #expect(await processGroupEnds(cancelledPID))
   }
 
   /// Best-effort setup: a setup command that exits non-zero must NOT throw

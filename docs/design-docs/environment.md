@@ -160,7 +160,7 @@ script:
 
 `GitWorktreeCLI`（Clone Repository、Add Project 的仓库识别）同样经共享的 `CommandRunner` 执行：clone 的超时为 30 分钟，其余 60 秒；超时或调用方任务取消时，runner 结束 git 及其进程组。
 
-git 的选择集中在 `GitLaunch.mode(for:)`（`codans/Git/`）：跳过 `-C`、`-c` 一类全局选项后，子命令是 clone、fetch、push、pull、ls-remote，或 `remote show`（不带 `-n`）/ `update` / `prune` 时走 login shell，其余走 `.directThenLoginShell`。`GitWorktreeShell.runStream`（`wt sw`、clone 的流式输出）自己持有 `Process`，用同一个 `CommandLaunch` 与 `ProcessLaunch.make`，不另写一套。
+git 的选择集中在 `GitLaunch.mode(for:)`（`codans/Git/`）：跳过 `-C`、`-c` 一类全局选项后，子命令是 clone、fetch、push、pull、ls-remote，或 `remote show`（不带 `-n`）/ `update` / `prune` 时走 login shell，其余走 `.directThenLoginShell`。流式输出的命令（`wt sw`、Workspace 源仓库的 clone、setup 脚本）走 `CommandRunner.runStream`：与一次性的 `run` 共用 `CommandLaunch`、`ProcessLaunch.make`、超时与取消（超时或调用方取消时停止整个进程组）。时限见 `GitWorktreeClient.StreamTimeouts`：clone 30 分钟（与 Clone sheet 相同），`wt sw` 20 分钟，setup 脚本 60 分钟。
 
 | 命令 | 启动方式 | 原因 |
 |---|---|---|

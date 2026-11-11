@@ -224,6 +224,10 @@ nonisolated enum SetupScriptOutcome: Equatable, Sendable {
   case succeeded
   case failedToStart(reason: String)
   case exited(code: Int32)
+  /// The script was still running at the deadline and was stopped.
+  case timedOut(after: Duration)
+  /// The calling task was cancelled and the script was stopped.
+  case cancelled
 
   /// One line for the user; nil on success.
   var failureReason: String? {
@@ -231,7 +235,23 @@ nonisolated enum SetupScriptOutcome: Equatable, Sendable {
     case .succeeded: return nil
     case .failedToStart(let reason): return "setup script failed to start: \(reason)"
     case .exited(let code): return "setup script exited with code \(code)"
+    case .timedOut(let timeout): return "setup script \(GitWorktreeShell.timeoutReason(timeout))"
+    case .cancelled: return "setup script was cancelled"
     }
+  }
+}
+
+nonisolated extension GitWorktreeClient {
+  /// Deadlines of the streamed commands. At the deadline the runner stops
+  /// the command and everything it started.
+  struct StreamTimeouts: Equatable, Sendable {
+    /// A Workspace source clone; the same bound as the Clone sheet.
+    var clone: Duration = GitWorktreeCLI.cloneTimeout
+    /// `wt sw`: `git worktree add` plus the optional copy of ignored and
+    /// untracked files, which can be large (`node_modules`).
+    var createWorktree: Duration = .seconds(20 * 60)
+    /// A user's setup script often installs dependencies.
+    var setupScript: Duration = .seconds(60 * 60)
   }
 }
 
@@ -457,33 +477,6 @@ nonisolated extension GitWorktreeClient {
 
 // MARK: - Live implementation helpers
 
-/// Thread-safe box holding the spawned `wt` Process so a cancellation
-/// path on a different thread (`AsyncThrowingStream.onTermination`
-/// is not isolated to any particular actor) can terminate it without
-/// racing the Task body that assigned it. `@unchecked Sendable`
-/// because the NSLock discipline is what actually enforces safety.
-nonisolated final class CreateWorktreeProcessBox: @unchecked Sendable {
-  private let lock = NSLock()
-  private var process: Process?
-
-  func set(_ p: Process) {
-    lock.lock()
-    process = p
-    lock.unlock()
-  }
-
-  func terminateIfRunning() {
-    lock.lock()
-    let captured = process
-    lock.unlock()
-    guard let captured, captured.isRunning else { return }
-    // `Process` starts the child in its own process group; signal the group
-    // so the login shell's rc commands and git's helpers stop as well.
-    let pid = captured.processIdentifier
-    kill(getpgid(pid) == pid ? -pid : pid, SIGTERM)
-  }
-}
-
 /// Resolves the bundled `wt` script out of the app bundle's Resources
 /// folder. Debug and Release builds alike embed the script via Tuist's
 /// post-build `embed-git-wt.sh` (see `apps/mac/scripts/`).
@@ -505,8 +498,8 @@ nonisolated func wtScriptURL() throws -> URL {
 nonisolated enum GitWorktreeShell {
   static let runner = FoundationCommandRunner()
   static let gitURL = URL(fileURLWithPath: "/usr/bin/git")
-  /// 60 s covers the slowest non-copy git operation we issue. Streaming
-  /// `wt sw` bypasses this limit by using its own pipe-driven runner.
+  /// 60 s covers the slowest non-copy git operation we issue. Streamed
+  /// commands use `GitWorktreeClient.StreamTimeouts`.
   static let defaultTimeout: Duration = .seconds(60)
   static let maxOutputBytes = 4 * 1024 * 1024
 
@@ -544,194 +537,14 @@ nonisolated enum GitWorktreeShell {
     String(data: data, encoding: .utf8) ?? ""
   }
 
-  /// Mutable line buffer boxed so the Sendable readability handlers can
-  /// accumulate partial lines across reads without data races; the caller's
-  /// lock is what actually serializes access.
-  final class LineBuffer: @unchecked Sendable {
-    var buffer = ""
-    var lastNonEmpty = ""
-    /// Every byte consumed with `keepAll`, for the error report: the line
-    /// loop drains `buffer`, which alone would leave only the trailing
-    /// partial line.
-    var collected = ""
-
-    /// Appends a chunk and returns the complete lines it closed. With
-    /// `splitOnCarriageReturn`, progress-style output that redraws one line
-    /// with `\r` (`git clone --progress`) streams each redraw as a line.
-    func consume(
-      _ chunk: Data, lock: NSLock, splitOnCarriageReturn: Bool, trackLastNonEmpty: Bool, keepAll: Bool = false
-    ) -> [String] {
-      guard !chunk.isEmpty, let raw = String(data: chunk, encoding: .utf8) else { return [] }
-      let text = splitOnCarriageReturn ? raw.replacingOccurrences(of: "\r", with: "\n") : raw
-      lock.lock()
-      defer { lock.unlock() }
-      if keepAll { collected += raw }
-      buffer += text
-      var lines: [String] = []
-      while let newline = buffer.firstIndex(of: "\n") {
-        lines.append(String(buffer[..<newline]))
-        buffer.removeSubrange(...newline)
-      }
-      if trackLastNonEmpty {
-        for line in lines {
-          let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-          if !trimmed.isEmpty { lastNonEmpty = trimmed }
-        }
-      }
-      return lines
+  /// The error text for a command the runner stopped at its deadline.
+  static func timeoutReason(_ timeout: Duration) -> String {
+    let seconds = Int(timeout.components.seconds)
+    if seconds >= 60, seconds % 60 == 0 {
+      let minutes = seconds / 60
+      return "did not finish in \(minutes) minute\(minutes == 1 ? "" : "s")"
     }
-  }
-
-  /// Low-level streaming runner for `wt sw` — spawns a `Process`, wires
-  /// per-line stdout/stderr handlers, and yields line-level events until
-  /// the child exits. On success the final event is
-  /// `.exited(code, stderr)`.
-  ///
-  /// The optional `onSpawn` callback fires immediately before
-  /// `process.run()` so the caller can capture the `Process` reference
-  /// for external cancellation (see `createWorktreeStream`'s
-  /// `continuation.onTermination` wiring). Default
-  /// is a no-op so existing callers stay source-compatible.
-  ///
-  /// `launch` picks direct or login-shell start (`CommandLaunch`), with
-  /// `environment` as the command's environment. A retry streams the lines
-  /// of both attempts and calls `onSpawn` for each process.
-  static func runStream(
-    executable: URL,
-    arguments: [String],
-    cwd: URL,
-    environment: [String: String],
-    launch mode: CommandLaunch,
-    loginShell: LoginShell? = nil,
-    splitOnCarriageReturn: Bool = false,
-    onSpawn: @Sendable (Process) -> Void = { _ in },
-    onStdout: @escaping @Sendable (String) -> Void,
-    onStderr: @escaping @Sendable (String) -> Void
-  ) async -> StreamResult {
-    // Same guard as `FoundationCommandRunner`: a non-file cwd makes
-    // `Process` raise an Objective-C exception.
-    guard cwd.isFileURL else {
-      return (-1, "", "", FoundationCommandRunner.nonLocalDirectoryReason(cwd))
-    }
-    var result: StreamResult = (-1, "", "", "no launch")
-    for viaLoginShell in mode.attemptsViaLoginShell {
-      let launch: ProcessLaunch
-      do {
-        launch = try ProcessLaunch.make(
-          executable: executable, arguments: arguments, env: environment, cwd: cwd,
-          loginShell: viaLoginShell ? (loginShell ?? .current()) : nil)
-      } catch {
-        return (-1, "", "", error.reason)
-      }
-      result = await runStreamOnce(
-        launch, splitOnCarriageReturn: splitOnCarriageReturn, onSpawn: onSpawn,
-        onStdout: onStdout, onStderr: onStderr)
-      guard result.spawnFailedReason == nil,
-        LoginShellLaunch.reportsMissingCommand(exitCode: result.exitCode, stderr: result.stderrCollected),
-        !Task.isCancelled
-      else { break }
-    }
-    return result
-  }
-
-  typealias StreamResult = (
-    exitCode: Int32, stdoutLast: String, stderrCollected: String, spawnFailedReason: String?
-  )
-
-  private static func runStreamOnce(
-    _ launch: ProcessLaunch,
-    splitOnCarriageReturn: Bool,
-    onSpawn: @Sendable (Process) -> Void,
-    onStdout: @escaping @Sendable (String) -> Void,
-    onStderr: @escaping @Sendable (String) -> Void
-  ) async -> StreamResult {
-    await withCheckedContinuation { cont in
-      let process = Process()
-      process.executableURL = launch.executable
-      process.arguments = launch.arguments
-      process.currentDirectoryURL = launch.currentDirectory
-      process.environment = launch.environment
-      process.standardInput = FileHandle.nullDevice
-
-      let stdoutPipe = Pipe.closeOnExec()
-      let stderrPipe = Pipe.closeOnExec()
-      process.standardOutput = stdoutPipe
-      process.standardError = stderrPipe
-
-      let stdoutState = LineBuffer()
-      let stderrState = LineBuffer()
-      let stdoutLock = NSLock()
-      let stderrLock = NSLock()
-
-      let stdoutCollector = PipeCollector(
-        pipe: stdoutPipe,
-        maxBytes: 0,
-        onChunk: { chunk in
-          let lines = stdoutState.consume(
-            chunk, lock: stdoutLock, splitOnCarriageReturn: splitOnCarriageReturn,
-            trackLastNonEmpty: true)
-          for line in lines { onStdout(line) }
-        })
-      let stderrCollector = PipeCollector(
-        pipe: stderrPipe,
-        maxBytes: 0,
-        onChunk: { chunk in
-          let lines = stderrState.consume(
-            chunk, lock: stderrLock, splitOnCarriageReturn: splitOnCarriageReturn,
-            trackLastNonEmpty: false, keepAll: true)
-          for line in lines { onStderr(line) }
-        })
-
-      process.terminationHandler = { proc in
-        // Bounded wait for the remaining output: a forked process elsewhere
-        // can hold a write end, and EOF then never arrives.
-        _ = stdoutCollector.finishBlocking()
-        _ = stderrCollector.finishBlocking()
-        // Flush trailing bytes that did not end in a newline.
-        stdoutLock.lock()
-        let tailOut = stdoutState.buffer
-        stdoutState.buffer = ""
-        let trimmed = tailOut.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty { stdoutState.lastNonEmpty = trimmed }
-        let finalLastNonEmpty = stdoutState.lastNonEmpty
-        stdoutLock.unlock()
-        if !tailOut.isEmpty { onStdout(tailOut) }
-        stderrLock.lock()
-        let tailErr = stderrState.buffer
-        stderrState.buffer = ""
-        let finalStderr = stderrState.collected
-        stderrLock.unlock()
-        if !tailErr.isEmpty { onStderr(tailErr) }
-        cont.resume(
-          returning: (
-            exitCode: proc.terminationStatus,
-            stdoutLast: finalLastNonEmpty,
-            stderrCollected: finalStderr,
-            spawnFailedReason: nil
-          ))
-      }
-
-      // Hand the Process to the caller before run() so a
-      // cancellation path can hold a reference before the child
-      // actually starts.
-      onSpawn(process)
-
-      do {
-        try process.run()
-      } catch {
-        try? stdoutPipe.fileHandleForWriting.close()
-        try? stderrPipe.fileHandleForWriting.close()
-        _ = stdoutCollector.finishBlocking()
-        _ = stderrCollector.finishBlocking()
-        cont.resume(
-          returning: (
-            exitCode: -1,
-            stdoutLast: "",
-            stderrCollected: "",
-            spawnFailedReason: error.localizedDescription
-          ))
-      }
-    }
+    return "did not finish in \(seconds) second\(seconds == 1 ? "" : "s")"
   }
 }
 
@@ -739,16 +552,13 @@ nonisolated extension GitWorktreeClient {
   // Binds every closure to a live `wt`/`git` invocation. Used from
   // `CodansApp.bringUp()` at startup.
   //
-  // `onCreateWorktreeSpawn` is an optional testing seam — the live
-  // `createWorktreeStream` path calls it immediately before
-  // `process.run()`. It can fire up to TWICE per creation: first with
-  // the `git worktree add` (`wt`) child, then — when the spec carries a
-  // non-empty `setupCommand` — again with the setup `bash` child.
-  // Consumers that capture "the spawned process" must therefore expect
-  // the LATEST spawn to win (a later `set(_:)` overwrites the earlier
-  // one). Production code leaves it nil; integration tests pass a closure
-  // that captures a weak reference to the Process so they can assert
-  // `!process.isRunning` after cancelling the stream (issue #24 (a)).
+  // `onSpawn` is an optional testing seam: the live streamed commands
+  // (`wt sw`, its setup script, `runSetupScript`, `cloneStream`) call it
+  // with the pid of each child right after it started. A creation with a
+  // setup command fires it twice: the `wt` child, then the setup `bash`.
+  // Production code leaves it nil; integration tests use it to assert that
+  // the child's process group is gone after a cancel or a timeout.
+  // `streamTimeouts` bounds the streamed commands; tests shorten it.
   //
   // `remoteHostResolver` is the Remote Project transport seam (the same
   // pattern as `LiveGitService`): when it maps a repo root to a `RemoteHost`,
@@ -759,7 +569,8 @@ nonisolated extension GitWorktreeClient {
   //
   // swiftlint:disable:next cyclomatic_complexity function_body_length
   static func makeLive(
-    onCreateWorktreeSpawn: (@Sendable (Process) -> Void)? = nil,
+    onSpawn: (@Sendable (pid_t) -> Void)? = nil,
+    streamTimeouts: StreamTimeouts = StreamTimeouts(),
     remoteHostResolver: @escaping @Sendable (URL) async -> RemoteHost? = { _ in nil }
   ) -> GitWorktreeClient {
     GitWorktreeClient(
@@ -902,7 +713,9 @@ nonisolated extension GitWorktreeClient {
       },
 
       cloneStream: { remoteURL, destination in
-        makeLocalCloneStream(remoteURL: remoteURL, destination: destination)
+        makeLocalCloneStream(
+          remoteURL: remoteURL, destination: destination, timeout: streamTimeouts.clone,
+          onSpawn: onSpawn ?? { _ in })
       },
 
       lsRemoteHeads: { remoteURL in
@@ -965,7 +778,7 @@ nonisolated extension GitWorktreeClient {
         // Local-only by design: the stream drives the bundled `wt` script
         // (copy-ignored / copy-untracked / setup phases). Remote creation is
         // the sidebar's explicit `git worktree add`-over-SSH path.
-        makeLocalCreateWorktreeStream(spec: spec, onCreateWorktreeSpawn: onCreateWorktreeSpawn)
+        makeLocalCreateWorktreeStream(spec: spec, timeouts: streamTimeouts, onSpawn: onSpawn ?? { _ in })
       },
 
       removeWorktree: { repoRoot, path in
@@ -1050,45 +863,42 @@ nonisolated extension GitWorktreeClient {
       },
 
       runSetupScript: { directory, command, onLine in
-        let processBox = CreateWorktreeProcessBox()
-        return await withTaskCancellationHandler {
-          await runLocalSetupScript(
-            command: command, directory: directory,
-            onSpawn: { process in
-              processBox.set(process)
-              onCreateWorktreeSpawn?(process)
-            },
-            onLine: onLine)
-        } onCancel: {
-          processBox.terminateIfRunning()
-        }
+        await runLocalSetupScript(
+          command: command, directory: directory, timeout: streamTimeouts.setupScript,
+          onSpawn: onSpawn ?? { _ in }, onLine: onLine)
       }
     )
   }
 
   /// `bash -lc <command>` in `directory`, every stdout and stderr line to
   /// `onLine`. Shared by the setup phase of `createWorktreeStream` and
-  /// `runSetupScript`.
+  /// `runSetupScript`. Cancelling the calling task stops the script.
   static func runLocalSetupScript(
     command: String,
     directory: URL,
-    onSpawn: @Sendable (Process) -> Void,
+    timeout: Duration,
+    onSpawn: @escaping @Sendable (pid_t) -> Void,
     onLine: @escaping @Sendable (String) -> Void
   ) async -> SetupScriptOutcome {
-    let outcome = await GitWorktreeShell.runStream(
+    let outcome = await GitWorktreeShell.runner.runStream(
       executable: URL(fileURLWithPath: "/bin/bash"),
       arguments: ["-lc", command],
-      cwd: directory,
       // The user's script, not git: it keeps the app's environment.
-      environment: ProcessInfo.processInfo.environment,
+      env: ProcessInfo.processInfo.environment,
+      cwd: directory,
+      timeout: timeout,
       // A user script that starts its own login bash.
       launch: .direct,
+      splitOnCarriageReturn: false,
       onSpawn: onSpawn,
-      onStdout: onLine,
-      onStderr: onLine
+      onLine: onLine
     )
-    if let reason = outcome.spawnFailedReason { return .failedToStart(reason: reason) }
-    return outcome.exitCode == 0 ? .succeeded : .exited(code: outcome.exitCode)
+    switch outcome {
+    case .exited(let code, _, _): return code == 0 ? .succeeded : .exited(code: code)
+    case .timedOut: return .timedOut(after: timeout)
+    case .cancelled: return .cancelled
+    case .spawnFailed(let reason): return .failedToStart(reason: reason)
+    }
   }
 
   /// Remote worktree listing mapped into the local `GitWtEntry` shape so the
@@ -1168,16 +978,14 @@ nonisolated extension GitWorktreeClient {
     return nil
   }
 
-  /// Streaming `git clone` body behind `cloneStream`. Same shape as the
-  /// worktree stream: a locked process box so `onTermination` can kill the
-  /// child, then cancel the task. Git prints progress on stderr with `\r`
-  /// between updates, so the runner splits on both so each update arrives
-  /// as its own line while the clone is still running.
+  /// Streaming `git clone` body behind `cloneStream`. Ending the stream
+  /// cancels the task, and the runner then stops the clone. Git prints
+  /// progress on stderr with `\r` between updates, so the runner splits on
+  /// both so each update arrives as its own line while the clone runs.
   private static func makeLocalCloneStream(
-    remoteURL: String, destination: URL
+    remoteURL: String, destination: URL, timeout: Duration, onSpawn: @escaping @Sendable (pid_t) -> Void
   ) -> AsyncThrowingStream<String, Error> {
     AsyncThrowingStream { continuation in
-      let processBox = CreateWorktreeProcessBox()
       let task = Task {
         let parent = destination.deletingLastPathComponent()
         do {
@@ -1188,35 +996,35 @@ nonisolated extension GitWorktreeClient {
           return
         }
         let arguments = ["clone", "--progress", "--", remoteURL, destination.path(percentEncoded: false)]
-        let outcome = await GitWorktreeShell.runStream(
+        let outcome = await GitWorktreeShell.runner.runStream(
           executable: GitWorktreeShell.gitURL,
           arguments: arguments,
+          env: GitWorktreeShell.nonInteractiveEnvironment,
           cwd: parent,
-          environment: GitWorktreeShell.nonInteractiveEnvironment,
+          timeout: timeout,
           launch: GitLaunch.mode(for: arguments),
           splitOnCarriageReturn: true,
-          onSpawn: { process in processBox.set(process) },
-          onStdout: { line in continuation.yield(line) },
-          onStderr: { line in continuation.yield(line) }
+          onSpawn: onSpawn,
+          onLine: { line in continuation.yield(line) }
         )
-        if let reason = outcome.spawnFailedReason {
-          continuation.finish(throwing: GitWorktreeError.commandFailed(command: "git clone", stderr: reason))
-          return
-        }
-        guard outcome.exitCode == 0 else {
+        switch outcome {
+        case .exited(0, _, _):
+          continuation.finish()
+        case .exited(_, _, let stderr):
           continuation.finish(
             throwing: GitWorktreeError.commandFailed(
-              command: "git clone \(remoteURL)",
-              stderr: outcome.stderrCollected.trimmingCharacters(in: .whitespacesAndNewlines)))
-          return
+              command: "git clone \(remoteURL)", stderr: stderr.trimmingCharacters(in: .whitespacesAndNewlines)))
+        case .timedOut:
+          continuation.finish(
+            throwing: GitWorktreeError.commandFailed(
+              command: "git clone \(remoteURL)", stderr: GitWorktreeShell.timeoutReason(timeout)))
+        case .cancelled:
+          continuation.finish(throwing: CancellationError())
+        case .spawnFailed(let reason):
+          continuation.finish(throwing: GitWorktreeError.commandFailed(command: "git clone", stderr: reason))
         }
-        continuation.finish()
       }
-      continuation.onTermination = { _ in
-        // Child first, then the task — see `makeLocalCreateWorktreeStream`.
-        processBox.terminateIfRunning()
-        task.cancel()
-      }
+      continuation.onTermination = { _ in task.cancel() }
     }
   }
 
@@ -1224,16 +1032,10 @@ nonisolated extension GitWorktreeClient {
   // `createWorktreeStream` closure stays readable.
   private static func makeLocalCreateWorktreeStream(
     spec: CreateWorktreeSpec,
-    onCreateWorktreeSpawn: (@Sendable (Process) -> Void)?
+    timeouts: StreamTimeouts,
+    onSpawn: @escaping @Sendable (pid_t) -> Void
   ) -> AsyncThrowingStream<CreateWorktreeEvent, Error> {
     AsyncThrowingStream { continuation in
-      // Locked box so `continuation.onTermination` (fires on any
-      // thread / isolation context) can safely read the Process
-      // reference and terminate the child. Without this, a
-      // cancelled consumer leaks the `wt` child until it finishes
-      // on its own.
-      let processBox = CreateWorktreeProcessBox()
-
       let task = Task {
         do {
           let wt = try wtScriptURL()
@@ -1270,34 +1072,35 @@ nonisolated extension GitWorktreeClient {
           let preEntries = await liveLsEntries(wt: wt, repoRoot: spec.repoRoot)
 
           let args = makeCreateArguments(for: spec)
-          let outcome = await GitWorktreeShell.runStream(
+          let command = "wt \(args.joined(separator: " "))"
+          let outcome = await GitWorktreeShell.runner.runStream(
             executable: wt,
             arguments: args,
+            env: GitWorktreeShell.nonInteractiveEnvironment,
             cwd: spec.repoRoot,
-            environment: GitWorktreeShell.nonInteractiveEnvironment,
+            timeout: timeouts.createWorktree,
             launch: GitWorktreeShell.launch(executable: wt, arguments: args),
-            onSpawn: { process in
-              processBox.set(process)
-              onCreateWorktreeSpawn?(process)
-            },
-            onStdout: { line in continuation.yield(.progressLine(line)) },
-            onStderr: { line in continuation.yield(.progressLine(line)) }
+            splitOnCarriageReturn: false,
+            onSpawn: onSpawn,
+            onLine: { line in continuation.yield(.progressLine(line)) }
           )
-          if let reason = outcome.spawnFailedReason {
+          let stdoutLast: String
+          switch outcome {
+          case .exited(0, let lastStdoutLine, _):
+            stdoutLast = lastStdoutLine
+          case .exited(_, _, let stderr):
+            continuation.finish(throwing: mapGitStderr(command: command, stderr: stderr))
+            return
+          case .timedOut:
             continuation.finish(
               throwing: GitWorktreeError.commandFailed(
-                command: "wt \(args.joined(separator: " "))",
-                stderr: reason
-              ))
+                command: command, stderr: GitWorktreeShell.timeoutReason(timeouts.createWorktree)))
             return
-          }
-          guard outcome.exitCode == 0 else {
-            let command = "wt \(args.joined(separator: " "))"
-            continuation.finish(
-              throwing: mapGitStderr(
-                command: command,
-                stderr: outcome.stderrCollected
-              ))
+          case .cancelled:
+            continuation.finish(throwing: CancellationError())
+            return
+          case .spawnFailed(let reason):
+            continuation.finish(throwing: GitWorktreeError.commandFailed(command: command, stderr: reason))
             return
           }
 
@@ -1309,12 +1112,12 @@ nonisolated extension GitWorktreeClient {
             let worktreeURL = pickNewWorktreePath(
               preEntries: preEntries,
               postEntries: postEntries,
-              fallbackStdoutLast: outcome.stdoutLast
+              fallbackStdoutLast: stdoutLast
             )
           else {
             continuation.finish(
               throwing: GitWorktreeError.commandFailed(
-                command: "wt \(args.joined(separator: " "))",
+                command: command,
                 stderr: "wt exited 0 but no new worktree appeared in wt ls"
               ))
             return
@@ -1323,9 +1126,8 @@ nonisolated extension GitWorktreeClient {
           // Optional setup-script phase. Runs as a tracked phase
           // INSIDE the stream (rather than later as the first pane's
           // initial command) so a cancelled creation also kills the
-          // setup child — it reuses the SAME `processBox` +
-          // `continuation.onTermination` wiring the `wt sw`
-          // invocation uses. The command runs in the freshly-created
+          // setup child: ending the stream cancels the task, and the
+          // runner stops whichever child is running. The command runs in the freshly-created
           // worktree (`worktreeURL`), not `spec.repoRoot`.
           let setup = spec.setupCommand?.trimmingCharacters(in: .whitespacesAndNewlines)
           if let setup, !setup.isEmpty {
@@ -1333,10 +1135,8 @@ nonisolated extension GitWorktreeClient {
             let setupOutcome = await runLocalSetupScript(
               command: setup,
               directory: worktreeURL,
-              onSpawn: { process in
-                processBox.set(process)
-                onCreateWorktreeSpawn?(process)
-              },
+              timeout: timeouts.setupScript,
+              onSpawn: onSpawn,
               onLine: { line in continuation.yield(.progressLine(line)) }
             )
             // Best-effort: a spawn failure or non-zero exit from the
@@ -1353,16 +1153,9 @@ nonisolated extension GitWorktreeClient {
           continuation.finish(throwing: error)
         }
       }
-      continuation.onTermination = { _ in
-        // Order matters: terminate the child FIRST so
-        // `runStream`'s terminationHandler fires and resumes its
-        // continuation naturally (Task body completes, reaches
-        // the final `continuation.finish(...)`). Cancelling the
-        // Task first would still leave the wt child alive until
-        // it finished, defeating the point of this handler.
-        processBox.terminateIfRunning()
-        task.cancel()
-      }
+      // The runner stops the running child (and its process group) when
+      // the task is cancelled.
+      continuation.onTermination = { _ in task.cancel() }
     }
   }
 
