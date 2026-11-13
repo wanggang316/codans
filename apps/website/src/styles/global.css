@@ -1,0 +1,234 @@
+@import "tailwindcss";
+
+/* The page follows the system appearance, like the app does. */
+:root {
+  color-scheme: light dark;
+  --canvas: #f4f5f7;
+  --surface: #ffffff;
+  --sunken: #eaecf0;
+  --ink: #16181d;
+  --muted: #5f6672;
+  --line: #dcdfe5;
+  --accent: #0a60ff;
+  --accent-ink: #ffffff;
+  --stage-from: #0b56e8;
+  --stage-to: #062b86;
+  --state-working: #0a60ff;
+  --state-blocked: #e08a00;
+  --state-done: #1f9d57;
+  --state-idle: #8a909b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #17181b;
+    --surface: #1f2125;
+    --sunken: #121316;
+    --ink: #eceef1;
+    --muted: #9aa0aa;
+    --line: #2f3238;
+    --accent: #4c8dff;
+    --accent-ink: #0b1020;
+    --stage-from: #0a48c6;
+    --stage-to: #051f63;
+    --state-working: #4c8dff;
+    --state-blocked: #f5a524;
+    --state-done: #3ccb7f;
+    --state-idle: #6b717c;
+  }
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-sunken: var(--sunken);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  /* System fonts: SF Pro and PingFang on the Macs this product runs on. */
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", "Segoe UI",
+    sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "PingFang SC", monospace;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+  body {
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 17px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 6px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+}
+
+@layer components {
+  .wrap {
+    max-width: 1200px;
+    margin-inline: auto;
+    padding-inline: 24px;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 44px;
+    padding: 0 18px;
+    border-radius: 10px;
+    font-size: 16px;
+    font-weight: 550;
+    white-space: nowrap;
+  }
+  .btn-primary {
+    background: var(--ink);
+    color: var(--canvas);
+  }
+  .btn-primary:hover {
+    background: var(--accent);
+    color: var(--accent-ink);
+  }
+  .btn-quiet {
+    box-shadow: inset 0 0 0 1px var(--line);
+  }
+  .btn-quiet:hover {
+    background: var(--surface);
+  }
+  .btn-small {
+    height: 34px;
+    padding: 0 13px;
+    border-radius: 8px;
+    font-size: 14px;
+  }
+
+  /* Display type. Latin headlines are set tight; CJK needs looser metrics. */
+  .display {
+    font-size: clamp(34px, 4.7vw, 58px);
+    line-height: 1.06;
+    font-weight: 650;
+    letter-spacing: -0.032em;
+    text-wrap: balance;
+  }
+  .heading {
+    font-size: clamp(25px, 2.6vw, 33px);
+    line-height: 1.16;
+    font-weight: 620;
+    letter-spacing: -0.022em;
+    text-wrap: balance;
+  }
+  :lang(zh) .display {
+    line-height: 1.18;
+    letter-spacing: -0.01em;
+  }
+  :lang(zh) .heading {
+    line-height: 1.3;
+    letter-spacing: 0;
+  }
+
+  /* Rich text that comes from the dictionaries through `set:html`. */
+  .prose-copy {
+    color: var(--muted);
+    text-wrap: pretty;
+  }
+  .prose-copy kbd,
+  .prose-copy code {
+    padding: 1px 6px;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    background: var(--surface);
+    color: var(--ink);
+    font-family: var(--font-mono);
+    font-size: 0.8em;
+  }
+  .prose-copy .tag {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 8px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 12px;
+    vertical-align: 2px;
+  }
+  .prose-copy strong {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .prose-copy a {
+    color: var(--accent);
+  }
+  .prose-copy a:hover {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  /* Agent state marks: the same four states the Agents View shows. */
+  .state {
+    position: relative;
+    display: inline-block;
+    flex: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+  }
+  .state-idle {
+    box-shadow: inset 0 0 0 1.5px var(--state-idle);
+  }
+  .state-working {
+    border: 2px solid color-mix(in srgb, var(--state-working) 25%, transparent);
+    border-top-color: var(--state-working);
+    animation: state-spin 0.9s linear infinite;
+  }
+  .state-blocked {
+    background: var(--state-blocked);
+  }
+  .state-blocked::after {
+    content: "!";
+    position: absolute;
+    inset: 0;
+    color: var(--canvas);
+    font: 700 9px/12px var(--font-sans);
+    text-align: center;
+  }
+  .state-done {
+    background: var(--state-done);
+  }
+  .state-done::after {
+    content: "";
+    position: absolute;
+    left: 3.2px;
+    top: 2.2px;
+    width: 3px;
+    height: 5.5px;
+    border: solid var(--canvas);
+    border-width: 0 1.6px 1.6px 0;
+    transform: rotate(42deg);
+  }
+  @keyframes state-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .state-working {
+      animation: none;
+      border-color: var(--state-working);
+    }
+  }
+}

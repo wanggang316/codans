@@ -1,0 +1,169 @@
+---
+import Base from "../layouts/Base.astro";
+import BrewCommand from "../components/BrewCommand.astro";
+import Download from "../components/Download.astro";
+import Shot from "../components/Shot.astro";
+import { dictionary, type Locale } from "../i18n";
+import { LINKS } from "../lib/links";
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const t = dictionary(locale);
+
+// Shell comments stay in English in every locale, like the commands.
+const commands = [
+  { line: "codans worktree new feat/retry --agent codex", note: "worktree + agent" },
+  { line: "codans agent status" },
+  { output: 'p7  claude-code  working  3m12s  api/main  "dev server"' },
+  { line: "codans agent wait p7 --until idle", note: "block until it stops" },
+  { line: "codans pane send 'make test' --capture", note: "run, get the output" },
+  { line: "codans broadcast --label agent 'reload'", note: "fan out to many panes" },
+  { line: "codans handoff to codex --brief -", note: "pass the task on" },
+];
+const noteColumn = Math.max(...commands.map((command) => command.line?.length ?? 0)) + 3;
+---
+
+<Base locale={locale} page="/" title={t.meta.title} description={t.meta.description}>
+  <div class="wrap">
+    <section class="pt-10 pb-10 sm:pt-18">
+      <h1 class="display max-w-[17em]" set:html={t.hero.title} />
+      <p class="mt-5.5 max-w-[37em] text-[19px] text-pretty text-muted">{t.hero.lede}</p>
+      <div class="mt-7.5 flex flex-wrap items-center gap-3">
+        <Download locale={locale} />
+        <BrewCommand locale={locale} />
+      </div>
+      <p class="mt-3.5 text-sm text-muted">{t.hero.requirements}</p>
+
+      <div class="stage mt-11">
+        <Shot id="hero" alt={t.hero.shotAlt} eager />
+      </div>
+      <ul class="mt-4.5 flex flex-wrap gap-x-7 gap-y-2.5 px-0.5 text-sm text-muted">
+        {
+          t.states.map((state) => (
+            <li class="flex items-center gap-2">
+              <i class={`state state-${state.key}`} />
+              <span>
+                <b class="font-[550] text-ink">{state.name}</b> {state.detail}
+              </span>
+            </li>
+          ))
+        }
+      </ul>
+    </section>
+
+    <p class="mt-4 flex flex-wrap items-baseline gap-x-6.5 gap-y-2 border-y border-line py-5.5 text-[15px] text-muted">
+      <span>{t.agents.lead}</span>
+      {t.agents.names.map((name) => <b class="text-base font-[550] text-ink">{name}</b>)}
+      <span>{t.agents.tail}</span>
+    </p>
+
+    {
+      t.features.map((feature) => (
+        <section class="grid items-center gap-7 pt-16 md:grid-cols-[minmax(0,4fr)_minmax(0,7fr)] md:gap-14 md:pt-22">
+          <div>
+            <h2 class="heading" set:html={feature.title} />
+            {feature.body.map((paragraph) => (
+              <p class="prose-copy mt-3.5 max-w-[30em]" set:html={paragraph} />
+            ))}
+          </div>
+          <Shot id={feature.shot} alt={feature.alt} />
+        </section>
+      ))
+    }
+
+    <section
+      class="mt-18 grid items-start gap-7 border-t border-line py-14 md:mt-26 md:grid-cols-[minmax(0,4fr)_minmax(0,7fr)] md:gap-14"
+    >
+      <div>
+        <h2 class="heading" set:html={t.cli.title} />
+        {t.cli.body.map((paragraph) => <p class="prose-copy mt-3.5 max-w-[30em]" set:html={paragraph} />)}
+      </div>
+      <pre
+        class="terminal overflow-x-auto rounded-xl px-5.5 py-5 font-mono text-[13px] leading-[1.75]">{commands.map((command) =>
+          command.line ? (
+            <>
+              <span class="prompt">$ </span>{command.note ? command.line.padEnd(noteColumn) : command.line}{command.note && <span class="dim"># {command.note}</span>}{"\n"}
+            </>
+          ) : (
+            <><span class="dim">{command.output}</span>{"\n"}</>
+          ),
+        )}</pre>
+    </section>
+
+    <section class="border-t border-line pt-14">
+      <h2 class="heading">{t.more.title}</h2>
+      <dl class="mt-8 grid gap-x-12 sm:grid-cols-2 lg:grid-cols-3">
+        {
+          t.more.items.map((item) => (
+            <div class="border-t border-line py-4.5">
+              <dt class="font-semibold">{item.title}</dt>
+              <dd class="mt-1 text-[15px] text-muted">{item.body}</dd>
+            </div>
+          ))
+        }
+      </dl>
+    </section>
+
+    <section
+      class="mt-24 flex flex-wrap items-center justify-between gap-7 rounded-[18px] bg-surface px-6 py-14 shadow-[0_0_0_1px_var(--line)] sm:px-16"
+    >
+      <h2 class="heading">{t.cta.title}</h2>
+      <div class="flex flex-wrap items-center gap-3">
+        <Download locale={locale} />
+        <a href={LINKS.repo} class="btn btn-quiet">{t.cta.source}</a>
+      </div>
+    </section>
+  </div>
+</Base>
+
+<style>
+  /* The stage behind the hero shot: the logo's stacked blocks, enlarged. */
+  .stage {
+    position: relative;
+    overflow: hidden;
+    padding: clamp(14px, 4.5vw, 56px);
+    border-radius: 18px;
+    background: linear-gradient(160deg, var(--stage-from), var(--stage-to));
+  }
+  .stage::before {
+    content: "";
+    position: absolute;
+    right: -3%;
+    bottom: -30%;
+    width: 58%;
+    aspect-ratio: 1;
+    opacity: 0.5;
+    background:
+      linear-gradient(#2f8bff, #2f8bff) 0 0 / 31% 31% no-repeat,
+      linear-gradient(#04174f, #04174f) 0 50% / 31% 31% no-repeat,
+      linear-gradient(#63bcff, #63bcff) 50% 50% / 31% 31% no-repeat,
+      linear-gradient(#0a4fe0, #0a4fe0) 0 100% / 31% 31% no-repeat,
+      linear-gradient(#1f7bff, #1f7bff) 50% 100% / 31% 31% no-repeat,
+      linear-gradient(#c3e0ff, #c3e0ff) 100% 100% / 31% 31% no-repeat;
+  }
+  .stage :global(img),
+  .stage :global(video),
+  .stage :global([role="img"]) {
+    position: relative;
+    box-shadow:
+      0 0 0 1px rgb(255 255 255 / 0.1),
+      0 30px 70px -20px rgb(0 8 40 / 0.75);
+  }
+
+  /* A terminal is dark in both appearances. */
+  .terminal {
+    background: #1b1d21;
+    color: #c9cdd5;
+    box-shadow: 0 0 0 1px var(--line);
+  }
+  .terminal .prompt {
+    color: #4c8dff;
+    user-select: none;
+  }
+  .terminal .dim {
+    color: #8c929d;
+  }
+</style>

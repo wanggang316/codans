@@ -1,78 +1,82 @@
 # codans website
 
-Marketing landing page for [Codans](https://github.com/wanggang316/codans).
+The [codans.dev](https://codans.dev) site: the home page and the changelog, in
+English and Chinese.
 
 ## Stack
 
-- Vite 6 + React 18 + TypeScript
-- Tailwind CSS 3
-- framer-motion (all animations)
-- react-i18next (English first, structure ready for additional locales under `src/locales/`)
+- Astro 7, static output, no client framework
+- Tailwind CSS 4 (tokens and component classes in `src/styles/global.css`)
+- System fonts; the page follows the system light or dark appearance
 
 ## Develop
 
+Requires Node.js 22.23.4 or later.
+
 ```bash
 pnpm install
-pnpm dev          # http://localhost:5173
+pnpm dev          # http://localhost:4321
+pnpm typecheck    # astro check
 pnpm build        # output → dist/
-pnpm preview      # serve the production build locally
+pnpm preview      # serve the production build on http://localhost:4173
 ```
 
 ## Layout
 
-The site is a small multi-page app — two HTML entries (`index.html` →
-`main.tsx`, `changelog.html` → `changelog-main.tsx`), no client router.
-GitHub Pages serves the clean `/changelog` URL; in dev a tiny middleware in
-`vite.config.ts` rewrites it to `changelog.html`.
-
 ```
 src/
-├── App.tsx                      # home page
-├── main.tsx                     # home entry  (index.html)
-├── changelog-main.tsx          # changelog entry (changelog.html)
-├── i18n.ts
-├── vite-env.d.ts               # vite/client + virtual:changelog-raw types
-├── locales/<en|zh>/landing.json  # all visible strings live here
-├── styles/globals.css
+├── pages/                    # routes; each file only selects a view and a locale
+│   ├── index.astro           #   /
+│   ├── changelog.astro       #   /changelog
+│   └── zh/                   #   /zh, /zh/changelog
+├── views/                    # Home.astro, Changelog.astro
+├── layouts/Base.astro        # <head>, nav, footer, download-link resolver
+├── components/               # Nav, Footer, Download, BrewCommand, Shot
+├── i18n/                     # en.ts defines the dictionary shape; zh.ts must match it
 ├── lib/
-│   ├── links.ts                # external URLs
-│   ├── changelog.ts            # parse CHANGELOG.md → structured releases
-│   └── useTypewriter.ts        # canned-output typing hook
-├── components/                 # shared chrome: Nav, Footer, Logo
-├── pages/
-│   └── ChangelogPage.tsx       # /changelog timeline (reuses Nav + Footer)
-└── sections/                   # the home page:
-    ├── Hero.tsx                # app screenshot + tagline
-    ├── Features.tsx            # "What is Codans?" intro + feature list
-    └── CtaStrip.tsx
+│   ├── changelog.ts          # parse CHANGELOG.md → structured releases
+│   ├── inline-markdown.ts    # changelog bullet → safe inline HTML
+│   ├── links.ts              # external URLs
+│   └── shots.ts              # find the media files of a product shot
+└── styles/global.css
+public/shots/                 # product screenshots and recordings
 ```
 
-## Changelog
+`build.format` is `file`, so the build emits `changelog.html` and GitHub Pages
+serves the clean `/changelog` URL. The changelog page reads the repository-root
+`CHANGELOG.md` at build time.
 
-The `/changelog` page renders the **repo-root `CHANGELOG.md`** — it is the
-single source of truth, never duplicated here. The `codans-changelog` Vite
-plugin (`vite.config.ts`) exposes the raw markdown as `virtual:changelog-raw`;
-`lib/changelog.ts` parses the Keep a Changelog format into releases. To update
-the page, edit `CHANGELOG.md` at the repo root.
+To add a string, add it to `src/i18n/en.ts` and `src/i18n/zh.ts`. The type
+checker reports a key that is missing from `zh.ts`.
 
-## Adding a locale
+## Product shots
 
-1. Create `src/locales/<code>/landing.json` mirroring `en/landing.json`.
-2. Register it in `src/i18n.ts` and switch `lng`.
+The home page shows real captures of the app. Each shot has an id, and the
+`Shot` component looks for these files in `public/shots/`:
 
-Every visible string already routes through `t('...')` — no component changes needed.
+| File | Purpose |
+|---|---|
+| `<id>.png` | Still image. Also the poster of a recording. |
+| `<id>-dark.png` | Optional. Shown when the system appearance is dark. |
+| `<id>.mp4` | Optional. A silent screen recording that plays in place of the still. |
 
-## Assets
+A shot without a PNG file renders as a labelled empty frame.
 
-`public/logo.png` is the production-rendered Codans icon, sourced from
-`apps/mac/codans/App/AppIcon.icon/Assets/logo1024-dark.png` (the active layer
-of the app's `.icon` bundle). Regenerate all three derived sizes via:
+| Id | What to capture |
+|---|---|
+| `hero` | The full window. Sidebar with three projects and several worktrees, Agents View with agents in the working, blocked, and done states, and a terminal pane with an agent at work. |
+| `new-agent` | The New Agent dialog (⌘⇧N) with a project, a new worktree name, an agent, and a prompt filled in. |
+| `agents-view` | The Agents View with at least one agent in each state, and a notification for a blocked agent. |
+| `handoff` | One tab with two panes side by side: the source agent after `codans handoff`, and the receiver that starts on the briefing. |
+| `review` | The diff window with a few changed files, and the pull request popover of a worktree with checks and the merge button. |
 
-```bash
-python3 -c "
-from PIL import Image
-src = Image.open('../mac/codans/App/AppIcon.icon/Assets/logo1024-dark.png').convert('RGB')
-src.resize((512, 512), Image.LANCZOS).save('public/logo.png', optimize=True)
-src.resize((96, 96), Image.LANCZOS).save('public/favicon.png', optimize=True)
-src.resize((256, 256), Image.LANCZOS).save('src/assets/logo-256.png', optimize=True)"
-```
+Capture rules:
+
+- Use a demo data set. Do not show private project names, paths, or prompts.
+- Capture at 2x and crop to the window.
+- Keep recordings under 15 seconds and under 2 MB. They loop without sound.
+
+## Deploy
+
+`.github/workflows/website.yml` builds the site and publishes `dist/` to GitHub
+Pages on each push to `main` that changes `apps/website/**` or `CHANGELOG.md`.

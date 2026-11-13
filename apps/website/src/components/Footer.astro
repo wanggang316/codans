@@ -1,0 +1,21 @@
+---
+import { dictionary, localePath, type Locale } from "../i18n";
+import { LINKS } from "../lib/links";
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const t = dictionary(locale);
+---
+
+<footer class="wrap flex flex-wrap items-center gap-x-6 gap-y-2.5 pt-10 pb-14 text-sm text-muted">
+  <span class="mr-auto">
+    © 2026 <a href={LINKS.author} class="hover:text-ink">Gump Wang</a>
+  </span>
+  <a href={localePath(locale, "/changelog")} class="hover:text-ink">{t.nav.changelog}</a>
+  <a href={LINKS.releases} class="hover:text-ink">{t.footer.releases}</a>
+  <a href={LINKS.issues} class="hover:text-ink">{t.footer.issues}</a>
+  <a href={LINKS.repo} class="hover:text-ink">{t.footer.repo}</a>
+</footer>

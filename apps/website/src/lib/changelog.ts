@@ -1,8 +1,7 @@
 // Parser for the repo-root CHANGELOG.md (Keep a Changelog format). The raw
-// markdown is the single source of truth — see the `virtual:changelog-raw`
-// plugin in vite.config.ts. This turns it into structured releases the
-// ChangelogPage renders. Kept pure (string in, data out) so it's trivial to
-// reason about and unit-test.
+// markdown is the single source of truth. This turns it into structured
+// releases that the changelog view renders. Kept pure (string in, data out)
+// so it is simple to reason about and unit-test.
 
 export type ChangeKind =
   | "Added"

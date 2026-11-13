@@ -1,0 +1,65 @@
+---
+import { resolveShot } from "../lib/shots";
+
+interface Props {
+  /** Shot id: the file name stem under `public/shots/`. */
+  id: string;
+  alt: string;
+  /** The first shot on the page loads eagerly; the others load lazily. */
+  eager?: boolean;
+}
+
+const { id, alt, eager = false } = Astro.props;
+const { image, darkImage, video } = resolveShot(id);
+const frame = "block h-auto w-full rounded-xl shadow-[0_0_0_1px_var(--line),0_24px_50px_-28px_rgb(0_0_0/0.5)]";
+---
+
+{
+  image && video && (
+    <video
+      class={frame}
+      width={image.width}
+      height={image.height}
+      poster={image.src}
+      aria-label={alt}
+      autoplay
+      loop
+      muted
+      playsinline
+      preload={eager ? "auto" : "metadata"}
+    >
+      <source src={video} type="video/mp4" />
+    </video>
+  )
+}
+{
+  image && !video && (
+    <picture>
+      {darkImage && <source srcset={darkImage} media="(prefers-color-scheme: dark)" />}
+      <img
+        class={frame}
+        src={image.src}
+        width={image.width}
+        height={image.height}
+        alt={alt}
+        loading={eager ? "eager" : "lazy"}
+        decoding="async"
+      />
+    </picture>
+  )
+}
+{
+  !image && (
+    <div
+      class="flex aspect-[16/10] items-center justify-center rounded-xl border border-dashed border-line bg-sunken p-6 text-center text-sm text-muted"
+      role="img"
+      aria-label={alt}
+    >
+      <span>
+        <span class="font-mono text-ink">shots/{id}.png</span>
+        <br />
+        {alt}
+      </span>
+    </div>
+  )
+}
