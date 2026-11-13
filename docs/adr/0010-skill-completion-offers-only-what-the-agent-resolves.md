@@ -39,6 +39,12 @@ and call:
    against the host's `HOME`. A read that fails gives no completion, and
    the Skills button shows why.
 
+6. Completion is a user selection aid, not an execution guarantee. Do not
+   hide a skill based on `disable-model-invocation` and its position in the
+   prompt. Insert the agent's token at the caret and preserve the rest of
+   the prompt. The agent owns expansion and execution; codans does not
+   move the token or expand the skill itself.
+
 ## Reasons
 
 - A suggestion the agent cannot resolve does nothing or reaches the agent as

@@ -15,7 +15,9 @@ import Testing
 @Suite(.serialized)
 struct CommandQueueSkillTests {
   private nonisolated static let skills = ["code-review", "tdd"].map {
-    AgentSkillEntry(name: $0, summary: nil, source: .user, url: URL(fileURLWithPath: "/tmp/skills/\($0)"))
+    AgentSkillEntry(
+      name: $0, summary: nil, source: .user, url: URL(fileURLWithPath: "/tmp/skills/\($0)"),
+      disablesModelInvocation: true)
   }
 
   private static func catalog(

@@ -130,7 +130,7 @@ struct SkillLocation {
 
 - **触发**：在 token 开头（prompt 开头或空白之后）输入当前 agent 的前缀字符（`/`、`$`、`@`）时弹出列表。`invocationPosition == .leading` 的 agent 只在整个 prompt 开头触发。
 - **过滤**：对名称与描述做模糊匹配，名称前缀匹配优先。过滤结果为空时自动收起。
-- **禁止模型调用的 Skill**：调用 token 之前只有空白时（prompt 开头）列出；之前有其他文本时（prompt 中间）不列出。Claude Code 只在 prompt 开头由 CLI 直接展开 Skill；中间的调用靠模型的 Skill 工具，而 frontmatter 含 `disable-model-invocation: true` 的 Skill 模型不能调用，插入后不生效（ADR 0010）。
+- **手动选择 Skill**：`disable-model-invocation` 不参与补全过滤。在支持任意位置补全的 Agent 中，同一 Skill 在 prompt 开头、中间和末尾都可搜索、选择。选择后只在光标处插入该 Agent 的调用 token，保留其他正文；不自动移动 token 或展开 Skill。调用如何解析、是否执行由 Agent 决定，补全结果不保证执行（ADR 0010）。
 - **按键**：弹出时 Return / Tab 插入、↑↓ 移动、Esc 只关弹窗。收起后 Return 发送、Esc 关对话框，与现在一致。输入法组字期间（有 marked text）这些键都交给输入法（确认、取消或选字），列表与对话框都不处理。
 - **插入**：把已输入的前缀和查询替换为 `<调用 token> `（末尾带空格）。点击某一行同样插入。
 - **呈现**：列表浮在对话框之上，不占对话框布局，打开和关闭时对话框大小不变。它是输入框所在窗口的子窗口（`ComposerSkillCompletionPanel`：borderless、non-activating、不能成为 key），与 `NSTextView` 的补全相同；不用 `.overlay`（会被分组 `Form` 的滚动视图和 sheet 边界裁掉），也不用 `.popover`（会从输入框拿走焦点）。面板与输入框同宽，贴着输入框上沿向上打开，上方屏幕空间不够时在输入框下方打开。焦点留在输入框，按键仍由修饰符处理。面板随窗口移动；列表关闭、窗口关闭或窗口失去 key 时面板关闭（失去 key 时按 Esc 处理，同一调用不再自动弹出）。外观为原生菜单卡片：菜单材质、圆角、系统阴影；每行只有来源图标（User、Project、Plugin 各不相同）与名称，来源写在行的辅助功能标签里；高亮行用系统选中色；最多显示 9 行，其余滚动。面板宽度取当前匹配项中最宽的行（图标、名称与内边距），不小于 180 pt，不大于输入框宽度，超出时名称中间截断；左边与输入框左边对齐，过滤改变匹配项时宽度随之变化，对话框大小不变。
@@ -173,7 +173,7 @@ Command Queue（⌘L）的输入框用同一个组件、同一个修饰符和 Sk
 - 探针：项目内 `.agents/skills/codans-probe-459/SKILL.md`（Codex、Pi、OpenCode 共用的目录），正文要求只回复 `PROBE-MARKER-9C2E`（标记只在正文）。
 - 两种实测：先直接运行 CLI（`codex exec`、`pi -p`、`opencode run`）；再在隔离 Debug 实例里经 New Agent 对话框（选中已有 worktree）用补全列表插入调用 token 后发送，读 pane 内容找标记。
 - Codex：首次进入目录时 TUI 先询问是否信任该目录，信任后执行首条 prompt。另用临时 `CODEX_HOME` 验证 `$CODEX_HOME/skills` 可用、已启用插件的 `$probeplug:hello` 输出标记、`enabled = false` 的插件不可用。覆盖项实测（2026-11-10，`codex exec`，插件在 `config.toml` 中已启用）：`-p off`（`off.config.toml` 设 `enabled = false`）、`--disable plugins`、`[features] plugins = false`、已信任项目的 `.codex/config.toml` 设 `enabled = false`，四者都使插件不可用；`-c 'plugins."probeplug@probe-market".enabled=false'` 未生效，但 `-c` 能改任意配置，仍视为读不准。
-- Pi：TUI 启动时先询问是否信任项目目录；只有信任后才加载项目级 Skill（`pi -p` 在未信任目录中，中间位置的调用失败，因为模型的 Skill 列表里没有项目 Skill；开头的 `/skill:name` 仍由 Pi 直接展开）。中间位置靠模型读取 Skill，所以 `disable-model-invocation: true` 的 Skill 只在开头生效，由补全过滤（见"交互"）。
+- Pi：TUI 启动时先询问是否信任项目目录；只有信任后才加载项目级 Skill（`pi -p` 在未信任目录中，中间位置的调用失败，因为模型的 Skill 列表里没有项目 Skill；开头的 `/skill:name` 仍由 Pi 直接展开）。这次探针记录的是调用机制，不作为补全过滤依据；`disable-model-invocation: true` 的 Skill 仍可在正文中选择，执行语义交给 Pi（见"交互"）。
 - OpenCode：`opencode run` 中 `@name` 与 `/name` 在开头和中间都由模型调用 Skill 工具后输出标记；但 OpenCode 的交互式 TUI 没有带首条 prompt 并发送的参数（`--prompt` 只预填输入框），New Agent 因此无法给 OpenCode 发首条 prompt（`AgentDescriptor.promptStyle` 为 `nil`）。等有可发送的启动参数后再启用。调研值保留在上表：用户级 `.config/opencode/skills`、`.claude/skills`、`.agents/skills`，项目级 `.opencode/skills`、`.claude/skills`、`.agents/skills`（向上到仓库根）。
 - Gemini CLI：本机未安装，临时装到私有目录并在登录 `PATH` 上临时放一个链接（New Agent 只列登录 `PATH` 上能找到的 agent）。可用的凭据都不可用：OAuth 要浏览器登录，`~/.config/secrets.env` 的 API key 返回 `CONSUMER_SUSPENDED`，其代理地址返回 404。在有可用凭据的机器上重跑后才能决定写法。
 - 切换 agent：同一草稿中从 Codex 切到 Pi，`$` 不再弹出，`/` 弹出 Pi 的列表，插入 `/skill:codans-probe-459`。

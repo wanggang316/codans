@@ -296,14 +296,18 @@ struct ComposerSkillCompletionTests {
     #expect(completion.matches.contains { $0.name == "deploy" })
   }
 
-  @Test
-  func skillWithoutModelInvocationIsLeftOutMidPrompt() {
-    let completion = completion(skills: Self.skillsWithManualOnly)
-    completion.update(text: "then /deploy", caret: 12)
-    #expect(completion.matches.isEmpty)
-    #expect(!completion.isOpen)
-    completion.update(text: "then /", caret: 6)
-    #expect(completion.matches == Self.skills)
+  @Test(arguments: [SkillLocation.claudeCode, .codex, .pi])
+  func manualSkillCanBeSelectedAtAnyPromptPosition(location: SkillLocation) throws {
+    let token = try #require(location.invocationStyle.token(for: "deploy"))
+    for prefix in ["", "Please run ", "First review.\nThen run "] {
+      let completion = completion(location, skills: Self.skillsWithManualOnly)
+      let text = prefix + token + " on staging"
+      let caret = (prefix + token).utf16.count
+      completion.update(text: text, caret: caret)
+      #expect(completion.matches.map(\.name) == ["deploy"])
+      #expect(completion.isOpen)
+      #expect(completion.handle(.accept, text: text) == .insert(text: text, caret: caret + 1))
+    }
   }
 
   // MARK: - Pointer
