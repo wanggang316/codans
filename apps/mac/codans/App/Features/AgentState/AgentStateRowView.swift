@@ -331,7 +331,7 @@ struct AgentStateRowView: View {
   /// project, and state. The agent title is left out: it changes too
   /// often for a label VoiceOver reads on focus.
   private var accessibilityLabelText: String {
-    "\(entry.kind.displayName), \(worktreeName), \(projectName), \(sentenceVerb)" + (isSleeping ? ", sleeping" : "")
+    "\(entry.kind.displayName), \(worktreeName), \(projectName), \(sentenceVerb)"
   }
 }
 
