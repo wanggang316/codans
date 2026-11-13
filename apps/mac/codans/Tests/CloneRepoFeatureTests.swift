@@ -109,4 +109,21 @@ private actor HangingCommandRunner: CommandRunner {
     wasCancelled = Task.isCancelled
     return .timedOut
   }
+
+  func runStream(
+    executable: URL,
+    arguments: [String],
+    env: [String: String],
+    cwd: URL,
+    timeout: Duration,
+    launch: CommandLaunch,
+    splitOnCarriageReturn: Bool,
+    onSpawn: @escaping @Sendable (pid_t) -> Void,
+    onLine: @escaping @Sendable (String) -> Void
+  ) async -> CommandStreamOutcome {
+    _ = await run(
+      executable: executable, arguments: arguments, env: env, cwd: cwd,
+      timeout: timeout, maxOutputBytes: 0, launch: launch)
+    return Task.isCancelled ? .cancelled : .timedOut
+  }
 }
