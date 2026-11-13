@@ -9,7 +9,7 @@ import SwiftUI
 ///     · `normal`: the agent title (else the agent display name)
 ///       over the identity line `<WorktreeName> <ProjectName>`.
 ///     · `compact`: the identity line alone.
-/// - Trailing: sleep glyph (when sleeping) + state icon.
+/// - Trailing: state icon.
 ///
 /// Click target is the whole row — bound to `onTap`. The host (sidebar
 /// panel) intentionally does NOT collapse on tap; the row stays visible
@@ -40,11 +40,6 @@ struct AgentStateRowView: View {
   /// Defaults false so older call sites that don't pass it (legacy
   /// view, tests) still compile.
   var isSelected: Bool = false
-  /// True when no surface renders this row's pane: the agent still runs in
-  /// its daemon, but the app does not observe it, so `entry.state` is the
-  /// last known one. Draws a sleep glyph before the state icon. Defaults
-  /// false so legacy call sites and tests render unchanged.
-  var isSleeping: Bool = false
   /// Row density — `normal` keeps the two-line identity column;
   /// `compact` joins worktree and project on one line and tightens
   /// vertical padding. Defaults to `.normal` so the legacy default
@@ -84,14 +79,10 @@ struct AgentStateRowView: View {
       Spacer(minLength: 8)
       // While ⌘ is held the chord follows the status glyphs, which stay visible and
       // clickable; the identity column gives up the room the chord takes.
-      HStack(alignment: .center, spacing: 10) {
-        if isSleeping {
-          sleepGlyph
-        }
-        statusColumn
-      }
-      .commandKeyHint(chord: hotkeyHint, spacing: 8, font: .caption)
+      statusColumn
+        .commandKeyHint(chord: hotkeyHint, spacing: 8, font: .caption)
     }
+    .opacity(isSelected ? 1 : 0.9)
     .padding(.horizontal, 12)
     // Compact mode tightens the row to roughly two-thirds of the
     // normal vertical padding so a single-line identity reads as
@@ -155,9 +146,7 @@ struct AgentStateRowView: View {
   }
 
   /// Center column. `normal` puts the live agent title over the identity
-  /// line; `compact` shows the identity line alone. A cached state dims the
-  /// agent title the same as the state icon: both are the last value seen,
-  /// not a live one.
+  /// line; `compact` shows the identity line alone.
   @ViewBuilder
   private var identityColumn: some View {
     switch displayMode {
@@ -166,7 +155,6 @@ struct AgentStateRowView: View {
         AgentTitleLine(
           paneID: paneID,
           agentTitle: agentTitle,
-          isStateCached: isStateCached,
           presentation: AgentTitlePresentation(kind: entry.kind)
         )
         // A rebind to another agent kind starts a fresh presentation, so
@@ -252,21 +240,7 @@ struct AgentStateRowView: View {
     }
   }
 
-  /// Sleep marker for a pane no surface renders. Semibold compensates for
-  /// the thin strokes of the zzz glyph next to the filled state icons.
-  private var sleepGlyph: some View {
-    Image(systemName: "zzz")
-      .font(.caption2)
-      .fontWeight(.semibold)
-      .imageScale(.small)
-      .foregroundStyle(.secondary)
-      .help("Sleeping to save resources. Click to wake.")
-      .accessibilityIdentifier("agentState.row.\(paneID).sleeping")
-      .accessibilityLabel("Sleeping")
-  }
-
   private var isStateCached: Bool { entry.source == .cached }
-  static let cachedOpacity = 0.45
 
   /// Trailing status column — state icon + short verb, in a single
   /// HStack that the outer row's `alignment: .center` keeps vertically
@@ -275,12 +249,11 @@ struct AgentStateRowView: View {
   ///
   /// A cached state (no surface, and no program status report through the
   /// passive watcher) is the last one seen, not a live one: the icon is
-  /// dimmed and does not animate, so a restored `working` does not read as
+  /// static, so a restored `working` does not read as
   /// work in progress.
   private var statusColumn: some View {
     stateIcon
       .font(.caption2)
-      .opacity(isStateCached ? Self.cachedOpacity : 1)
       .help(isStateCached ? "Last known state. Click to wake and update it." : "")
       .accessibilityElement(children: .ignore)
       .accessibilityIdentifier("agentState.row.\(paneID).state")
@@ -358,7 +331,7 @@ struct AgentStateRowView: View {
   /// project, and state. The agent title is left out: it changes too
   /// often for a label VoiceOver reads on focus.
   private var accessibilityLabelText: String {
-    "\(entry.kind.displayName), \(worktreeName), \(projectName), \(sentenceVerb)" + (isSleeping ? ", sleeping" : "")
+    "\(entry.kind.displayName), \(worktreeName), \(projectName), \(sentenceVerb)"
   }
 }
 

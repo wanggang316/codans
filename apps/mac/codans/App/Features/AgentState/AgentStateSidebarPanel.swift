@@ -284,7 +284,6 @@ struct AgentStateSidebarPanel: View {
               projectColor: resolved?.projectColor,
               projectRemoteAuthority: resolved?.remoteHost?.displayAuthority,
               isSelected: item.paneID == focusedPaneID,
-              isSleeping: registry.isSleeping(item.paneID),
               displayMode: displayMode,
               agentTitle: { registry.agentTitle(for: item.paneID) },
               hotkeyHint: hotkeyHint(forRowAt: offset + 1),
