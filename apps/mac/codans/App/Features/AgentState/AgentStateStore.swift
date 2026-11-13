@@ -74,7 +74,7 @@ final class AgentStateStore {
   struct AgentTitle: Equatable, Sendable {
     let text: String
     /// The text comes from the quit snapshot, not from a live report. The
-    /// row dims it like a cached state until the agent reports again.
+    /// marker remains until the agent reports again.
     let isRestored: Bool
   }
 
