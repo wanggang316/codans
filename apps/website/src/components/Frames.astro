@@ -1,0 +1,29 @@
+---
+import Shot from "./Shot.astro";
+
+interface Props {
+  /** Shot ids, in order. One id gives a still image. */
+  ids: string[];
+  alt: string;
+  class?: string;
+}
+
+const { ids, alt, class: className = "" } = Astro.props;
+---
+
+{
+  ids.length === 1 ? (
+    <Shot id={ids[0]} alt={alt} class={className} />
+  ) : (
+    <div class="frames" data-frames>
+      {ids.map((id, index) => (
+        <div class="frame" data-active={index === 0 ? "" : undefined} aria-hidden={index === 0 ? undefined : "true"}>
+          <Shot id={id} alt={index === 0 ? alt : ""} class={className} />
+        </div>
+      ))}
+      <span class="frames-dots" aria-hidden="true">
+        {ids.map((_, index) => <i data-active={index === 0 ? "" : undefined} />)}
+      </span>
+    </div>
+  )
+}

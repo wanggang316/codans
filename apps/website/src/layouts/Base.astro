@@ -1,0 +1,66 @@
+---
+import "../styles/global.css";
+import Nav from "../components/Nav.astro";
+import Footer from "../components/Footer.astro";
+import { LANG_TAG, localePath, otherLocale, type Locale } from "../i18n";
+import { LINKS } from "../lib/links";
+
+interface Props {
+  locale: Locale;
+  /** Locale-independent path of the page: "/" or "/changelog". */
+  page: string;
+  title: string;
+  description: string;
+}
+
+const { locale, page, title, description } = Astro.props;
+const site = Astro.site!;
+const url = (target: Locale) => new URL(localePath(target, page), site).href;
+const other = otherLocale(locale);
+---
+
+<!doctype html>
+<html lang={LANG_TAG[locale]}>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <meta name="theme-color" content="#f4f5f7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#17181b" media="(prefers-color-scheme: dark)" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={url(locale)} />
+    <link rel="alternate" hreflang={LANG_TAG[locale]} href={url(locale)} />
+    <link rel="alternate" hreflang={LANG_TAG[other]} href={url(other)} />
+    <link rel="alternate" hreflang="x-default" href={url("en")} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={url(locale)} />
+    <meta property="og:image" content={new URL("/shots/og.png", site).href} />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+  </head>
+  <body>
+    <Nav locale={locale} page={page} />
+    <main>
+      <slot />
+    </main>
+    <Footer locale={locale} />
+
+    <script is:inline define:vars={{ api: LINKS.latestReleaseApi }}>
+      // Download links start at the stable-named asset URL. Point them at the
+      // `.dmg` of the newest release, so the download also works when that
+      // release has no stable-named asset.
+      const links = document.querySelectorAll("a[data-dmg]");
+      if (links.length) {
+        fetch(api, { headers: { Accept: "application/vnd.github+json" } })
+          .then((response) => (response.ok ? response.json() : Promise.reject()))
+          .then((release) => {
+            const dmg = (release.assets ?? []).find((asset) => asset.name.toLowerCase().endsWith(".dmg"));
+            if (dmg) links.forEach((link) => (link.href = dmg.browser_download_url));
+          })
+          .catch(() => {});
+      }
+    </script>
+  </body>
+</html>

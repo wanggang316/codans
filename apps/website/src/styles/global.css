@@ -1,0 +1,571 @@
+@import "tailwindcss";
+
+/* The page follows the system appearance, like the app does. */
+:root {
+  color-scheme: light dark;
+  --canvas: #fafaf9;
+  --surface: #ffffff;
+  --sunken: #efefec;
+  --ink: #131313;
+  --muted: #5c5c58;
+  --line: #dddbd6;
+  --accent: #0a60ff;
+  --accent-ink: #ffffff;
+  --inverse: #1b1b1a;
+  --inverse-ink: #f4f4f1;
+  --inverse-muted: #a9a9a3;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #111112;
+    --surface: #202022;
+    --sunken: #19191b;
+    --ink: #ededeb;
+    --muted: #a1a19c;
+    --line: #2d2d30;
+    --accent: #4c8dff;
+    --accent-ink: #0b1020;
+    --inverse: #222224;
+    --inverse-ink: #ededeb;
+    --inverse-muted: #a1a19c;
+  }
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-sunken: var(--sunken);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  /* System fonts: SF Pro and PingFang on the Macs this product runs on. */
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", "Segoe UI",
+    sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "PingFang SC", monospace;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+  body {
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 17px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 6px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+}
+
+@layer components {
+  .wrap {
+    max-width: 1200px;
+    margin-inline: auto;
+    padding-inline: 24px;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 44px;
+    padding: 0 18px;
+    border-radius: 10px;
+    font-size: 16px;
+    font-weight: 550;
+    white-space: nowrap;
+  }
+  .btn-primary {
+    background: var(--ink);
+    color: var(--canvas);
+  }
+  .btn-primary:hover {
+    background: var(--accent);
+    color: var(--accent-ink);
+  }
+  .btn-quiet {
+    box-shadow: inset 0 0 0 1px var(--line);
+  }
+  .btn-quiet:hover {
+    background: var(--surface);
+  }
+  /* An icon link in the navigation: a 34px target around an 18px glyph. */
+  .nav-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    color: var(--muted);
+  }
+  .nav-icon:hover {
+    background: var(--sunken);
+    color: var(--ink);
+  }
+  .btn-small {
+    height: 34px;
+    padding: 0 13px;
+    border-radius: 8px;
+    font-size: 14px;
+  }
+
+  /* Display type. Latin headlines are set tight; CJK needs looser metrics. */
+  .display {
+    font-size: clamp(34px, 4.7vw, 58px);
+    line-height: 1.06;
+    font-weight: 500;
+    letter-spacing: -0.032em;
+    text-wrap: balance;
+  }
+  .heading {
+    font-size: clamp(25px, 2.6vw, 33px);
+    line-height: 1.16;
+    font-weight: 500;
+    letter-spacing: -0.022em;
+    text-wrap: balance;
+  }
+  :lang(zh) .display {
+    line-height: 1.18;
+    letter-spacing: -0.01em;
+  }
+  :lang(zh) .heading {
+    line-height: 1.3;
+    letter-spacing: 0;
+  }
+
+  /* Rich text that comes from the dictionaries through `set:html`. */
+  .prose-copy {
+    color: var(--muted);
+    text-wrap: pretty;
+  }
+  .prose-copy kbd,
+  .prose-copy code {
+    padding: 1px 6px;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    background: var(--surface);
+    color: var(--ink);
+    font-family: var(--font-mono);
+    font-size: 0.8em;
+  }
+  .prose-copy .tag {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 8px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 12px;
+    vertical-align: 2px;
+  }
+  .prose-copy strong {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .prose-copy a {
+    color: var(--accent);
+  }
+  .prose-copy a:hover {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  /* Body copy is set in the monospaced face; headings stay in the system sans. */
+  .copy {
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 14px;
+    line-height: 1.62;
+    text-wrap: pretty;
+  }
+  .copy kbd,
+  .copy code {
+    padding: 1px 5px;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    background: var(--surface);
+    color: var(--ink);
+    font-family: var(--font-mono);
+    font-size: 0.92em;
+  }
+  /* Key symbols are set in the system sans: the monospaced face draws them small and uneven. */
+  .copy kbd,
+  .prose-copy kbd {
+    padding: 1px 7px;
+    font-family: var(--font-sans);
+    font-size: 1em;
+    letter-spacing: 0.08em;
+  }
+  .subheading {
+    font-size: 17px;
+    line-height: 1.3;
+    font-weight: 550;
+    letter-spacing: -0.01em;
+  }
+
+  /* Product media. */
+  .shot {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 10px;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 12%, transparent);
+  }
+
+  /* The tour: full scenes on a stage. A scene is 1664 x 1044 and its window is 1440 wide, so at
+     full size the window is as wide as the text column and the backdrop extends past it. */
+  .tour {
+    position: relative;
+    width: min(100% - 32px, (1200px - 48px) * 1664 / 1440);
+    margin: 56px auto 0;
+  }
+  .tour-views {
+    display: grid;
+  }
+  .tour-view {
+    grid-area: 1 / 1;
+    visibility: hidden;
+    opacity: 0;
+    transition:
+      opacity 0.5s ease,
+      visibility 0s linear 0.5s;
+  }
+  .tour-view[data-active] {
+    visibility: visible;
+    opacity: 1;
+    transition: opacity 0.5s ease;
+  }
+  /* A scene has its own backdrop, so it gets no outline. */
+  .tour-shot {
+    border-radius: clamp(12px, 1.6vw, 26px);
+    box-shadow: none;
+  }
+  /* The segments sit on the backdrop, in the margin below the window (72 of 1044). A dark pill
+     keeps them readable on every backdrop. */
+  .tour-tabs {
+    position: absolute;
+    bottom: calc(3.45% - 10px);
+    left: 50%;
+    height: 20px;
+    padding: 0 10px;
+    display: flex;
+    gap: 6px;
+    border-radius: 999px;
+    background: rgb(0 0 0 / 0.32);
+    backdrop-filter: blur(10px);
+    transform: translateX(-50%);
+  }
+  @media (max-width: 640px) {
+    .tour-tabs {
+      bottom: calc(3.45% - 5px);
+      height: 10px;
+      padding: 0 6px;
+      gap: 4px;
+    }
+  }
+  .tour-tab {
+    position: relative;
+    width: clamp(18px, 3vw, 40px);
+    height: 100%;
+    cursor: pointer;
+  }
+  .tour-tab::before,
+  .tour-tab::after {
+    content: "";
+    position: absolute;
+    inset: calc(50% - 1.5px) 0 auto;
+    height: 3px;
+    border-radius: 2px;
+    background: rgb(255 255 255 / 0.4);
+  }
+  .tour-tab::after {
+    background: #fff;
+    transform: scaleX(0);
+    transform-origin: left;
+  }
+  .tour-tab:hover::before {
+    background: rgb(255 255 255 / 0.65);
+  }
+  .tour-tab[aria-selected="true"]::after {
+    transform: scaleX(1);
+  }
+  /* While the tour advances by itself, the current segment fills like a timer. */
+  .tour[data-auto] .tour-tab[aria-selected="true"]::after {
+    animation: tour-fill 6s linear;
+  }
+  @keyframes tour-fill {
+    from {
+      transform: scaleX(0);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tour-view,
+    .tour-view[data-active] {
+      transition: none;
+    }
+  }
+
+  /* Sections. */
+  .section {
+    margin-top: 112px;
+  }
+  .section-head {
+    max-width: 46em;
+  }
+  .section-head .copy {
+    margin-top: 16px;
+    font-size: 15px;
+  }
+
+  /* The theme wall: a tilted plane of tiles behind a window as wide as a tour scene. Every
+     second column sits half a tile lower. */
+  .themes {
+    position: relative;
+    width: min(100vw - 32px, (1200px - 48px) * 1664 / 1440);
+    height: clamp(280px, 36vw, 460px);
+    margin: 40px 0 0 50%;
+    overflow: hidden;
+    border-radius: clamp(12px, 1.6vw, 26px);
+    transform: translateX(-50%);
+  }
+  .themes-plane {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    display: flex;
+    gap: 14px;
+    width: max-content;
+    transform: translate(-50%, -50%) rotateX(42deg) rotateZ(-22deg);
+  }
+  .themes-column {
+    flex: none;
+    width: 190px;
+  }
+  .themes-column:nth-child(even) {
+    transform: translateY(-76px);
+  }
+  .themes-column > li {
+    padding-bottom: 14px;
+  }
+
+  /* A card: media on top, then a title and one short paragraph. */
+  .card {
+    padding: 12px 12px 22px;
+    border-radius: 14px;
+    background: var(--sunken);
+  }
+  article.card {
+    transition:
+      background-color 0.2s ease,
+      box-shadow 0.2s ease;
+  }
+  article.card:hover {
+    background: color-mix(in srgb, var(--sunken) 55%, var(--surface));
+    box-shadow: 0 0 0 1px var(--line);
+  }
+  /* Frames: stills of one flow in the same place. The script shows one at a time. */
+  .frames {
+    position: relative;
+    display: grid;
+  }
+  .frame {
+    grid-area: 1 / 1;
+    opacity: 0;
+    transition: opacity 0.35s ease;
+  }
+  .frame[data-active] {
+    opacity: 1;
+  }
+  .frames-dots {
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+    display: flex;
+    gap: 4px;
+    padding: 5px 7px;
+    border-radius: 999px;
+    background: rgb(0 0 0 / 0.45);
+  }
+  .frames-dots i {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: rgb(255 255 255 / 0.4);
+  }
+  .frames-dots i[data-active] {
+    background: #fff;
+  }
+  .card-flush {
+    padding: 12px;
+  }
+  .card-shot {
+    aspect-ratio: 16 / 10;
+    border-radius: 8px;
+    object-fit: cover;
+    object-position: top left;
+  }
+  .card-title {
+    margin: 18px 8px 0;
+    font-size: 16px;
+    font-weight: 550;
+    letter-spacing: -0.008em;
+  }
+  .card-title .tag {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 8px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-weight: 400;
+    vertical-align: 2px;
+  }
+  .card-body {
+    margin: 6px 8px 0;
+    font-size: 13.5px;
+  }
+
+  .panel {
+    padding: 28px;
+    border-radius: 14px;
+    background: var(--sunken);
+  }
+  /* A capability list: a check mark for each line, a dash for one that does not apply. */
+  .checks > li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px 10px;
+    padding: 9px 0 9px 28px;
+    border-top: 1px solid var(--line);
+    color: var(--ink);
+    background: no-repeat 2px 12px / 15px
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%232da44e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3 8.5 3.2 3.2L13 4.8'/%3E%3C/svg%3E");
+  }
+  .checks > li[data-unsupported] {
+    color: var(--muted);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%238b8b86' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M4 8h8'/%3E%3C/svg%3E");
+  }
+  .checks small {
+    color: var(--muted);
+    font-size: 12.5px;
+  }
+  .rows > li {
+    padding: 22px 0;
+    border-top: 1px solid var(--line);
+  }
+  .rows > li:first-child {
+    padding-top: 4px;
+    border-top: 0;
+  }
+  .rows > li:last-child {
+    padding-bottom: 4px;
+  }
+
+  /* Pill tabs, like the filter bar of the sidebar: the selected pill takes its own color. */
+  .pill-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .pill-tab {
+    height: 34px;
+    padding: 0 16px;
+    border-radius: 999px;
+    background: var(--sunken);
+    color: var(--muted);
+    font-size: 14px;
+    font-weight: 550;
+    cursor: pointer;
+    transition:
+      background-color 0.2s ease,
+      color 0.2s ease;
+  }
+  .pill-tab:hover {
+    color: var(--ink);
+  }
+  .pill-tab[aria-selected="true"] {
+    background: var(--tab);
+    color: #fff;
+  }
+  /* A card in a light shade of the color of its tab. */
+  .card-tinted {
+    padding: 12px;
+    background: color-mix(in srgb, var(--tab) 7%, var(--sunken));
+  }
+
+  /* A switcher list: the selected item is raised, the others are quiet. */
+  .switcher-list {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    padding: 12px;
+  }
+  .switcher-item {
+    display: grid;
+    gap: 6px;
+    padding: 16px 18px;
+    border-radius: 10px;
+    text-align: left;
+    cursor: pointer;
+    opacity: 0.62;
+    transition:
+      opacity 0.2s ease,
+      background-color 0.2s ease;
+  }
+  .switcher-item:hover {
+    opacity: 1;
+  }
+  .switcher-item[aria-selected="true"] {
+    background: var(--surface);
+    box-shadow: 0 0 0 1px var(--line);
+    opacity: 1;
+  }
+
+  /* The block that turns the page colors around. */
+  .inverse {
+    padding: 40px 32px;
+    border-radius: 14px;
+    background: var(--inverse);
+    color: var(--inverse-ink);
+  }
+  .cta {
+    padding: clamp(48px, 7vw, 96px) clamp(28px, 5vw, 72px);
+  }
+  .cta .display {
+    max-width: 14em;
+    font-size: clamp(30px, 3.8vw, 46px);
+  }
+  .inverse .copy {
+    color: var(--inverse-muted);
+  }
+  .inverse .btn-primary {
+    background: var(--inverse-ink);
+    color: var(--inverse);
+  }
+  .inverse .btn-quiet {
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--inverse-ink) 28%, transparent);
+  }
+  .inverse .btn-quiet:hover {
+    background: color-mix(in srgb, var(--inverse-ink) 10%, transparent);
+  }
+}

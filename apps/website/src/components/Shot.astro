@@ -1,0 +1,44 @@
+---
+import { resolveShot } from "../lib/shots";
+
+interface Props {
+  /** Shot id: the file name stem under `public/shots/`. */
+  id: string;
+  alt: string;
+  /** The first shot on the page loads eagerly; the others load lazily. */
+  eager?: boolean;
+  class?: string;
+}
+
+const { id, alt, eager = false, class: className = "" } = Astro.props;
+const shot = resolveShot(id);
+---
+
+{
+  shot.video ? (
+    <video
+      class:list={["shot", className]}
+      width={shot.width}
+      height={shot.height}
+      poster={shot.src}
+      aria-label={alt}
+      data-hover-play
+      loop
+      muted
+      playsinline
+      preload="none"
+    >
+      <source src={shot.video} type="video/mp4" />
+    </video>
+  ) : (
+    <img
+      class:list={["shot", className]}
+      src={shot.src}
+      width={shot.width}
+      height={shot.height}
+      alt={alt}
+      loading={eager ? "eager" : "lazy"}
+      decoding="async"
+    />
+  )
+}

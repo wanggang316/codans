@@ -1,0 +1,422 @@
+---
+import Base from "../layouts/Base.astro";
+import BrewCommand from "../components/BrewCommand.astro";
+import Download from "../components/Download.astro";
+import Frames from "../components/Frames.astro";
+import GitHubIcon from "../components/GitHubIcon.astro";
+import GitLabIcon from "../components/GitLabIcon.astro";
+import Shot from "../components/Shot.astro";
+import { dictionary, type Locale } from "../i18n";
+import { LINKS } from "../lib/links";
+import { THEME_COLUMNS } from "../lib/themes";
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const t = dictionary(locale);
+
+// The colors of the sidebar filter pills in the app.
+const FILTER_COLORS: Record<string, string> = {
+  remote: "#5b7cfa",
+  workspace: "#d946ef",
+  pr: "#34c759",
+  unread: "#ff9f0a",
+};
+---
+
+<Base locale={locale} page="/" title={t.meta.title} description={t.meta.description}>
+  <div class="wrap">
+    <section class="pt-12 sm:pt-20">
+      <h1 class="display max-w-[16em]" set:html={t.hero.title} />
+      <p class="copy mt-6 max-w-[46em] text-[16px]">{t.hero.lede}</p>
+      <div class="mt-8">
+        <Download locale={locale} />
+      </div>
+      <p class="copy mt-3.5 text-[13px]">{t.hero.requirements}</p>
+    </section>
+
+  </div>
+
+  <section class="tour" data-tour aria-label={t.hero.tabsLabel}>
+    <div class="tour-views">
+      {
+        t.hero.views.map((view, index) => (
+          <div
+            class="tour-view"
+            id={`tour-view-${index}`}
+            role="tabpanel"
+            aria-labelledby={`tour-tab-${index}`}
+            data-active={index === 0 ? "" : undefined}
+          >
+            <Shot id={view.shot} alt={view.alt} eager={index === 0} class="tour-shot" />
+          </div>
+        ))
+      }
+    </div>
+    <div class="tour-tabs" role="tablist" aria-label={t.hero.tabsLabel}>
+      {
+        t.hero.views.map((view, index) => (
+          <button
+            type="button"
+            role="tab"
+            class="tour-tab"
+            id={`tour-tab-${index}`}
+            aria-label={view.label}
+            title={view.label}
+            aria-controls={`tour-view-${index}`}
+            aria-selected={index === 0 ? "true" : "false"}
+            tabindex={index === 0 ? 0 : -1}
+            data-view={index}
+          />
+        ))
+      }
+    </div>
+  </section>
+
+  <div class="wrap">
+    <section class="section" id="agent-first">
+      <header class="section-head">
+        <h2 class="heading">{t.agentFirst.title}</h2>
+        <p class="copy">{t.agentFirst.lede}</p>
+      </header>
+      <div class="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {
+          t.agentFirst.cards.map((card) => (
+            <article class="card">
+              <Frames ids={card.shots} alt={card.alt} class="card-shot" />
+              <h3 class="card-title" set:html={card.title} />
+              <p class="copy card-body" set:html={card.body} />
+            </article>
+          ))
+        }
+      </div>
+    </section>
+
+    <section class="section" id="parallel">
+      <header class="section-head">
+        <h2 class="heading">{t.parallel.title}</h2>
+        <p class="copy">{t.parallel.lede}</p>
+      </header>
+      <div class="mt-10 grid gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+        <div class="card card-flush">
+          <Shot id="sidebar" alt={t.parallel.sidebarAlt} class="h-full max-h-[620px] object-cover object-top" />
+        </div>
+        <ul class="rows panel flex flex-col justify-center">
+          {
+            t.parallel.points.map((point) => (
+              <li>
+                <h3 class="subheading">{point.title}</h3>
+                <p class="copy mt-2">{point.body}</p>
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+    </section>
+
+    <section class="section" id="pull-requests">
+      <header class="section-head">
+        <h2 class="heading">{t.pr.title}</h2>
+        <p class="copy prose-copy" set:html={t.pr.lede} />
+      </header>
+      <div class="mt-10 grid gap-4 sm:grid-cols-2">
+        {
+          t.pr.platforms.map((platform) => (
+            <article class="panel">
+              <header class="flex items-center gap-3.5">
+                {platform.id === "github" ? <GitHubIcon size={30} /> : <GitLabIcon size={30} />}
+                <div>
+                  <h3 class="subheading">{platform.name}</h3>
+                  <p class="copy mt-0.5 text-[13px]" set:html={platform.via} />
+                </div>
+              </header>
+              <ul class="checks copy mt-6">
+                {platform.items.map((item) => (
+                  <li data-unsupported={"unsupported" in item ? "" : undefined}>
+                    <span>{item.text}</span>
+                    {"unsupported" in item && <small>{item.unsupported}</small>}
+                  </li>
+                ))}
+              </ul>
+            </article>
+          ))
+        }
+      </div>
+    </section>
+
+    <section class="section" id="projects">
+      <header class="section-head">
+        <h2 class="heading">{t.more.projects.title}</h2>
+        <p class="copy">{t.more.projects.lede}</p>
+      </header>
+      <div class="mt-10" data-switcher>
+        <div class="pill-tabs" role="tablist" aria-label={t.more.projects.title}>
+          {
+            t.more.projects.items.map((item, index) => (
+              <button
+                type="button"
+                role="tab"
+                class="pill-tab"
+                style={`--tab: ${FILTER_COLORS[item.id]}`}
+                id={`filter-tab-${item.id}`}
+                aria-controls={`filter-panel-${item.id}`}
+                aria-selected={index === 0 ? "true" : "false"}
+                tabindex={index === 0 ? 0 : -1}
+              >
+                {item.tab}
+              </button>
+            ))
+          }
+        </div>
+        <div class="frames mt-4">
+          {
+            t.more.projects.items.map((item, index) => (
+              <div
+                class="frame card card-tinted grid items-center gap-x-10 gap-y-2 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]"
+                style={`--tab: ${FILTER_COLORS[item.id]}`}
+                id={`filter-panel-${item.id}`}
+                role="tabpanel"
+                aria-labelledby={`filter-tab-${item.id}`}
+                data-active={index === 0 ? "" : undefined}
+              >
+                <Shot id={`filter-${item.id}`} alt={item.alt} class="card-shot" />
+                <div class="lg:pr-6">
+                  <h3 class="card-title">{item.title}</h3>
+                  <p class="copy card-body">{item.body}</p>
+                </div>
+              </div>
+            ))
+          }
+        </div>
+      </div>
+
+    </section>
+
+    <section class="section" id="themes">
+      <header class="section-head">
+        <h2 class="heading">{t.more.themes.title}</h2>
+        <p class="copy">{t.more.themes.body}</p>
+      </header>
+      <div class="themes">
+        <div class="themes-plane">
+          {
+            // The plane must cover the tilted window, so the columns repeat. A repeated tile is
+            // decoration: it has no alternative text.
+            [0, 1].flatMap((pass) =>
+              THEME_COLUMNS.map((column) => (
+                <ul class="themes-column" aria-hidden={pass ? "true" : undefined}>
+                  {[...column, ...column, ...column].map((item, index) => (
+                    <li aria-hidden={!pass && index >= column.length ? "true" : undefined}>
+                      <Shot
+                        id={item.shot}
+                        alt={!pass && index < column.length ? `${item.name} ${t.more.themes.altSuffix}` : ""}
+                        class="rounded-md"
+                      />
+                      <p class="copy mt-1.5 text-[11.5px]">{item.name}</p>
+                    </li>
+                  ))}
+                </ul>
+              )),
+            )
+          }
+        </div>
+      </div>
+
+    </section>
+
+    <section class="section" id="quick-actions">
+      <header class="section-head">
+        <h2 class="heading">{t.more.speed.title}</h2>
+        <p class="copy">{t.more.speed.lede}</p>
+      </header>
+      <div class="mt-10 grid gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]" data-switcher>
+        <div class="panel switcher-list" role="tablist" aria-orientation="vertical" aria-label={t.more.speed.title}>
+          {
+            t.more.speed.items.map((item, index) => (
+              <button
+                type="button"
+                role="tab"
+                class="switcher-item"
+                id={`quick-tab-${index}`}
+                aria-controls={`quick-panel-${index}`}
+                aria-selected={index === 0 ? "true" : "false"}
+                tabindex={index === 0 ? 0 : -1}
+              >
+                <span class="subheading">{item.title}</span>
+                <span class="copy" set:html={item.body} />
+              </button>
+            ))
+          }
+        </div>
+        <div class="card card-flush frames">
+          {
+            t.more.speed.items.map((item, index) => (
+              <div
+                class="frame"
+                id={`quick-panel-${index}`}
+                role="tabpanel"
+                aria-labelledby={`quick-tab-${index}`}
+                data-active={index === 0 ? "" : undefined}
+              >
+                <Shot id={item.shot} alt={item.alt} class="card-shot" />
+              </div>
+            ))
+          }
+        </div>
+      </div>
+    </section>
+
+    <section class="inverse cta mt-24">
+      <h2 class="display">{t.cta.title}</h2>
+      <div class="mt-9 flex flex-wrap items-center gap-3">
+        <Download locale={locale} />
+        <a href={LINKS.repo} class="btn btn-quiet">
+          <GitHubIcon size={17} />
+          {t.cta.source}
+        </a>
+      </div>
+      <div class="mt-4">
+        <BrewCommand locale={locale} />
+      </div>
+      <p class="copy mt-4 text-[13px]">{t.hero.requirements}</p>
+    </section>
+  </div>
+</Base>
+
+<script>
+  // Frames and recordings in a card play while the pointer is over the card. On a device
+  // without hover they play while they are on screen.
+  const canHover = window.matchMedia("(hover: hover)").matches;
+  const whileActive = (target: Element, start: () => void, stop: () => void) => {
+    if (canHover) {
+      target.addEventListener("mouseenter", start);
+      target.addEventListener("mouseleave", stop);
+    } else {
+      new IntersectionObserver(([entry]) => (entry.isIntersecting ? start() : stop()), {
+        threshold: 0.7,
+      }).observe(target);
+    }
+  };
+
+  for (const frames of document.querySelectorAll<HTMLElement>("[data-frames]")) {
+    const items = [...frames.querySelectorAll<HTMLElement>(".frame")];
+    const dots = [...frames.querySelectorAll<HTMLElement>(".frames-dots i")];
+    let current = 0;
+    let timer: number | undefined;
+    const show = (index: number) => {
+      current = index % items.length;
+      items.forEach((item, i) => item.toggleAttribute("data-active", i === current));
+      dots.forEach((dot, i) => dot.toggleAttribute("data-active", i === current));
+    };
+    whileActive(
+      frames.closest(".card") ?? frames,
+      () => {
+        window.clearInterval(timer);
+        show(1);
+        timer = window.setInterval(() => show(current + 1), 3000);
+      },
+      () => {
+        window.clearInterval(timer);
+        show(0);
+      },
+    );
+    // A click hands the frames to the reader: each click shows the next frame, and the
+    // frames play by themselves again the next time the card becomes active.
+    frames.addEventListener("click", () => {
+      window.clearInterval(timer);
+      show(current + 1);
+    });
+  }
+
+  for (const video of document.querySelectorAll<HTMLVideoElement>("video[data-hover-play]")) {
+    whileActive(
+      video.closest(".card") ?? video,
+      () => void video.play().catch(() => {}),
+      () => {
+        video.pause();
+        video.currentTime = 0;
+      },
+    );
+  }
+
+  // A switcher: a list of tabs on one side and one picture for each tab on the other.
+  for (const switcher of document.querySelectorAll<HTMLElement>("[data-switcher]")) {
+    const tabs = [...switcher.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    const panels = [...switcher.querySelectorAll<HTMLElement>('[role="tabpanel"]')];
+    const select = (index: number) => {
+      const next = (index + tabs.length) % tabs.length;
+      tabs.forEach((tab, i) => {
+        tab.setAttribute("aria-selected", String(i === next));
+        tab.tabIndex = i === next ? 0 : -1;
+      });
+      panels.forEach((panel, i) => panel.toggleAttribute("data-active", i === next));
+      return next;
+    };
+    tabs.forEach((tab, i) => {
+      tab.addEventListener("click", () => select(i));
+      tab.addEventListener("keydown", (event) => {
+        const step =
+          event.key === "ArrowDown" || event.key === "ArrowRight"
+            ? 1
+            : event.key === "ArrowUp" || event.key === "ArrowLeft"
+              ? -1
+              : 0;
+        if (!step) return;
+        event.preventDefault();
+        tabs[select(i + step)].focus();
+      });
+    });
+  }
+
+  // The tour advances by itself until the reader takes over.
+  for (const tour of document.querySelectorAll<HTMLElement>("[data-tour]")) {
+    const tabs = [...tour.querySelectorAll<HTMLButtonElement>("[data-view]")];
+    const panels = [...tour.querySelectorAll<HTMLElement>(".tour-view")];
+    let current = 0;
+    let timer: number | undefined;
+
+    const show = (index: number) => {
+      current = (index + tabs.length) % tabs.length;
+      tabs.forEach((tab, i) => {
+        tab.setAttribute("aria-selected", String(i === current));
+        tab.tabIndex = i === current ? 0 : -1;
+      });
+      panels.forEach((panel, i) => panel.toggleAttribute("data-active", i === current));
+    };
+    const stop = () => {
+      window.clearInterval(timer);
+      timer = undefined;
+      tour.removeAttribute("data-auto");
+    };
+
+    tabs.forEach((tab, i) => {
+      tab.addEventListener("click", () => {
+        stop();
+        show(i);
+      });
+      tab.addEventListener("keydown", (event) => {
+        const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+        if (!step) return;
+        event.preventDefault();
+        stop();
+        show(current + step);
+        tabs[current].focus();
+      });
+    });
+    // A click on the left half of a scene goes back; on the right half, forward.
+    const views = tour.querySelector<HTMLElement>(".tour-views");
+    views?.addEventListener("click", (event) => {
+      const box = views.getBoundingClientRect();
+      stop();
+      show(current + (event.clientX < box.left + box.width / 2 ? -1 : 1));
+    });
+    tour.addEventListener("pointerdown", stop);
+
+    if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      tour.toggleAttribute("data-auto", true);
+      timer = window.setInterval(() => show(current + 1), 6000);
+    }
+  }
+</script>

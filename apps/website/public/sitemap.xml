@@ -5,7 +5,15 @@
     <changefreq>weekly</changefreq>
   </url>
   <url>
+    <loc>https://codans.dev/zh</loc>
+    <changefreq>weekly</changefreq>
+  </url>
+  <url>
     <loc>https://codans.dev/changelog</loc>
+    <changefreq>weekly</changefreq>
+  </url>
+  <url>
+    <loc>https://codans.dev/zh/changelog</loc>
     <changefreq>weekly</changefreq>
   </url>
 </urlset>

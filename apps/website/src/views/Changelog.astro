@@ -1,0 +1,79 @@
+---
+import raw from "../../../../CHANGELOG.md?raw";
+import Base from "../layouts/Base.astro";
+import { dictionary, LANG_TAG, type Locale } from "../i18n";
+import { parseChangelog } from "../lib/changelog";
+import { renderInlineMarkdown } from "../lib/inline-markdown";
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const t = dictionary(locale);
+const releases = parseChangelog(raw);
+
+const dateFormat = new Intl.DateTimeFormat(LANG_TAG[locale], {
+  year: "numeric",
+  month: "long",
+  day: "numeric",
+  timeZone: "UTC",
+});
+
+function formatDate(iso: string | null): string {
+  if (!iso) return "";
+  const match = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return iso;
+  return dateFormat.format(new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))));
+}
+---
+
+<Base locale={locale} page="/changelog" title={t.meta.changelogTitle} description={t.changelog.subtitle}>
+  <div class="mx-auto max-w-[860px] px-6">
+    <header class="pt-10 pb-8 sm:pt-18">
+      <h1 class="display">{t.changelog.title}</h1>
+      <p class="mt-4 text-[19px] text-muted">{t.changelog.subtitle}</p>
+    </header>
+
+    {
+      releases.map((release, index) => (
+        <article
+          id={`v${release.version}`}
+          class="scroll-mt-6 border-t border-line py-10 md:grid md:grid-cols-[170px_minmax(0,1fr)] md:gap-x-10"
+        >
+          <div class="md:sticky md:top-6 md:self-start">
+            <h2 class="flex items-center gap-2.5">
+              <a href={`#v${release.version}`} class="font-mono text-lg font-semibold hover:text-accent">
+                {release.version}
+              </a>
+              {index === 0 && (
+                <span class="rounded-full border border-line px-2 py-px text-xs text-muted">{t.changelog.latest}</span>
+              )}
+            </h2>
+            {release.date && (
+              <time datetime={release.date} class="mt-1 block text-sm text-muted">
+                {formatDate(release.date)}
+              </time>
+            )}
+          </div>
+
+          <div class="mt-5 flex flex-col gap-7 md:mt-0">
+            {release.groups.map((group) => (
+              <section>
+                <h3 class="text-[15px] font-semibold">{t.changelog.kinds[group.kind] ?? group.kind}</h3>
+                <ul class="mt-2.5 flex flex-col gap-2.5">
+                  {group.items.map((item) => (
+                    <li
+                      class="prose-copy relative pl-5 text-[15.5px] leading-relaxed before:absolute before:top-[0.68em] before:left-1 before:size-1 before:rounded-full before:bg-muted"
+                      set:html={renderInlineMarkdown(item)}
+                    />
+                  ))}
+                </ul>
+              </section>
+            ))}
+          </div>
+        </article>
+      ))
+    }
+  </div>
+</Base>

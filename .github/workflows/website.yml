@@ -4,11 +4,11 @@
 # configured with build_type=workflow + custom domain via the repo settings,
 # so no gh-pages branch or CNAME file is involved.
 #
-# CHANGELOG.md is in the trigger set because the on-site /changelog page bakes
-# the repo-root CHANGELOG.md into the bundle at build time (see the
-# virtual:changelog-raw plugin in apps/website/vite.config.ts). Release bumps
-# touch only CHANGELOG.md, so without this path the published changelog would
-# lag a version behind every release.
+# CHANGELOG.md is in the trigger set because the on-site /changelog page
+# renders the repo-root CHANGELOG.md at build time (see
+# apps/website/src/views/Changelog.astro). Release bumps touch only
+# CHANGELOG.md, so without this path the published changelog would lag a
+# version behind every release.
 name: website
 
 on:

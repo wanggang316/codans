@@ -1,0 +1,36 @@
+---
+import { dictionary, type Locale } from "../i18n";
+import { LINKS } from "../lib/links";
+
+interface Props {
+  locale: Locale;
+}
+
+const t = dictionary(Astro.props.locale);
+---
+
+<div
+  class="inline-flex h-11 max-w-full items-center gap-3 rounded-[10px] border border-line bg-surface pr-2 pl-3.5 font-mono text-sm text-ink"
+>
+  <span class="text-muted select-none" aria-hidden="true">$</span>
+  <span class="truncate">{LINKS.brew}</span>
+  <button
+    type="button"
+    class="h-[30px] flex-none cursor-pointer rounded-[7px] px-2.5 font-sans text-[13px] whitespace-nowrap text-muted hover:bg-sunken hover:text-ink"
+    data-copy={LINKS.brew}
+    data-copied={t.hero.copied}
+  >
+    {t.hero.copy}
+  </button>
+</div>
+
+<script>
+  for (const button of document.querySelectorAll<HTMLButtonElement>("button[data-copy]")) {
+    const label = button.textContent;
+    button.addEventListener("click", async () => {
+      await navigator.clipboard.writeText(button.dataset.copy!);
+      button.textContent = button.dataset.copied!;
+      setTimeout(() => (button.textContent = label), 1400);
+    });
+  }
+</script>
