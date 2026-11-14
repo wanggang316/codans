@@ -13,9 +13,6 @@ interface Props {
 const { locale } = Astro.props;
 const t = dictionary(locale);
 
-// The tour is one flat list of views; each view remembers its step.
-const views = t.hero.steps.flatMap((step, stepIndex) => step.views.map((view) => ({ ...view, stepIndex })));
-
 // Commands and their output stay in English in every locale.
 const terminal = [
   { line: "codans agent status" },
@@ -42,56 +39,45 @@ const noteColumn = Math.max(...terminal.map((entry) => entry.line?.length ?? 0))
       <p class="copy mt-3.5 text-[13px]">{t.hero.requirements}</p>
     </section>
 
-    <section class="tour mt-12" data-tour aria-label={t.hero.tabsLabel}>
-      <div class="tour-steps" role="tablist" aria-label={t.hero.tabsLabel}>
-        {
-          t.hero.steps.map((step, stepIndex) => (
-            <div class="tour-step">
-              <p class="tour-step-name">
-                <span class="tour-step-number">{stepIndex + 1}</span>
-                {step.name}
-              </p>
-              <div class="flex flex-wrap gap-1.5">
-                {views.map(
-                  (view, index) =>
-                    view.stepIndex === stepIndex && (
-                      <button
-                        type="button"
-                        role="tab"
-                        class="tour-tab"
-                        id={`tour-tab-${index}`}
-                        aria-controls={`tour-view-${index}`}
-                        aria-selected={index === 0 ? "true" : "false"}
-                        tabindex={index === 0 ? 0 : -1}
-                        data-view={index}
-                      >
-                        {view.label}
-                      </button>
-                    ),
-                )}
-              </div>
-            </div>
-          ))
-        }
-      </div>
-      <div class="tour-views">
-        {
-          views.map((view, index) => (
-            <figure
-              class="tour-view"
-              id={`tour-view-${index}`}
-              role="tabpanel"
-              aria-labelledby={`tour-tab-${index}`}
-              data-active={index === 0 ? "" : undefined}
-            >
-              <Shot id={view.shot} alt={view.alt} eager={index === 0} />
-              <figcaption class="copy mt-4 px-1 text-[14px]">{view.caption}</figcaption>
-            </figure>
-          ))
-        }
-      </div>
-    </section>
+  </div>
 
+  <section class="tour" data-tour aria-label={t.hero.tabsLabel}>
+    <div class="tour-views">
+      {
+        t.hero.views.map((view, index) => (
+          <div
+            class="tour-view"
+            id={`tour-view-${index}`}
+            role="tabpanel"
+            aria-labelledby={`tour-tab-${index}`}
+            data-active={index === 0 ? "" : undefined}
+          >
+            <Shot id={view.shot} alt={view.alt} eager={index === 0} class="tour-shot" />
+          </div>
+        ))
+      }
+    </div>
+    <div class="tour-tabs" role="tablist" aria-label={t.hero.tabsLabel}>
+      {
+        t.hero.views.map((view, index) => (
+          <button
+            type="button"
+            role="tab"
+            class="tour-tab"
+            id={`tour-tab-${index}`}
+            aria-label={view.label}
+            title={view.label}
+            aria-controls={`tour-view-${index}`}
+            aria-selected={index === 0 ? "true" : "false"}
+            tabindex={index === 0 ? 0 : -1}
+            data-view={index}
+          />
+        ))
+      }
+    </div>
+  </section>
+
+  <div class="wrap">
     <p class="copy mt-10 flex flex-wrap items-baseline gap-x-6 gap-y-2 border-y border-line py-5 text-[14px]">
       <span>{t.agents.lead}</span>
       {t.agents.names.map((name) => <b class="font-sans text-[15px] font-[550] text-ink">{name}</b>)}
@@ -289,6 +275,7 @@ const noteColumn = Math.max(...terminal.map((entry) => entry.line?.length ?? 0))
     const stop = () => {
       window.clearInterval(timer);
       timer = undefined;
+      tour.removeAttribute("data-auto");
     };
 
     tabs.forEach((tab, i) => {
@@ -308,6 +295,7 @@ const noteColumn = Math.max(...terminal.map((entry) => entry.line?.length ?? 0))
     tour.addEventListener("pointerdown", stop);
 
     if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      tour.toggleAttribute("data-auto", true);
       timer = window.setInterval(() => show(current + 1), 6000);
     }
   }

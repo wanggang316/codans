@@ -24,24 +24,28 @@
     "width": 1280
   },
   "hero-build": {
-    "height": 1500,
-    "width": 2400
+    "height": 1747,
+    "width": 3200
+  },
+  "hero-mr": {
+    "height": 1747,
+    "width": 3200
   },
   "hero-pr": {
-    "height": 1500,
-    "width": 2400
+    "height": 1747,
+    "width": 3200
   },
   "hero-review": {
-    "height": 1500,
-    "width": 2400
+    "height": 1747,
+    "width": 3200
   },
   "hero-start": {
-    "height": 1500,
-    "width": 2400
+    "height": 1747,
+    "width": 3200
   },
   "hero-team": {
-    "height": 1500,
-    "width": 2400
+    "height": 1747,
+    "width": 3200
   },
   "layout": {
     "height": 1500,

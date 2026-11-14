@@ -22,51 +22,36 @@ export const zh: Dictionary = {
     copied: "已复制",
     requirements: "免费开源。需要 macOS 14 或更高版本，Apple Silicon。",
     tabsLabel: "产品导览",
-    steps: [
+    views: [
       {
-        name: "开始",
-        views: [
-          {
-            shot: "hero-start",
-            label: "新建 Agent",
-            caption: "选项目、起分支名、写提示词。Codans 创建 worktree，并在里面启动 Agent。",
-            alt: "Codans 窗口上的 New Agent 对话框：项目、名为 feat/digest-email 的新 worktree、提示词，已选 Claude Code。",
-          },
-        ],
+        shot: "hero-start",
+        label: "开始：New Agent 对话框",
+        alt: "粉色沙丘前的浅色 Codans 窗口，上面是 New Agent 对话框：inboxlm 项目、名为 feat/label-rules 的新 worktree、提示词，已选 Claude Code。",
       },
       {
-        name: "工作",
-        views: [
-          {
-            shot: "hero-build",
-            label: "边写边跑",
-            caption: "左边 Agent 写代码，右边是它不能弄坏的开发服务器。",
-            alt: "宽 pane 里 Claude Code 正在工作，旁边的窄 pane 显示开发服务器的请求日志。",
-          },
-          {
-            shot: "hero-review",
-            label: "边做边审",
-            caption: "左边是 Codex，右边实时显示这个 worktree 的 diff。改动发生的同时你就在读。",
-            alt: "窄 pane 里是 Codex，旁边的宽 pane 是终端 diff 查看器和改动的文件。",
-          },
-          {
-            shot: "hero-team",
-            label: "多 Agent 协作",
-            caption: "五个 Agent 在同一个 worktree：一个主导，一个审查，其余负责测试、基准和文档。",
-            alt: "隐藏侧栏的五个 pane：第一列 Claude Code，第二列 Codex 和 omp，第三列 OpenCode 和 Pi。",
-          },
-        ],
+        shot: "hero-build",
+        label: "工作：Agent 和开发服务器",
+        alt: "火星地貌前的深色 Codans 窗口。宽 pane 里 Claude Code 正在工作，旁边的窄 pane 运行开发服务器。",
       },
       {
-        name: "交付",
-        views: [
-          {
-            shot: "hero-pr",
-            label: "Pull Request",
-            caption: "窗口顶栏显示当前 worktree 的 PR。鼠标移上去查看检查结果，然后合并。",
-            alt: "窗口顶栏下方的 PR 弹出面板：标题、作者、三项通过的检查和 Merge 按钮。",
-          },
-        ],
+        shot: "hero-review",
+        label: "工作：Agent 和实时 diff",
+        alt: "Tokyo Night 主题的 Codans 窗口，背景是地球的蓝色边缘，月球在窗口后面。窄 pane 里是 Codex，旁边是终端 diff 查看器。",
+      },
+      {
+        shot: "hero-team",
+        label: "工作：一个 worktree 里的五个 Agent",
+        alt: "Rosé Pine 主题、隐藏侧栏的 Codans 窗口。五个 pane：第一列 Claude Code，第二列 Codex 和 omp，第三列 OpenCode 和 Pi。",
+      },
+      {
+        shot: "hero-pr",
+        label: "交付：GitHub Pull Request",
+        alt: "纯绿色背景上的浅色 Codans 窗口。顶栏下方的 PR 弹出面板显示三项通过的检查和 Merge 按钮。",
+      },
+      {
+        shot: "hero-mr",
+        label: "交付：GitLab Merge Request",
+        alt: "月球表面上方的深色 Codans 窗口。顶栏下方的 MR 弹出面板显示三项通过的检查和 Merge 按钮。",
       },
     ],
   },

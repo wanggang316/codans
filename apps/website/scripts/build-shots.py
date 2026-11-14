@@ -6,9 +6,10 @@ os.makedirs(out, exist_ok=True)
 full = None
 jobs = [
   # id, source, crop box in source pixels (None = whole), max width
-  ("hero-start", "hero-start.png", None, 2400), ("hero-build", "hero-build.png", None, 2400),
-  ("hero-review", "hero-review.png", None, 2400), ("hero-team", "hero-team.png", None, 2400),
-  ("hero-pr", "hero-pr.png", None, 2400),
+  # The tour scenes: the window with its shadow in front of a backdrop, captured as a screen region.
+  ("hero-start", "stage-start.png", None, 3200), ("hero-build", "stage-build.png", None, 3200),
+  ("hero-review", "stage-review.png", None, 3200), ("hero-team", "stage-team.png", None, 3200),
+  ("hero-pr", "stage-pr.png", None, 3200), ("hero-mr", "stage-mr.png", None, 3200),
   ("agents-view", "full-agents.png", (0, 1050, 1120, 1750), 1120),
   ("new-agent", "hero-start.png", (800, 500, 2080, 1300), 1280),
   ("skills", "full-skills.png", (840, 380, 2120, 1180), 1280),
@@ -46,7 +47,8 @@ for v, poster in (("panes-team.mp4", "panes-team-poster.png"),):
     im = Image.open(os.path.join(src, poster)).convert("RGB")
     im.save(os.path.join(out, "panes-team.webp"), "WEBP", quality=80, method=6)
     sizes["panes-team"] = {"width": im.width, "height": im.height, "video": True}
-og = Image.open(os.path.join(src, "hero-build.png")).convert("RGB").resize((1200, 750), Image.LANCZOS)
+og = Image.open(os.path.join(src, "stage-build.png")).convert("RGB")
+og = og.resize((1200, round(og.height * 1200 / og.width)), Image.LANCZOS).crop((0, 12, 1200, 642))
 og.save(os.path.join(out, "og.png"), optimize=True)
 json.dump(sizes, open(manifest, "w"), indent=2, sort_keys=True)
 print(len(sizes), "shots")

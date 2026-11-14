@@ -69,7 +69,7 @@ repository.
 
 | Ids | What they show |
 |---|---|
-| `hero-start`, `hero-build`, `hero-review`, `hero-team`, `hero-pr` | The tour: full window, one tab. New Agent dialog; agent beside a dev server (7:3); agent beside a live diff (4:6); five agents without the sidebar; the pull request popover of the header. |
+| `hero-start`, `hero-build`, `hero-review`, `hero-team`, `hero-pr`, `hero-mr` | The tour scenes: the full window, one tab, in front of a backdrop. New Agent dialog; agent beside a dev server (7:3); agent beside a live diff (4:6); five agents without the sidebar; the pull request popover; the merge request popover. Each scene has its own theme. |
 | `agents-view`, `new-agent`, `skills`, `queue`, `sessions`, `profile`, `handoff`, `notifications`, `persistence` | The Agent-first cards: one cropped detail for each feature. |
 | `sidebar`, `panes-team` (recording), `layout` | The Parallel section. |
 | `pr-popover`, `mr-popover`, `diff` | The Pull requests section: GitHub, GitLab, and the diff window. |
@@ -83,6 +83,15 @@ Capture rules:
 - Capture the window at 2x with `screencapture -l <window id>`. Popovers, menus,
   and sheets are separate windows: capture the screen region and paste it onto
   the window capture.
+- A tour scene is a screen region, not a window capture: the sidebar and the
+  header are glass, and they show the backdrop only when it is on screen. Put a
+  borderless window with the backdrop image behind the app window, make the app
+  active, and capture the region with `screencapture -R`.
+- Backdrops must be free to use: public-domain photos (NASA, US National Park
+  Service, Bureau of Land Management), generated images, or plain colors. Do not
+  use the wallpapers that come with macOS.
+- Make the app window key and give one pane the focus before each capture.
+  Panes without focus are dimmed.
 - Use one tab in each worktree.
 - Keep recordings under 15 seconds and under 2 MB. They loop without sound.
 - The numbers in the Parallel section are measurements. Measure again before you
