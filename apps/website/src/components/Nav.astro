@@ -15,14 +15,14 @@ const t = dictionary(locale);
 ---
 
 <header class="wrap">
-  <nav class="flex h-16 items-center gap-5 text-[15px] sm:gap-7" aria-label="Main">
-    <a href={localePath(locale, "/")} class="mr-auto flex items-center gap-2.5 text-[17px] font-semibold">
+  <nav class="flex h-16 items-center gap-3 text-[15px] whitespace-nowrap sm:gap-7" aria-label="Main">
+    <a href={localePath(locale, "/")} class="mr-auto flex flex-none items-center gap-2.5 text-[17px] font-semibold">
       <Image src={logo} alt="" width={26} height={26} densities={[1, 2, 3]} class="rounded-md" />
       Codans
     </a>
     <a href={localePath(locale, "/changelog")} class="text-muted hover:text-ink">{t.nav.changelog}</a>
-    <div class="flex items-center gap-1">
-      <a href={LINKS.repo} class="nav-icon" aria-label={t.nav.github} title={t.nav.github}>
+    <div class="flex flex-none items-center gap-1">
+      <a href={LINKS.repo} class="nav-icon max-sm:hidden" aria-label={t.nav.github} title={t.nav.github}>
         <GitHubIcon size={18} />
       </a>
       <a

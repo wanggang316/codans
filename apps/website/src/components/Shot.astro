@@ -7,38 +7,27 @@ interface Props {
   alt: string;
   /** The first shot on the page loads eagerly; the others load lazily. */
   eager?: boolean;
+  /** The layout width of the image, as a `sizes` value. The browser picks the file from it. */
+  sizes?: string;
   class?: string;
 }
 
-const { id, alt, eager = false, class: className = "" } = Astro.props;
+// The default fits a card in the three-column grids.
+const CARD = "(min-width: 1024px) 380px, (min-width: 640px) 50vw, 100vw";
+
+const { id, alt, eager = false, sizes = CARD, class: className = "" } = Astro.props;
 const shot = resolveShot(id);
 ---
 
-{
-  shot.video ? (
-    <video
-      class:list={["shot", className]}
-      width={shot.width}
-      height={shot.height}
-      poster={shot.src}
-      aria-label={alt}
-      data-hover-play
-      loop
-      muted
-      playsinline
-      preload="none"
-    >
-      <source src={shot.video} type="video/mp4" />
-    </video>
-  ) : (
-    <img
-      class:list={["shot", className]}
-      src={shot.src}
-      width={shot.width}
-      height={shot.height}
-      alt={alt}
-      loading={eager ? "eager" : "lazy"}
-      decoding="async"
-    />
-  )
-}
+<img
+  class:list={["shot", className]}
+  src={shot.src}
+  srcset={shot.srcset}
+  sizes={shot.srcset ? sizes : undefined}
+  width={shot.width}
+  height={shot.height}
+  alt={alt}
+  loading={eager ? "eager" : "lazy"}
+  fetchpriority={eager ? "high" : undefined}
+  decoding="async"
+/>

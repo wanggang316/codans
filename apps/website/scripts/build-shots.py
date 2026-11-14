@@ -5,13 +5,15 @@ src, out, manifest = sys.argv[1], sys.argv[2], sys.argv[3]
 os.makedirs(out, exist_ok=True)
 full = None
 SCENE = (256, 4, 3584, 2092)
+VARIANTS = (480, 800, 1280)
+QUALITY = 80
 jobs = [
   # id, source, crop box in source pixels (None = whole), max width
   # A tour scene is 1664 x 1044 points around the 1440 x 900 window; global.css uses this size.
   # The tour scenes: the window with its shadow in front of a backdrop, captured as a screen region.
-  ("hero-palette", "stage-palette.png", SCENE, 3200), ("hero-start", "stage-start.png", SCENE, 3200),
-  ("hero-build", "stage-build.png", SCENE, 3200), ("hero-review", "stage-review.png", SCENE, 3200),
-  ("hero-team", "stage-team.png", SCENE, 3200), ("hero-pr", "stage-pr.png", SCENE, 3200),
+  ("hero-palette", "stage-palette.png", SCENE, 2664), ("hero-start", "stage-start.png", SCENE, 2664),
+  ("hero-build", "stage-build.png", SCENE, 2664), ("hero-review", "stage-review.png", SCENE, 2664),
+  ("hero-team", "stage-team.png", SCENE, 2664), ("hero-pr", "stage-pr.png", SCENE, 2664),
   ("agents-view-1", "agents-view-1.png", None, 740), ("agents-view-2", "agents-view-2.png", None, 740),
   ("agents-view-3", "agents-view-3.png", None, 740),
   ("new-agent", "hero-start.png", (800, 500, 2080, 1300), 1280),
@@ -31,7 +33,7 @@ jobs = [
   ("filter-pr", "full-filter-pr.png", (0, 0, 1280, 800), 1280),
   ("filter-unread", "full-filter-unread.png", (0, 0, 1280, 800), 1280),
   # The theme wall: the whole window in each theme, as a small tile.
-] + [("theme-" + n, "theme-" + n + ".png", None, 640) for n in (
+] + [("theme-" + n, "theme-" + n + ".png", None, 400) for n in (
   "dracula latte tokyonight gruvbox nord rosepine-dawn github-dark monokai github-light kanagawa one-dark "
   "everforest mocha gruvbox-light night-owl solarized rosepine ayu").split()] + [
   ("palette", "full-palette.png", (723, 190, 2163, 1090), 1440),
@@ -44,10 +46,16 @@ for sid, name, box, maxw in jobs:
     im = Image.open(os.path.join(src, name)).convert("RGBA")
     if box: im = im.crop(box)
     if im.width > maxw: im = im.resize((maxw, round(im.height * maxw / im.width)), Image.LANCZOS)
-    im.save(os.path.join(out, sid + ".webp"), "WEBP", quality=84, method=6)
+    im.save(os.path.join(out, sid + ".webp"), "WEBP", quality=QUALITY, method=6)
     sizes[sid] = {"width": im.width, "height": im.height}
+    # Narrower copies for `srcset`, so a phone does not download the desktop file.
+    widths = [w for w in VARIANTS if w <= im.width * 0.8]
+    for w in widths:
+        small = im.resize((w, round(im.height * w / im.width)), Image.LANCZOS)
+        small.save(os.path.join(out, f"{sid}-{w}.webp"), "WEBP", quality=QUALITY, method=6)
+    if widths: sizes[sid]["variants"] = widths
 og = Image.open(os.path.join(src, "stage-palette.png")).convert("RGB")
 og = og.resize((1200, round(og.height * 1200 / og.width)), Image.LANCZOS).crop((0, 12, 1200, 642))
-og.save(os.path.join(out, "og.png"), optimize=True)
+og.save(os.path.join(out, "og.jpg"), quality=86, optimize=True, progressive=True)
 json.dump(sizes, open(manifest, "w"), indent=2, sort_keys=True)
 print(len(sizes), "shots")

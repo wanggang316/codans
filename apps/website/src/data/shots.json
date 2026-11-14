@@ -1,198 +1,323 @@
 {
   "agents-view-1": {
     "height": 462,
+    "variants": [
+      480
+    ],
     "width": 740
   },
   "agents-view-2": {
     "height": 462,
+    "variants": [
+      480
+    ],
     "width": 740
   },
   "agents-view-3": {
     "height": 462,
+    "variants": [
+      480
+    ],
     "width": 740
   },
   "cli-1": {
     "height": 650,
+    "variants": [
+      480,
+      800
+    ],
     "width": 1040
   },
   "cli-2": {
     "height": 458,
+    "variants": [
+      480
+    ],
     "width": 732
   },
   "filter-pr": {
     "height": 800,
+    "variants": [
+      480,
+      800
+    ],
     "width": 1280
   },
   "filter-remote": {
     "height": 800,
+    "variants": [
+      480,
+      800
+    ],
     "width": 1280
   },
   "filter-unread": {
     "height": 800,
+    "variants": [
+      480,
+      800
+    ],
     "width": 1280
   },
   "filter-workspace": {
     "height": 800,
+    "variants": [
+      480,
+      800
+    ],
     "width": 1280
   },
   "handoff": {
     "height": 800,
+    "variants": [
+      480,
+      800
+    ],
     "width": 1280
   },
   "hero-build": {
-    "height": 2008,
-    "width": 3200
+    "height": 1671,
+    "variants": [
+      480,
+      800,
+      1280
+    ],
+    "width": 2664
   },
   "hero-palette": {
-    "height": 2008,
-    "width": 3200
+    "height": 1671,
+    "variants": [
+      480,
+      800,
+      1280
+    ],
+    "width": 2664
   },
   "hero-pr": {
-    "height": 2008,
-    "width": 3200
+    "height": 1671,
+    "variants": [
+      480,
+      800,
+      1280
+    ],
+    "width": 2664
   },
   "hero-review": {
-    "height": 2008,
-    "width": 3200
+    "height": 1671,
+    "variants": [
+      480,
+      800,
+      1280
+    ],
+    "width": 2664
   },
   "hero-start": {
-    "height": 2008,
-    "width": 3200
+    "height": 1671,
+    "variants": [
+      480,
+      800,
+      1280
+    ],
+    "width": 2664
   },
   "hero-team": {
-    "height": 2008,
-    "width": 3200
+    "height": 1671,
+    "variants": [
+      480,
+      800,
+      1280
+    ],
+    "width": 2664
   },
   "new-agent": {
     "height": 800,
+    "variants": [
+      480,
+      800
+    ],
     "width": 1280
   },
   "notifications-1": {
     "height": 461,
+    "variants": [
+      480
+    ],
     "width": 738
   },
   "notifications-2": {
     "height": 800,
+    "variants": [
+      480,
+      800
+    ],
     "width": 1280
   },
   "open-in": {
     "height": 800,
+    "variants": [
+      480,
+      800
+    ],
     "width": 1280
   },
   "palette": {
     "height": 900,
+    "variants": [
+      480,
+      800
+    ],
     "width": 1440
   },
   "persistence": {
     "height": 800,
+    "variants": [
+      480,
+      800
+    ],
     "width": 1280
   },
   "profile": {
     "height": 883,
+    "variants": [
+      480,
+      800
+    ],
     "width": 1280
   },
   "queue-1": {
     "height": 800,
+    "variants": [
+      480,
+      800
+    ],
     "width": 1280
   },
   "queue-2": {
     "height": 700,
+    "variants": [
+      480,
+      800
+    ],
     "width": 1120
   },
   "run-menu": {
     "height": 900,
+    "variants": [
+      480,
+      800
+    ],
     "width": 1440
   },
   "sessions-1": {
     "height": 800,
+    "variants": [
+      480,
+      800
+    ],
     "width": 1280
   },
   "sessions-2": {
     "height": 800,
+    "variants": [
+      480,
+      800
+    ],
     "width": 1280
   },
   "sessions-3": {
     "height": 800,
+    "variants": [
+      480,
+      800
+    ],
     "width": 1280
   },
   "shortcuts": {
     "height": 883,
+    "variants": [
+      480,
+      800
+    ],
     "width": 1280
   },
   "sidebar": {
     "height": 1600,
+    "variants": [
+      480,
+      800
+    ],
     "width": 1100
   },
   "theme-ayu": {
-    "height": 400,
-    "width": 640
+    "height": 250,
+    "width": 400
   },
   "theme-dracula": {
-    "height": 400,
-    "width": 640
+    "height": 250,
+    "width": 400
   },
   "theme-everforest": {
-    "height": 400,
-    "width": 640
+    "height": 250,
+    "width": 400
   },
   "theme-github-dark": {
-    "height": 400,
-    "width": 640
+    "height": 250,
+    "width": 400
   },
   "theme-github-light": {
-    "height": 400,
-    "width": 640
+    "height": 250,
+    "width": 400
   },
   "theme-gruvbox": {
-    "height": 400,
-    "width": 640
+    "height": 250,
+    "width": 400
   },
   "theme-gruvbox-light": {
-    "height": 400,
-    "width": 640
+    "height": 250,
+    "width": 400
   },
   "theme-kanagawa": {
-    "height": 400,
-    "width": 640
+    "height": 250,
+    "width": 400
   },
   "theme-latte": {
-    "height": 400,
-    "width": 640
+    "height": 250,
+    "width": 400
   },
   "theme-mocha": {
-    "height": 400,
-    "width": 640
+    "height": 250,
+    "width": 400
   },
   "theme-monokai": {
-    "height": 400,
-    "width": 640
+    "height": 250,
+    "width": 400
   },
   "theme-night-owl": {
-    "height": 400,
-    "width": 640
+    "height": 250,
+    "width": 400
   },
   "theme-nord": {
-    "height": 400,
-    "width": 640
+    "height": 250,
+    "width": 400
   },
   "theme-one-dark": {
-    "height": 400,
-    "width": 640
+    "height": 250,
+    "width": 400
   },
   "theme-rosepine": {
-    "height": 400,
-    "width": 640
+    "height": 250,
+    "width": 400
   },
   "theme-rosepine-dawn": {
-    "height": 400,
-    "width": 640
+    "height": 250,
+    "width": 400
   },
   "theme-solarized": {
-    "height": 400,
-    "width": 640
+    "height": 250,
+    "width": 400
   },
   "theme-tokyonight": {
-    "height": 400,
-    "width": 640
+    "height": 250,
+    "width": 400
   }
 }
