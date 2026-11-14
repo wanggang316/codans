@@ -1,21 +1,95 @@
 ---
-import { dictionary, localePath, type Locale } from "../i18n";
+import { dictionary, localePath, otherLocale, type Locale } from "../i18n";
 import { LINKS } from "../lib/links";
 
 interface Props {
   locale: Locale;
+  /** Locale-independent path of the page: "/" or "/changelog". */
+  page: string;
 }
 
-const { locale } = Astro.props;
+const { locale, page } = Astro.props;
 const t = dictionary(locale);
 ---
 
-<footer class="wrap flex flex-wrap items-center gap-x-6 gap-y-2.5 pt-10 pb-14 text-sm text-muted">
+<footer class="wrap flex flex-wrap items-center gap-x-2 gap-y-2.5 pt-10 pb-14 text-sm text-muted">
   <span class="mr-auto">
     © 2026 <a href={LINKS.author} class="hover:text-ink">Gump Wang</a>
   </span>
-  <a href={localePath(locale, "/changelog")} class="hover:text-ink">{t.nav.changelog}</a>
-  <a href={LINKS.releases} class="hover:text-ink">{t.footer.releases}</a>
-  <a href={LINKS.issues} class="hover:text-ink">{t.footer.issues}</a>
-  <a href={LINKS.repo} class="hover:text-ink">{t.footer.repo}</a>
+  <a
+    href={localePath(otherLocale(locale), page)}
+    hreflang={otherLocale(locale)}
+    class="nav-icon"
+    aria-label={t.footer.otherLocaleLabel}
+    title={t.footer.otherLocaleLabel}
+  >
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="m5 8 6 6"></path>
+      <path d="m4 14 6-6 2-3"></path>
+      <path d="M2 5h12"></path>
+      <path d="M7 2h1"></path>
+      <path d="m22 22-5-10-5 10"></path>
+      <path d="M14 18h6"></path>
+    </svg>
+  </a>
+  <button type="button" class="nav-icon theme-toggle" aria-label={t.footer.appearance} title={t.footer.appearance}>
+    <svg
+      class="icon-moon"
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"></path>
+    </svg>
+    <svg
+      class="icon-sun"
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="4"></circle>
+      <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path>
+    </svg>
+  </button>
 </footer>
+
+<script>
+  // The button switches between light and dark and keeps the choice. Base.astro applies a
+  // stored choice before the first paint.
+  for (const button of document.querySelectorAll<HTMLButtonElement>(".theme-toggle")) {
+    button.addEventListener("click", () => {
+      const root = document.documentElement;
+      const dark = root.dataset.theme
+        ? root.dataset.theme === "dark"
+        : window.matchMedia("(prefers-color-scheme: dark)").matches;
+      root.dataset.theme = dark ? "light" : "dark";
+      try {
+        localStorage.setItem("theme", root.dataset.theme);
+      } catch {
+        // Storage can be blocked. The choice then lasts for this page only.
+      }
+    });
+  }
+</script>

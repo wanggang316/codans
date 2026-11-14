@@ -10,8 +10,6 @@ export const zh: Dictionary = {
   nav: {
     changelog: "更新日志",
     github: "GitHub",
-    download: "下载",
-    otherLocaleLabel: "Switch to English",
   },
   hero: {
     title: "在一个窗口里，<br />并行运行所有 Coding Agent。",
@@ -252,9 +250,8 @@ export const zh: Dictionary = {
     source: "在 GitHub 上查看",
   },
   footer: {
-    releases: "发布版本",
-    issues: "问题反馈",
-    repo: "代码仓库",
+    otherLocaleLabel: "Switch to English",
+    appearance: "切换浅色和深色",
   },
   changelog: {
     title: "更新日志",

@@ -1,7 +1,5 @@
 export const LINKS = {
   repo: "https://github.com/wanggang316/codans",
-  releases: "https://github.com/wanggang316/codans/releases",
-  issues: "https://github.com/wanggang316/codans/issues",
   author: "https://github.com/wanggang316",
   // Release-independent direct download. GitHub resolves
   // `releases/latest/download/<asset>` to the asset of that exact name in the

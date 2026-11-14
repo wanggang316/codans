@@ -12,8 +12,6 @@ export const en = {
   nav: {
     changelog: "Changelog",
     github: "GitHub",
-    download: "Download",
-    otherLocaleLabel: "切换到中文",
   },
   hero: {
     title: "Run your coding agents in parallel, in one window.",
@@ -255,9 +253,8 @@ export const en = {
     source: "View on GitHub",
   },
   footer: {
-    releases: "Releases",
-    issues: "Issues",
-    repo: "Repository",
+    otherLocaleLabel: "切换到中文",
+    appearance: "Switch between light and dark",
   },
   changelog: {
     title: "Changelog",
