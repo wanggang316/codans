@@ -63,7 +63,8 @@ The home page shows real captures of the app. Each shot has an id, and the
 
 A card with more than one shot id shows them as frames (`Frames` component):
 the first frame is the still, and the others play while the pointer is over the
-card. A recording plays in the same way. On a device without hover, both play
+card. A click stops the play and shows the next frame; the frames play again
+the next time the pointer enters the card. A recording plays in the same way. On a device without hover, both play
 while they are on screen.
 
 `scripts/build-shots.py <captures dir> public/shots src/data/shots.json` makes

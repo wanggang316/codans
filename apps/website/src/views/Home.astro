@@ -261,13 +261,19 @@ const t = dictionary(locale);
       () => {
         window.clearInterval(timer);
         show(1);
-        timer = window.setInterval(() => show(current + 1), 1700);
+        timer = window.setInterval(() => show(current + 1), 3000);
       },
       () => {
         window.clearInterval(timer);
         show(0);
       },
     );
+    // A click hands the frames to the reader: each click shows the next frame, and the
+    // frames play by themselves again the next time the card becomes active.
+    frames.addEventListener("click", () => {
+      window.clearInterval(timer);
+      show(current + 1);
+    });
   }
 
   for (const video of document.querySelectorAll<HTMLVideoElement>("video[data-hover-play]")) {
