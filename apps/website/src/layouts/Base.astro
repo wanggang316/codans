@@ -39,13 +39,20 @@ const other = otherLocale(locale);
     <meta property="og:image" content={new URL("/shots/og.jpg", site).href} />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
+    <script is:inline>
+      // Apply a stored appearance before the first paint.
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
   </head>
   <body>
-    <Nav locale={locale} page={page} />
+    <Nav locale={locale} />
     <main>
       <slot />
     </main>
-    <Footer locale={locale} />
+    <Footer locale={locale} page={page} />
 
     <script is:inline define:vars={{ api: LINKS.latestReleaseApi }}>
       // Download links start at the stable-named asset URL. Point them at the

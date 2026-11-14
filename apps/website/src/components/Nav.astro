@@ -2,56 +2,26 @@
 import { Image } from "astro:assets";
 import logo from "../assets/logo-256.png";
 import GitHubIcon from "./GitHubIcon.astro";
-import { dictionary, localePath, otherLocale, type Locale } from "../i18n";
+import { dictionary, localePath, type Locale } from "../i18n";
 import { LINKS } from "../lib/links";
 
 interface Props {
   locale: Locale;
-  page: string;
 }
 
-const { locale, page } = Astro.props;
+const { locale } = Astro.props;
 const t = dictionary(locale);
 ---
 
 <header class="wrap">
-  <nav class="flex h-16 items-center gap-3 text-[15px] whitespace-nowrap sm:gap-7" aria-label="Main">
+  <nav class="flex h-16 items-center gap-4 text-[15px] whitespace-nowrap sm:gap-6" aria-label="Main">
     <a href={localePath(locale, "/")} class="mr-auto flex flex-none items-center gap-2.5 text-[17px] font-semibold">
       <Image src={logo} alt="" width={26} height={26} densities={[1, 2, 3]} class="rounded-md" />
       Codans
     </a>
     <a href={localePath(locale, "/changelog")} class="text-muted hover:text-ink">{t.nav.changelog}</a>
-    <div class="flex flex-none items-center gap-1">
-      <a href={LINKS.repo} class="nav-icon max-sm:hidden" aria-label={t.nav.github} title={t.nav.github}>
-        <GitHubIcon size={18} />
-      </a>
-      <a
-        href={localePath(otherLocale(locale), page)}
-        hreflang={otherLocale(locale)}
-        class="nav-icon"
-        aria-label={t.nav.otherLocaleLabel}
-        title={t.nav.otherLocaleLabel}
-      >
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <path d="m5 8 6 6" />
-          <path d="m4 14 6-6 2-3" />
-          <path d="M2 5h12" />
-          <path d="M7 2h1" />
-          <path d="m22 22-5-10-5 10" />
-          <path d="M14 18h6" />
-        </svg>
-      </a>
-    </div>
-    <a href={LINKS.latestDmg} data-dmg download class="btn btn-primary btn-small">{t.nav.download}</a>
+    <a href={LINKS.repo} class="nav-icon flex-none" aria-label={t.nav.github} title={t.nav.github}>
+      <GitHubIcon size={18} />
+    </a>
   </nav>
 </header>

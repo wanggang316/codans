@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
-/* The page follows the system appearance, like the app does. */
+/* The page follows the system appearance, like the app does. The appearance button in the
+   footer sets `data-theme` on the root, and that choice wins over the system. */
 :root {
   color-scheme: light dark;
   --canvas: #fafaf9;
@@ -15,9 +16,12 @@
   --inverse-ink: #f4f4f1;
   --inverse-muted: #a9a9a3;
 }
+:root[data-theme="light"] {
+  color-scheme: light;
+}
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --canvas: #111112;
     --surface: #202022;
     --sunken: #19191b;
@@ -30,6 +34,20 @@
     --inverse-ink: #ededeb;
     --inverse-muted: #a1a19c;
   }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #111112;
+  --surface: #202022;
+  --sunken: #19191b;
+  --ink: #ededeb;
+  --muted: #a1a19c;
+  --line: #2d2d30;
+  --accent: #4c8dff;
+  --accent-ink: #0b1020;
+  --inverse: #222224;
+  --inverse-ink: #ededeb;
+  --inverse-muted: #a1a19c;
 }
 
 @theme inline {
@@ -105,7 +123,7 @@
   .btn-quiet:hover {
     background: var(--surface);
   }
-  /* An icon link in the navigation: a 34px target around an 18px glyph. */
+  /* An icon link or button: a 34px target around an 18px glyph. */
   .nav-icon {
     display: inline-flex;
     align-items: center;
@@ -115,15 +133,28 @@
     border-radius: 8px;
     color: var(--muted);
   }
+  button.nav-icon {
+    cursor: pointer;
+  }
+  /* The appearance button shows the appearance that a click gives. */
+  .theme-toggle .icon-sun,
+  :root[data-theme="dark"] .theme-toggle .icon-moon {
+    display: none;
+  }
+  :root[data-theme="dark"] .theme-toggle .icon-sun {
+    display: block;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .theme-toggle .icon-moon {
+      display: none;
+    }
+    :root:not([data-theme="light"]) .theme-toggle .icon-sun {
+      display: block;
+    }
+  }
   .nav-icon:hover {
     background: var(--sunken);
     color: var(--ink);
-  }
-  .btn-small {
-    height: 34px;
-    padding: 0 13px;
-    border-radius: 8px;
-    font-size: 14px;
   }
 
   /* Display type. Latin headlines are set tight; CJK needs looser metrics. */
