@@ -146,13 +146,12 @@ const FILTER_COLORS: Record<string, string> = {
       </div>
     </section>
 
-    <section class="section" id="more">
+    <section class="section" id="projects">
       <header class="section-head">
-        <h2 class="heading">{t.more.title}</h2>
+        <h2 class="heading">{t.more.projects.title}</h2>
+        <p class="copy">{t.more.projects.lede}</p>
       </header>
-
-      <h3 class="group-title">{t.more.projects.title}</h3>
-      <div data-switcher>
+      <div class="mt-10" data-switcher>
         <div class="pill-tabs" role="tablist" aria-label={t.more.projects.title}>
           {
             t.more.projects.items.map((item, index) => (
@@ -184,7 +183,7 @@ const FILTER_COLORS: Record<string, string> = {
               >
                 <Shot id={`filter-${item.id}`} alt={item.alt} class="card-shot" />
                 <div class="lg:pr-6">
-                  <h4 class="card-title">{item.title}</h4>
+                  <h3 class="card-title">{item.title}</h3>
                   <p class="copy card-body">{item.body}</p>
                 </div>
               </div>
@@ -193,8 +192,13 @@ const FILTER_COLORS: Record<string, string> = {
         </div>
       </div>
 
-      <h3 class="group-title">{t.more.themes.title}</h3>
-      <p class="copy max-w-[52em]">{t.more.themes.body}</p>
+    </section>
+
+    <section class="section" id="themes">
+      <header class="section-head">
+        <h2 class="heading">{t.more.themes.title}</h2>
+        <p class="copy">{t.more.themes.body}</p>
+      </header>
       <div class="themes">
         <div class="themes-plane">
           {
@@ -220,8 +224,14 @@ const FILTER_COLORS: Record<string, string> = {
         </div>
       </div>
 
-      <h3 class="group-title">{t.more.speed.title}</h3>
-      <div class="grid gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]" data-switcher>
+    </section>
+
+    <section class="section" id="quick-actions">
+      <header class="section-head">
+        <h2 class="heading">{t.more.speed.title}</h2>
+        <p class="copy">{t.more.speed.lede}</p>
+      </header>
+      <div class="mt-10 grid gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]" data-switcher>
         <div class="panel switcher-list" role="tablist" aria-orientation="vertical" aria-label={t.more.speed.title}>
           {
             t.more.speed.items.map((item, index) => (

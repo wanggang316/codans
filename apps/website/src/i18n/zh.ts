@@ -176,9 +176,9 @@ export const zh: Dictionary = {
     ],
   },
   more: {
-    title: "配置一次，之后一直依赖的那些部分。",
     projects: {
       title: "项目管理",
+      lede: "用侧栏过滤器只看你需要的：远程主机、workspace、PR 或未读通知。",
       // One item for each sidebar filter, in the order of the filter bar in the app.
       items: [
         {
@@ -218,6 +218,7 @@ export const zh: Dictionary = {
     },
     speed: {
       title: "快捷操作",
+      lede: "常用操作，一个按键或一次点击就到。",
       items: [
         {
           shot: "palette",

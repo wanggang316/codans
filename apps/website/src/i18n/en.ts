@@ -179,9 +179,9 @@ export const en = {
     ],
   },
   more: {
-    title: "The parts you set up once and then rely on.",
     projects: {
       title: "Projects",
+      lede: "Filter the sidebar down to what you need: remote hosts, workspaces, pull requests, or unread notifications.",
       // One item for each sidebar filter, in the order of the filter bar in the app.
       items: [
         {
@@ -221,6 +221,7 @@ export const en = {
     },
     speed: {
       title: "Quick actions",
+      lede: "The actions you use all day are one key or one click away.",
       items: [
         {
           shot: "palette",

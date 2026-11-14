@@ -332,12 +332,6 @@
     margin-top: 16px;
     font-size: 15px;
   }
-  .group-title {
-    margin: 56px 0 16px;
-    font-size: 19px;
-    font-weight: 550;
-    letter-spacing: -0.012em;
-  }
 
   /* The theme wall: a tilted plane of tiles behind a window as wide as a tour scene. Every
      second column sits half a tile lower. */
@@ -345,7 +339,7 @@
     position: relative;
     width: min(100vw - 32px, (1200px - 48px) * 1664 / 1440);
     height: clamp(280px, 36vw, 460px);
-    margin: 28px 0 0 50%;
+    margin: 40px 0 0 50%;
     overflow: hidden;
     border-radius: clamp(12px, 1.6vw, 26px);
     transform: translateX(-50%);
