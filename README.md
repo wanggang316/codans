@@ -83,22 +83,13 @@ Every Ghostty theme is built in, 463 of them. Choose one for light and one for d
 
 ## Install
 
+Requires macOS **14 (Sonoma) or later** on Apple Silicon.
+
 ```bash
 brew install --cask wanggang316/tap/codans
 ```
 
 The cask installs `Codans.app` into `/Applications` and symlinks the embedded `codans` CLI into Homebrew's `bin`. Subsequent updates flow through the in-app Sparkle updater; `brew upgrade --cask codans` also picks up new stable releases.
-
-## Running Codans
-
-Requires macOS **14 (Sonoma) or later**. Xcode and mise are only needed to build
-from source.
-
-1. Open Codans and add a project directory from the sidebar.
-2. Select its root worktree, or create a worktree for a separate line of work.
-3. Run a coding agent in the terminal; use tabs and split panes for parallel tasks.
-
-For CLI usage, see the [Agent Skill](skills/codans-cli/SKILL.md).
 
 ## Build from Source
 
