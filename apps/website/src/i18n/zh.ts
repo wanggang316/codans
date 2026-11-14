@@ -142,7 +142,7 @@ export const zh: Dictionary = {
   },
   pr: {
     name: "Pull Request",
-    title: "从创建到合并，PR 不用离开窗口。",
+    title: "PR，从创建到合并。",
     lede: "Codans 通过你已经登录的 <code>gh</code> 和 <code>glab</code> CLI 读取 PR。它自己不发任何 HTTP 请求，也不保存 token。",
     // The capabilities that Settings > Git Platforms lists, in the same order.
     platforms: [

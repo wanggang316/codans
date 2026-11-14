@@ -145,7 +145,7 @@ export const en = {
   },
   pr: {
     name: "Pull requests",
-    title: "The pull request, from open to merged, without the browser.",
+    title: "The pull request, from open to merged.",
     lede: "Codans reads pull requests through the <code>gh</code> and <code>glab</code> CLIs that you are already logged in to. It sends no HTTP request of its own and stores no token.",
     // The capabilities that Settings > Git Platforms lists, in the same order.
     platforms: [
