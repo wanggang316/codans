@@ -49,8 +49,15 @@ const FILTER_COLORS: Record<string, string> = {
             role="tabpanel"
             aria-labelledby={`tour-tab-${index}`}
             data-active={index === 0 ? "" : undefined}
+            data-near={index === 0 ? "" : undefined}
           >
-            <Shot id={view.shot} alt={view.alt} eager={index === 0} class="tour-shot" />
+            <Shot
+              id={view.shot}
+              alt={view.alt}
+              eager={index === 0}
+              sizes="(min-width: 1364px) 1332px, calc(100vw - 32px)"
+              class="tour-shot"
+            />
           </div>
         ))
       }
@@ -101,7 +108,12 @@ const FILTER_COLORS: Record<string, string> = {
       </header>
       <div class="mt-10 grid gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
         <div class="card card-flush">
-          <Shot id="sidebar" alt={t.parallel.sidebarAlt} class="h-full max-h-[620px] object-cover object-top" />
+          <Shot
+            id="sidebar"
+            alt={t.parallel.sidebarAlt}
+            sizes="(min-width: 1024px) 460px, 100vw"
+            class="h-full max-h-[620px] object-cover object-top"
+          />
         </div>
         <ul class="rows panel flex flex-col justify-center">
           {
@@ -181,7 +193,12 @@ const FILTER_COLORS: Record<string, string> = {
                 aria-labelledby={`filter-tab-${item.id}`}
                 data-active={index === 0 ? "" : undefined}
               >
-                <Shot id={`filter-${item.id}`} alt={item.alt} class="card-shot" />
+                <Shot
+                  id={`filter-${item.id}`}
+                  alt={item.alt}
+                  sizes="(min-width: 1024px) 660px, 100vw"
+                  class="card-shot"
+                />
                 <div class="lg:pr-6">
                   <h3 class="card-title">{item.title}</h3>
                   <p class="copy card-body">{item.body}</p>
@@ -260,7 +277,7 @@ const FILTER_COLORS: Record<string, string> = {
                 aria-labelledby={`quick-tab-${index}`}
                 data-active={index === 0 ? "" : undefined}
               >
-                <Shot id={item.shot} alt={item.alt} class="card-shot" />
+                <Shot id={item.shot} alt={item.alt} sizes="(min-width: 1024px) 660px, 100vw" class="card-shot" />
               </div>
             ))
           }
@@ -286,7 +303,7 @@ const FILTER_COLORS: Record<string, string> = {
 </Base>
 
 <script>
-  // Frames and recordings in a card play while the pointer is over the card. On a device
+  // Frames in a card play while the pointer is over the card. On a device
   // without hover they play while they are on screen.
   const canHover = window.matchMedia("(hover: hover)").matches;
   const whileActive = (target: Element, start: () => void, stop: () => void) => {
@@ -328,17 +345,6 @@ const FILTER_COLORS: Record<string, string> = {
       window.clearInterval(timer);
       show(current + 1);
     });
-  }
-
-  for (const video of document.querySelectorAll<HTMLVideoElement>("video[data-hover-play]")) {
-    whileActive(
-      video.closest(".card") ?? video,
-      () => void video.play().catch(() => {}),
-      () => {
-        video.pause();
-        video.currentTime = 0;
-      },
-    );
   }
 
   // A switcher: a list of tabs on one side and one picture for each tab on the other.
@@ -384,7 +390,15 @@ const FILTER_COLORS: Record<string, string> = {
         tab.tabIndex = i === current ? 0 : -1;
       });
       panels.forEach((panel, i) => panel.toggleAttribute("data-active", i === current));
+      near();
     };
+    // A scene loads when it is one step away. A scene that is farther is out of the layout,
+    // and a lazy image out of the layout does not load.
+    const near = () =>
+      panels.forEach((panel, i) => {
+        const distance = Math.abs(i - current);
+        if (distance <= 1 || distance === panels.length - 1) panel.dataset.near = "";
+      });
     const stop = () => {
       window.clearInterval(timer);
       timer = undefined;
@@ -413,6 +427,10 @@ const FILTER_COLORS: Record<string, string> = {
       show(current + (event.clientX < box.left + box.width / 2 ? -1 : 1));
     });
     tour.addEventListener("pointerdown", stop);
+
+    // The neighbors of the first scene load after the page, not with it.
+    if (document.readyState === "complete") near();
+    else window.addEventListener("load", near, { once: true });
 
     if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       tour.toggleAttribute("data-auto", true);

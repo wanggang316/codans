@@ -246,6 +246,9 @@
       opacity 0.5s ease,
       visibility 0s linear 0.5s;
   }
+  .tour-view:not([data-near]) {
+    display: none;
+  }
   .tour-view[data-active] {
     visibility: visible;
     opacity: 1;

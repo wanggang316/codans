@@ -39,7 +39,7 @@ src/
 │   ├── links.ts              # external URLs
 │   └── shots.ts              # media and size of a product shot
 └── styles/global.css
-public/shots/                 # product screenshots and recordings
+public/shots/                 # product screenshots
 scripts/build-shots.py        # raw captures → public/shots + src/data/shots.json
 ```
 
@@ -57,14 +57,19 @@ The home page shows real captures of the app. Each shot has an id, and the
 
 | File | Purpose |
 |---|---|
-| `public/shots/<id>.webp` | Still image. Also the poster of a recording. |
-| `public/shots/<id>.mp4` | Optional. A silent screen recording that plays in place of the still. |
-| `src/data/shots.json` | Pixel size of each still, and the ids that have a recording. |
+| `public/shots/<id>.webp` | Still image at full size. |
+| `public/shots/<id>-<width>.webp` | Narrower copies (480, 800, 1280 px) for `srcset`. A phone downloads a small one. |
+| `src/data/shots.json` | Pixel size of each still, and the widths of its copies. |
+
+`Shot` takes a `sizes` value: the layout width of the image. The default fits a
+card in a three-column grid; pass a value when the image is wider. The tour
+loads the first scene with the page and each other scene when it is one step
+away.
 
 A card with more than one shot id shows them as frames (`Frames` component):
 the first frame is the still, and the others play while the pointer is over the
 card. A click stops the play and shows the next frame; the frames play again
-the next time the pointer enters the card. A recording plays in the same way. On a device without hover, both play
+the next time the pointer enters the card. On a device without hover, both play
 while they are on screen.
 
 `scripts/build-shots.py <captures dir> public/shots src/data/shots.json` makes
@@ -79,7 +84,7 @@ repository.
 | `agents-view-1..3`, `new-agent`, `queue-1..2`, `sessions-1..3`, `profile`, `handoff`, `notifications-1..2`, `persistence`, `cli-1..2` | The Agent-first cards: one cropped detail for each feature. Ids with a number are the frames of one flow. |
 | `sidebar` | The Parallel section. |
 | `filter-*`, `theme-*`, `palette`, `run-menu`, `shortcuts`, `open-in` | The last section. |
-| `og.png` | Link preview image. |
+| `og.jpg` | Link preview image. |
 
 Capture rules:
 
@@ -105,7 +110,6 @@ Capture rules:
   center. `build-shots.py` crops it to 1664 x 1044; `global.css` uses the same
   numbers to make the window as wide as the text column.
 - Use one tab in each worktree.
-- Keep recordings under 15 seconds and under 2 MB. They loop without sound.
 
 ## Deploy
 
