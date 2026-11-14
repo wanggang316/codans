@@ -274,14 +274,6 @@
     background: rgb(255 255 255 / 0.4);
   }
   .tour-tab::after {
-    content: "";
-    position: absolute;
-    inset: 10px 0 auto;
-    height: 3px;
-    border-radius: 2px;
-    background: rgb(255 255 255 / 0.4);
-  }
-  .tour-tab::after {
     background: #fff;
     transform: scaleX(0);
     transform-origin: left;
