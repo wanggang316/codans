@@ -208,7 +208,7 @@
 
   /* The tour: a wide stage of full scenes, and one segment for each scene. */
   .tour {
-    max-width: 1680px;
+    max-width: 1480px;
     margin: 56px auto 0;
     padding-inline: 16px;
   }

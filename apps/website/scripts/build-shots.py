@@ -4,12 +4,14 @@ from PIL import Image
 src, out, manifest = sys.argv[1], sys.argv[2], sys.argv[3]
 os.makedirs(out, exist_ok=True)
 full = None
+SCENE = (240, 74, 3600, 2022)
 jobs = [
   # id, source, crop box in source pixels (None = whole), max width
+  # A tour scene keeps half of the captured margin around the window.
   # The tour scenes: the window with its shadow in front of a backdrop, captured as a screen region.
-  ("hero-start", "stage-start.png", None, 3200), ("hero-build", "stage-build.png", None, 3200),
-  ("hero-review", "stage-review.png", None, 3200), ("hero-team", "stage-team.png", None, 3200),
-  ("hero-pr", "stage-pr.png", None, 3200), ("hero-mr", "stage-mr.png", None, 3200),
+  ("hero-start", "stage-start.png", SCENE, 3200), ("hero-build", "stage-build.png", SCENE, 3200),
+  ("hero-review", "stage-review.png", SCENE, 3200), ("hero-team", "stage-team.png", SCENE, 3200),
+  ("hero-pr", "stage-pr.png", SCENE, 3200), ("hero-mr", "stage-mr.png", SCENE, 3200),
   ("agents-view", "full-agents.png", (0, 1050, 1120, 1750), 1120),
   ("new-agent", "hero-start.png", (800, 500, 2080, 1300), 1280),
   ("skills", "full-skills.png", (840, 380, 2120, 1180), 1280),
