@@ -5,8 +5,7 @@
 <h1 align="center">Codans</h1>
 
 <p align="center">
-  <strong>Parallel development for the agent era.</strong><br />
-  One Mac-native window. Many worktrees. Every agent.
+  <strong>Run your coding agents in parallel, in one window.</strong>
 </p>
 
 <p align="center">
@@ -15,21 +14,21 @@
   <a href="https://github.com/wanggang316/codans/releases">Releases</a>
 </p>
 
----
+<p align="center">
+  <img src="apps/website/public/shots/hero-palette-1280.webp" alt="The Codans window with the command palette open: a sidebar of projects and worktrees, the Agents View, and Claude Code beside a dev server." width="900" />
+</p>
 
-Codans is a terminal development environment built for parallel development with coding agents. It orchestrates all of your projects, worktrees, and coding agents into a single window.
+Codans is a native macOS terminal for people who work through coding agents. It gives every task a worktree, every agent a pane, and shows you which ones are working and which ones need you.
 
-## Highlights
+## Features
 
-| | |
-|---|---|
-| **Native** | Built on Ghostty and native to macOS. |
-| **Agent-first** | See the live running state of every agent in real time. |
-| **Parallel** | Project tree + git worktrees + tabs + split panes manage every line of work in one window. No more Cmd-Tab. |
-| **Custom commands** | Bind project-specific commands and shortcuts; one chord runs the right thing. |
-| **GitHub** | Deep GitHub integration — manage the whole pull-request lifecycle in-app. |
-| **Keyboard-driven** | A deep set of customizable shortcuts to keep you fast. |
-| **IDE integration** | VS Code, Cursor, Zed, and Xcode are auto-detected. One shortcut opens any worktree. |
+- **Agent-first.** The Agents View shows every agent in every project with its live state. Start an agent with its worktree in one step, queue prompts for it, resume old sessions, and get a notification when it asks or finishes.
+- **Many worktrees in parallel.** Each task has its own worktree, tabs, and panes. The sidebar shows the diff size, pull request, running commands, and unread bells of each one. The app is optimized for many terminals: memory stays low.
+- **Pull requests.** Follow checks, merge, mark ready, and rerun failed checks for GitHub and GitLab, through the `gh` and `glab` CLIs that you are already logged in to.
+- **Workspaces and remote projects.** Work on several repositories in one workspace like a monorepo, and on projects on another machine over SSH.
+- **A CLI and an Agent Skill.** Everything in the window is a `codans` command, so agents can create worktrees, start other agents, and read their output.
+- **Quick actions.** A command palette, project commands on the Run button, a shortcut for every action, and one key to open a worktree in your editor.
+- **Native.** Built on Ghostty, with every Ghostty theme built in. Sessions keep running when you quit the app.
 
 ## Install
 
