@@ -78,7 +78,6 @@ repository.
 | `hero-palette`, `hero-start`, `hero-build`, `hero-review`, `hero-team`, `hero-pr` | The tour scenes: the full window, one tab, in front of a backdrop. Command palette; New Agent dialog; agent beside a dev server (7:3); agent beside a live diff (4:6); five agents without the sidebar; the pull request popover. Themes: GitHub Dark Default, GitHub Light Default, Gruvbox Dark, Rosé Pine Dawn. |
 | `agents-view-1..3`, `new-agent`, `queue-1..2`, `sessions-1..3`, `profile`, `handoff`, `notifications-1..2`, `persistence`, `cli-1..2` | The Agent-first cards: one cropped detail for each feature. Ids with a number are the frames of one flow. |
 | `sidebar` | The Parallel section. |
-| `diff` | The Pull requests section: the diff window. The GitHub and GitLab cards are text; they list the capabilities from Settings > Git Platforms. |
 | `filter-*`, `theme-*`, `palette`, `run-menu`, `shortcuts`, `open-in` | The last section. |
 | `og.png` | Link preview image. |
 

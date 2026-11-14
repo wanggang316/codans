@@ -180,10 +180,6 @@ export const en = {
         ],
       },
     ],
-    diffTitle: "Read the change first",
-    diffBody:
-      "A read-only diff window shows what the agent changed: uncommitted work, or everything the branch adds to its base. Unified or split, with a file tree, and without resizing your terminal.",
-    diffAlt: "The diff window in split layout with a file tree of eleven changed files.",
   },
   more: {
     name: "And the rest",

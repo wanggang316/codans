@@ -177,10 +177,6 @@ export const zh: Dictionary = {
         ],
       },
     ],
-    diffTitle: "先读改动",
-    diffBody:
-      "只读 diff 窗口展示 Agent 改了什么：未提交的改动，或者这个分支相对基线新增的全部内容。支持统一和分栏视图，带文件树，不挤占终端。",
-    diffAlt: "分栏布局的 diff 窗口，文件树里有十一个改动的文件。",
   },
   more: {
     name: "其他",

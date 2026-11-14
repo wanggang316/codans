@@ -413,9 +413,6 @@
     object-fit: cover;
     object-position: top left;
   }
-  .card-shot-natural {
-    aspect-ratio: auto;
-  }
   .card-shot-portrait {
     aspect-ratio: 7 / 6;
   }
