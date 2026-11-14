@@ -357,52 +357,35 @@
     letter-spacing: -0.012em;
   }
 
-  /* The theme wall: a tilted plane of tiles behind a window as wide as a tour scene. The
-     columns move slowly, each one against its neighbors. */
+  /* The theme wall: a tilted plane of tiles behind a window as wide as a tour scene. Every
+     second column sits half a tile lower. */
   .themes {
     position: relative;
     width: min(100vw - 32px, (1200px - 48px) * 1664 / 1440);
-    height: clamp(340px, 44vw, 580px);
+    height: clamp(280px, 36vw, 460px);
     margin: 28px 0 0 50%;
     overflow: hidden;
+    border-radius: clamp(12px, 1.6vw, 26px);
     transform: translateX(-50%);
-    mask-image:
-      linear-gradient(to right, transparent, #000 8%, #000 92%, transparent),
-      linear-gradient(to bottom, transparent, #000 14%, #000 86%, transparent);
-    mask-composite: intersect;
   }
   .themes-plane {
     position: absolute;
     top: 50%;
     left: 50%;
     display: flex;
-    gap: 18px;
+    gap: 14px;
     width: max-content;
-    transform: translate(-50%, -50%) rotateX(42deg) rotateZ(-22deg) scale(1.2);
+    transform: translate(-50%, -50%) rotateX(42deg) rotateZ(-22deg);
   }
   .themes-column {
     flex: none;
-    width: 260px;
-    animation: themes-move 100s linear infinite;
+    width: 190px;
   }
   .themes-column:nth-child(even) {
-    animation-direction: reverse;
-  }
-  .themes:hover .themes-column {
-    animation-play-state: paused;
+    transform: translateY(-76px);
   }
   .themes-column > li {
-    padding-bottom: 18px;
-  }
-  @keyframes themes-move {
-    to {
-      transform: translateY(-50%);
-    }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .themes-column {
-      animation: none;
-    }
+    padding-bottom: 14px;
   }
 
   /* A card: media on top, then a title and one short paragraph. */

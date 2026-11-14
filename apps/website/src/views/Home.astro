@@ -165,20 +165,24 @@ const t = dictionary(locale);
       <div class="themes">
         <div class="themes-plane">
           {
-            THEME_COLUMNS.map((column) => (
-              <ul class="themes-column">
-                {[...column, ...column].map((item, index) => (
-                  <li aria-hidden={index >= column.length ? "true" : undefined}>
-                    <Shot
-                      id={item.shot}
-                      alt={index < column.length ? `${item.name} ${t.more.themes.altSuffix}` : ""}
-                      class="rounded-md"
-                    />
-                    <p class="copy mt-2 text-[12.5px]">{item.name}</p>
-                  </li>
-                ))}
-              </ul>
-            ))
+            // The plane must cover the tilted window, so the columns repeat. A repeated tile is
+            // decoration: it has no alternative text.
+            [0, 1].flatMap((pass) =>
+              THEME_COLUMNS.map((column) => (
+                <ul class="themes-column" aria-hidden={pass ? "true" : undefined}>
+                  {[...column, ...column, ...column].map((item, index) => (
+                    <li aria-hidden={!pass && index >= column.length ? "true" : undefined}>
+                      <Shot
+                        id={item.shot}
+                        alt={!pass && index < column.length ? `${item.name} ${t.more.themes.altSuffix}` : ""}
+                        class="rounded-md"
+                      />
+                      <p class="copy mt-1.5 text-[11.5px]">{item.name}</p>
+                    </li>
+                  ))}
+                </ul>
+              )),
+            )
           }
         </div>
       </div>
