@@ -357,45 +357,50 @@
     letter-spacing: -0.012em;
   }
 
-  /* The theme wall: three rows of tiles that move slowly to the left. It is as wide as a tour
-     scene, and each row starts half a tile after the row above it. */
+  /* The theme wall: a tilted plane of tiles behind a window as wide as a tour scene. The
+     columns move slowly, each one against its neighbors. */
   .themes {
-    --tile-gap: 14px;
-    --wall: min(100vw - 32px, (1200px - 48px) * 1664 / 1440);
-    --tile: max(170px, (var(--wall) - 5 * var(--tile-gap)) / 6);
-    width: var(--wall);
+    position: relative;
+    width: min(100vw - 32px, (1200px - 48px) * 1664 / 1440);
+    height: clamp(340px, 44vw, 580px);
     margin: 28px 0 0 50%;
     overflow: hidden;
     transform: translateX(-50%);
-    mask-image: linear-gradient(to right, transparent, #000 5%, #000 95%, transparent);
+    mask-image:
+      linear-gradient(to right, transparent, #000 8%, #000 92%, transparent),
+      linear-gradient(to bottom, transparent, #000 14%, #000 86%, transparent);
+    mask-composite: intersect;
   }
-  .themes-row + .themes-row {
-    margin-top: 18px;
-  }
-  .themes-track {
+  .themes-plane {
+    position: absolute;
+    top: 50%;
+    left: 50%;
     display: flex;
+    gap: 18px;
     width: max-content;
-    animation: themes-move 120s linear infinite;
+    transform: translate(-50%, -50%) rotateX(42deg) rotateZ(-22deg) scale(1.2);
   }
-  /* One tile takes a twelfth of the loop twice over: 10s is half a tile. */
-  .themes-row:nth-child(2) .themes-track {
-    animation-delay: -10s;
+  .themes-column {
+    flex: none;
+    width: 260px;
+    animation: themes-move 100s linear infinite;
   }
-  .themes:hover .themes-track {
+  .themes-column:nth-child(even) {
+    animation-direction: reverse;
+  }
+  .themes:hover .themes-column {
     animation-play-state: paused;
   }
-  .themes-track > li {
-    flex: none;
-    width: var(--tile);
-    margin-right: var(--tile-gap);
+  .themes-column > li {
+    padding-bottom: 18px;
   }
   @keyframes themes-move {
     to {
-      transform: translateX(-50%);
+      transform: translateY(-50%);
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    .themes-track {
+    .themes-column {
       animation: none;
     }
   }

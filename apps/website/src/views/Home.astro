@@ -8,7 +8,7 @@ import GitLabIcon from "../components/GitLabIcon.astro";
 import Shot from "../components/Shot.astro";
 import { dictionary, type Locale } from "../i18n";
 import { LINKS } from "../lib/links";
-import { THEME_ROWS } from "../lib/themes";
+import { THEME_COLUMNS } from "../lib/themes";
 
 interface Props {
   locale: Locale;
@@ -163,24 +163,24 @@ const t = dictionary(locale);
       <h3 class="group-title">{t.more.themes.title}</h3>
       <p class="copy max-w-[52em]">{t.more.themes.body}</p>
       <div class="themes">
-        {
-          THEME_ROWS.map((row) => (
-            <div class="themes-row">
-              <ul class="themes-track">
-                {[...row, ...row].map((item, index) => (
-                  <li aria-hidden={index >= row.length ? "true" : undefined}>
+        <div class="themes-plane">
+          {
+            THEME_COLUMNS.map((column) => (
+              <ul class="themes-column">
+                {[...column, ...column].map((item, index) => (
+                  <li aria-hidden={index >= column.length ? "true" : undefined}>
                     <Shot
                       id={item.shot}
-                      alt={index < row.length ? `${item.name} ${t.more.themes.altSuffix}` : ""}
+                      alt={index < column.length ? `${item.name} ${t.more.themes.altSuffix}` : ""}
                       class="rounded-md"
                     />
                     <p class="copy mt-2 text-[12.5px]">{item.name}</p>
                   </li>
                 ))}
               </ul>
-            </div>
-          ))
-        }
+            ))
+          }
+        </div>
       </div>
 
       <h3 class="group-title">{t.more.speed.title}</h3>
