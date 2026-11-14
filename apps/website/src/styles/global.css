@@ -444,9 +444,6 @@
     object-fit: cover;
     object-position: top left;
   }
-  .card-shot-portrait {
-    aspect-ratio: 7 / 6;
-  }
   .card-title {
     margin: 18px 8px 0;
     font-size: 16px;
@@ -505,6 +502,38 @@
   }
   .rows > li:last-child {
     padding-bottom: 4px;
+  }
+
+  /* Pill tabs, like the filter bar of the sidebar: the selected pill takes its own color. */
+  .pill-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .pill-tab {
+    height: 34px;
+    padding: 0 16px;
+    border-radius: 999px;
+    background: var(--sunken);
+    color: var(--muted);
+    font-size: 14px;
+    font-weight: 550;
+    cursor: pointer;
+    transition:
+      background-color 0.2s ease,
+      color 0.2s ease;
+  }
+  .pill-tab:hover {
+    color: var(--ink);
+  }
+  .pill-tab[aria-selected="true"] {
+    background: var(--tab);
+    color: #fff;
+  }
+  /* A card in a light shade of the color of its tab. */
+  .card-tinted {
+    padding: 12px;
+    background: color-mix(in srgb, var(--tab) 14%, var(--sunken));
   }
 
   /* A switcher list: the selected item is raised, the others are quiet. */

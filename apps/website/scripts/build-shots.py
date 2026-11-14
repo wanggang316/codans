@@ -26,9 +26,10 @@ jobs = [
   ("notifications-2", "full-filter-unread.png", (0, 60, 1280, 860), 1280),
   ("persistence", "full-quit.png", (324, 190, 1604, 990), 1280),
   ("sidebar", "full-sidebar.png", (0, 100, 1100, 1700), 1100),
-  ("filter-workspace", "full-filter-workspace.png", (0, 100, 700, 700), 700),
-  ("filter-remote", "full-filter-remote.png", (0, 100, 700, 700), 700),
-  ("filter-pr", "full-filter-pr.png", (0, 100, 700, 700), 700),
+  ("filter-remote", "full-filter-remote.png", (0, 0, 1280, 800), 1280),
+  ("filter-workspace", "full-filter-workspace.png", (0, 0, 1280, 800), 1280),
+  ("filter-pr", "full-filter-pr.png", (0, 0, 1280, 800), 1280),
+  ("filter-unread", "full-filter-unread.png", (0, 0, 1280, 800), 1280),
   # The theme wall: the whole window in each theme, as a small tile.
 ] + [("theme-" + n, "theme-" + n + ".png", None, 640) for n in (
   "dracula latte tokyonight gruvbox nord rosepine-dawn github-dark monokai github-light kanagawa one-dark "

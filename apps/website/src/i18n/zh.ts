@@ -183,24 +183,35 @@ export const zh: Dictionary = {
     title: "配置一次，之后一直依赖的那些部分。",
     projects: {
       title: "项目管理",
+      // One item for each sidebar filter, in the order of the filter bar in the app.
       items: [
         {
-          shot: "filter-workspace",
-          title: "Workspace",
-          body: "把多个仓库的 checkout 编成一组来做一件事。一个分支名，每个项目各 checkout 一份。",
-          alt: "打开 Workspace 过滤器的侧栏：一个 workspace，含 default 组和一个 release 组。",
-        },
-        {
-          shot: "filter-remote",
+          id: "remote",
+          tab: "Remote",
           title: "远程项目",
           body: "通过 SSH 使用另一台机器上的 worktree 和 pane，沿用你现有的 SSH 配置。",
-          alt: "打开 Remote 过滤器的侧栏：名为 Mac mini 的主机上的一个项目。",
+          alt: "打开 Remote 过滤器的 Codans 窗口：名为 Mac mini 的主机上的一个项目。",
         },
         {
-          shot: "filter-pr",
-          title: "过滤器",
-          body: "把侧栏收窄到远程项目、workspace、有 PR 的 worktree，或者有未读通知的 worktree。",
-          alt: "打开 PR 过滤器的侧栏：六个带 PR 的 worktree。",
+          id: "workspace",
+          tab: "Workspace",
+          title: "Workspace",
+          body: "把多个仓库的 checkout 编成一组来做一件事：一个分支名，每个项目各 checkout 一份。",
+          alt: "打开 Workspace 过滤器的 Codans 窗口：一个 workspace，含 default 组和一个 release 组。",
+        },
+        {
+          id: "pr",
+          tab: "PR",
+          title: "Pull Request",
+          body: "只看有 PR 的 worktree，带 PR 编号和 diff 大小。",
+          alt: "打开 PR 过滤器的 Codans 窗口：六个带 PR 的 worktree。",
+        },
+        {
+          id: "unread",
+          tab: "Unread",
+          title: "未读通知",
+          body: "只看 Agent 提问或完成后你还没看过的 worktree。",
+          alt: "打开 Unread 过滤器的 Codans 窗口：六个带铃铛的 worktree。",
         },
       ],
     },

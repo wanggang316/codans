@@ -16,6 +16,14 @@ interface Props {
 
 const { locale } = Astro.props;
 const t = dictionary(locale);
+
+// The colors of the sidebar filter pills in the app.
+const FILTER_COLORS: Record<string, string> = {
+  remote: "#5b7cfa",
+  workspace: "#d946ef",
+  pr: "#34c759",
+  unread: "#ff9f0a",
+};
 ---
 
 <Base locale={locale} page="/" title={t.meta.title} description={t.meta.description}>
@@ -148,16 +156,45 @@ const t = dictionary(locale);
       </header>
 
       <h3 class="group-title">{t.more.projects.title}</h3>
-      <div class="grid gap-4 sm:grid-cols-3">
-        {
-          t.more.projects.items.map((item) => (
-            <article class="card">
-              <Shot id={item.shot} alt={item.alt} class="card-shot card-shot-portrait" />
-              <h4 class="card-title">{item.title}</h4>
-              <p class="copy card-body">{item.body}</p>
-            </article>
-          ))
-        }
+      <div data-switcher>
+        <div class="pill-tabs" role="tablist" aria-label={t.more.projects.title}>
+          {
+            t.more.projects.items.map((item, index) => (
+              <button
+                type="button"
+                role="tab"
+                class="pill-tab"
+                style={`--tab: ${FILTER_COLORS[item.id]}`}
+                id={`filter-tab-${item.id}`}
+                aria-controls={`filter-panel-${item.id}`}
+                aria-selected={index === 0 ? "true" : "false"}
+                tabindex={index === 0 ? 0 : -1}
+              >
+                {item.tab}
+              </button>
+            ))
+          }
+        </div>
+        <div class="frames mt-4">
+          {
+            t.more.projects.items.map((item, index) => (
+              <div
+                class="frame card card-tinted grid items-center gap-x-10 gap-y-2 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]"
+                style={`--tab: ${FILTER_COLORS[item.id]}`}
+                id={`filter-panel-${item.id}`}
+                role="tabpanel"
+                aria-labelledby={`filter-tab-${item.id}`}
+                data-active={index === 0 ? "" : undefined}
+              >
+                <Shot id={`filter-${item.id}`} alt={item.alt} class="card-shot" />
+                <div class="lg:pr-6">
+                  <h4 class="card-title">{item.title}</h4>
+                  <p class="copy card-body">{item.body}</p>
+                </div>
+              </div>
+            ))
+          }
+        </div>
       </div>
 
       <h3 class="group-title">{t.more.themes.title}</h3>
@@ -314,7 +351,12 @@ const t = dictionary(locale);
     tabs.forEach((tab, i) => {
       tab.addEventListener("click", () => select(i));
       tab.addEventListener("keydown", (event) => {
-        const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
+        const step =
+          event.key === "ArrowDown" || event.key === "ArrowRight"
+            ? 1
+            : event.key === "ArrowUp" || event.key === "ArrowLeft"
+              ? -1
+              : 0;
         if (!step) return;
         event.preventDefault();
         tabs[select(i + step)].focus();

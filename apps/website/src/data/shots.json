@@ -20,16 +20,20 @@
     "width": 732
   },
   "filter-pr": {
-    "height": 600,
-    "width": 700
+    "height": 800,
+    "width": 1280
   },
   "filter-remote": {
-    "height": 600,
-    "width": 700
+    "height": 800,
+    "width": 1280
+  },
+  "filter-unread": {
+    "height": 800,
+    "width": 1280
   },
   "filter-workspace": {
-    "height": 600,
-    "width": 700
+    "height": 800,
+    "width": 1280
   },
   "handoff": {
     "height": 800,

@@ -186,24 +186,35 @@ export const en = {
     title: "The parts you set up once and then rely on.",
     projects: {
       title: "Projects",
+      // One item for each sidebar filter, in the order of the filter bar in the app.
       items: [
         {
-          shot: "filter-workspace",
-          title: "Workspaces",
-          body: "Group checkouts from several repositories for one task. One branch name, one checkout in each project.",
-          alt: "The sidebar with the Workspace filter: a workspace with a default group and a release group.",
-        },
-        {
-          shot: "filter-remote",
+          id: "remote",
+          tab: "Remote",
           title: "Remote projects",
           body: "Worktrees and panes on another machine over SSH, with the SSH config you already have.",
-          alt: "The sidebar with the Remote filter: a project on a host named Mac mini.",
+          alt: "The Codans window with the Remote filter on: a project on a host named Mac mini.",
         },
         {
-          shot: "filter-pr",
-          title: "Filters",
-          body: "Cut the sidebar down to remote projects, workspaces, worktrees with a pull request, or worktrees with unread notifications.",
-          alt: "The sidebar with the PR filter: six worktrees with a pull request.",
+          id: "workspace",
+          tab: "Workspace",
+          title: "Workspaces",
+          body: "Group checkouts from several repositories for one task: one branch name, one checkout in each project.",
+          alt: "The Codans window with the Workspace filter on: a workspace with a default group and a release group.",
+        },
+        {
+          id: "pr",
+          tab: "PR",
+          title: "Pull requests",
+          body: "Only the worktrees that have a pull request, each with its number and diff size.",
+          alt: "The Codans window with the PR filter on: six worktrees with a pull request.",
+        },
+        {
+          id: "unread",
+          tab: "Unread",
+          title: "Unread notifications",
+          body: "Only the worktrees where an agent asked or finished and you have not looked yet.",
+          alt: "The Codans window with the Unread filter on: six worktrees with a bell.",
         },
       ],
     },
