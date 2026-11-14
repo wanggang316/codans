@@ -376,7 +376,6 @@
   .frames {
     position: relative;
     display: grid;
-    cursor: pointer;
   }
   .frame {
     grid-area: 1 / 1;
