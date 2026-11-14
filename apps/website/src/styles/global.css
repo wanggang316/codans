@@ -215,7 +215,6 @@
   }
   .tour-views {
     display: grid;
-    cursor: pointer;
   }
   .tour-view {
     grid-area: 1 / 1;
