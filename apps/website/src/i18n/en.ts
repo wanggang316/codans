@@ -264,7 +264,7 @@ export const en = {
   },
   cta: {
     title: "Start with the project you have open.",
-    source: "Read the source",
+    source: "View on GitHub",
   },
   footer: {
     releases: "Releases",

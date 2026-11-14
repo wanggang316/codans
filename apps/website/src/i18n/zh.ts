@@ -260,7 +260,7 @@ export const zh: Dictionary = {
   },
   cta: {
     title: "从你手头正开着的项目开始。",
-    source: "阅读源码",
+    source: "在 GitHub 上查看",
   },
   footer: {
     releases: "发布版本",

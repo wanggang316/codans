@@ -2,6 +2,7 @@
 import Base from "../layouts/Base.astro";
 import BrewCommand from "../components/BrewCommand.astro";
 import Download from "../components/Download.astro";
+import GitHubIcon from "../components/GitHubIcon.astro";
 import Shot from "../components/Shot.astro";
 import { dictionary, type Locale } from "../i18n";
 import { LINKS } from "../lib/links";
@@ -243,7 +244,10 @@ const noteColumn = Math.max(...terminal.map((entry) => entry.line?.length ?? 0))
       <h2 class="display">{t.cta.title}</h2>
       <div class="mt-9 flex flex-wrap items-center gap-3">
         <Download locale={locale} />
-        <a href={LINKS.repo} class="btn btn-quiet">{t.cta.source}</a>
+        <a href={LINKS.repo} class="btn btn-quiet">
+          <GitHubIcon size={17} />
+          {t.cta.source}
+        </a>
       </div>
       <div class="mt-4">
         <BrewCommand locale={locale} />
