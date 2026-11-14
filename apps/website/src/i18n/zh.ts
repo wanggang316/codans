@@ -11,7 +11,6 @@ export const zh: Dictionary = {
     changelog: "更新日志",
     github: "GitHub",
     download: "下载",
-    otherLocale: "English",
     otherLocaleLabel: "Switch to English",
   },
   hero: {
@@ -54,11 +53,6 @@ export const zh: Dictionary = {
         alt: "纯绿色背景上的浅色 Codans 窗口。顶栏下方的 PR 弹出面板显示三项通过的检查和 Merge 按钮。",
       },
     ],
-  },
-  agents: {
-    lead: "支持你已经在终端里用的 Agent：",
-    names: ["Claude Code", "Codex", "OpenCode", "Pi", "omp", "Gemini CLI"],
-    tail: "以及任何有 CLI 的工具。",
   },
   agentFirst: {
     name: "Agent 优先",

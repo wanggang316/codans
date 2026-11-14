@@ -105,6 +105,20 @@
   .btn-quiet:hover {
     background: var(--surface);
   }
+  /* An icon link in the navigation: a 34px target around an 18px glyph. */
+  .nav-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    color: var(--muted);
+  }
+  .nav-icon:hover {
+    background: var(--sunken);
+    color: var(--ink);
+  }
   .btn-small {
     height: 34px;
     padding: 0 13px;
@@ -406,6 +420,13 @@
     border-radius: 14px;
     background: var(--inverse);
     color: var(--inverse-ink);
+  }
+  .cta {
+    padding: clamp(48px, 7vw, 96px) clamp(28px, 5vw, 72px);
+  }
+  .cta .display {
+    max-width: 14em;
+    font-size: clamp(30px, 3.8vw, 46px);
   }
   .inverse .copy {
     color: var(--inverse-muted);

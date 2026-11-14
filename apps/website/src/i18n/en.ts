@@ -13,7 +13,6 @@ export const en = {
     changelog: "Changelog",
     github: "GitHub",
     download: "Download",
-    otherLocale: "中文",
     otherLocaleLabel: "切换到中文",
   },
   hero: {
@@ -57,11 +56,6 @@ export const en = {
         alt: "A light Codans window on a plain green backdrop. The pull request popover under the header shows three passed checks and a Merge button.",
       },
     ],
-  },
-  agents: {
-    lead: "Works with the agents you already run in a terminal:",
-    names: ["Claude Code", "Codex", "OpenCode", "Pi", "omp", "Gemini CLI"],
-    tail: "and anything else with a CLI.",
   },
   agentFirst: {
     name: "Agent-first",

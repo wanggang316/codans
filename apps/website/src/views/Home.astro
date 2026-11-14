@@ -32,9 +32,8 @@ const noteColumn = Math.max(...terminal.map((entry) => entry.line?.length ?? 0))
     <section class="pt-12 sm:pt-20">
       <h1 class="display max-w-[16em]" set:html={t.hero.title} />
       <p class="copy mt-6 max-w-[46em] text-[16px]">{t.hero.lede}</p>
-      <div class="mt-8 flex flex-wrap items-center gap-3">
+      <div class="mt-8">
         <Download locale={locale} />
-        <BrewCommand locale={locale} />
       </div>
       <p class="copy mt-3.5 text-[13px]">{t.hero.requirements}</p>
     </section>
@@ -78,12 +77,6 @@ const noteColumn = Math.max(...terminal.map((entry) => entry.line?.length ?? 0))
   </section>
 
   <div class="wrap">
-    <p class="copy mt-10 flex flex-wrap items-baseline gap-x-6 gap-y-2 border-y border-line py-5 text-[14px]">
-      <span>{t.agents.lead}</span>
-      {t.agents.names.map((name) => <b class="font-sans text-[15px] font-[550] text-ink">{name}</b>)}
-      <span>{t.agents.tail}</span>
-    </p>
-
     <section class="section" id="agent-first">
       <header class="section-head">
         <p class="section-name">{t.agentFirst.name}</p>
@@ -246,12 +239,16 @@ const noteColumn = Math.max(...terminal.map((entry) => entry.line?.length ?? 0))
       </div>
     </section>
 
-    <section class="inverse mt-24 flex flex-wrap items-center justify-between gap-7">
-      <h2 class="heading">{t.cta.title}</h2>
-      <div class="flex flex-wrap items-center gap-3">
+    <section class="inverse cta mt-24">
+      <h2 class="display">{t.cta.title}</h2>
+      <div class="mt-9 flex flex-wrap items-center gap-3">
         <Download locale={locale} />
         <a href={LINKS.repo} class="btn btn-quiet">{t.cta.source}</a>
       </div>
+      <div class="mt-4">
+        <BrewCommand locale={locale} />
+      </div>
+      <p class="copy mt-4 text-[13px]">{t.hero.requirements}</p>
     </section>
   </div>
 </Base>
