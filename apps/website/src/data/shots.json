@@ -63,10 +63,6 @@
     "height": 2008,
     "width": 3200
   },
-  "mr-popover": {
-    "height": 594,
-    "width": 950
-  },
   "new-agent": {
     "height": 800,
     "width": 1280
@@ -90,10 +86,6 @@
   "persistence": {
     "height": 800,
     "width": 1280
-  },
-  "pr-popover": {
-    "height": 594,
-    "width": 950
   },
   "profile": {
     "height": 883,

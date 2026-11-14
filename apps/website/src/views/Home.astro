@@ -4,6 +4,7 @@ import BrewCommand from "../components/BrewCommand.astro";
 import Download from "../components/Download.astro";
 import Frames from "../components/Frames.astro";
 import GitHubIcon from "../components/GitHubIcon.astro";
+import GitLabIcon from "../components/GitLabIcon.astro";
 import Shot from "../components/Shot.astro";
 import { dictionary, type Locale } from "../i18n";
 import { LINKS } from "../lib/links";
@@ -116,28 +117,34 @@ const t = dictionary(locale);
       </header>
       <div class="mt-10 grid gap-4 sm:grid-cols-2">
         {
-          t.pr.cards.map((card) => (
-            <article class="card">
-              <Shot id={card.shot} alt={card.alt} class="card-shot" />
-              <h3 class="card-title">{card.title}</h3>
-              <p class="copy card-body">{card.body}</p>
+          t.pr.platforms.map((platform) => (
+            <article class="panel">
+              <header class="flex items-center gap-3.5">
+                {platform.id === "github" ? <GitHubIcon size={30} /> : <GitLabIcon size={30} />}
+                <div>
+                  <h3 class="subheading">{platform.name}</h3>
+                  <p class="copy mt-0.5 text-[13px]" set:html={platform.via} />
+                </div>
+              </header>
+              <ul class="checks copy mt-6">
+                {platform.items.map((item) => (
+                  <li data-unsupported={"unsupported" in item ? "" : undefined}>
+                    <span>{item.text}</span>
+                    {"unsupported" in item && <small>{item.unsupported}</small>}
+                  </li>
+                ))}
+              </ul>
             </article>
           ))
         }
       </div>
-      <div class="mt-4 grid gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-        <div class="panel">
-          <h3 class="subheading">{t.pr.capsTitle}</h3>
-          <ul class="rows rows-tight copy mt-5">
-            {t.pr.caps.map((cap) => <li>{cap}</li>)}
-          </ul>
-        </div>
-        <article class="card">
-          <Shot id="diff" alt={t.pr.diffAlt} class="card-shot card-shot-natural" />
+      <article class="card mt-4 grid items-center gap-x-10 gap-y-2 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
+        <Shot id="diff" alt={t.pr.diffAlt} class="card-shot card-shot-natural" />
+        <div class="lg:pr-6">
           <h3 class="card-title">{t.pr.diffTitle}</h3>
           <p class="copy card-body">{t.pr.diffBody}</p>
-        </article>
-      </div>
+        </div>
+      </article>
     </section>
 
     <section class="section" id="more">

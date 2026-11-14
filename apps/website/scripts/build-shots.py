@@ -26,8 +26,6 @@ jobs = [
   ("notifications-2", "full-filter-unread.png", (0, 60, 1280, 860), 1280),
   ("persistence", "full-quit.png", (324, 190, 1604, 990), 1280),
   ("sidebar", "full-sidebar.png", (0, 100, 1100, 1700), 1100),
-  ("pr-popover", "hero-pr.png", (1420, 50, 2370, 644), 1280),
-  ("mr-popover", "full-mr.png", (1420, 50, 2370, 644), 1280),
   ("diff", "win-diff.png", None, 2200),
   ("filter-workspace", "full-filter-workspace.png", (0, 100, 700, 700), 700),
   ("filter-remote", "full-filter-remote.png", (0, 100, 700, 700), 700),

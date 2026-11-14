@@ -447,6 +447,26 @@
     border-radius: 14px;
     background: var(--sunken);
   }
+  /* A capability list: a check mark for each line, a dash for one that does not apply. */
+  .checks > li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px 10px;
+    padding: 9px 0 9px 28px;
+    border-top: 1px solid var(--line);
+    color: var(--ink);
+    background: no-repeat 2px 12px / 15px
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%232da44e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3 8.5 3.2 3.2L13 4.8'/%3E%3C/svg%3E");
+  }
+  .checks > li[data-unsupported] {
+    color: var(--muted);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%238b8b86' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M4 8h8'/%3E%3C/svg%3E");
+  }
+  .checks small {
+    color: var(--muted);
+    font-size: 12.5px;
+  }
   .rows > li {
     padding: 22px 0;
     border-top: 1px solid var(--line);
@@ -457,10 +477,6 @@
   }
   .rows > li:last-child {
     padding-bottom: 4px;
-  }
-  .rows-tight > li,
-  .rows-tight > li:first-child {
-    padding: 11px 0;
   }
 
   /* The block that turns the page colors around. */
