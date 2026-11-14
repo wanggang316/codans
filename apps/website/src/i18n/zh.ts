@@ -24,6 +24,11 @@ export const zh: Dictionary = {
     tabsLabel: "产品导览",
     views: [
       {
+        shot: "hero-palette",
+        label: "命令面板",
+        alt: "火星山丘前的深色 Codans 窗口，命令面板已打开：New Agent、New Workspace、Open Project 等操作。侧栏的 Agents View 里有正在工作、等待批准和已完成的 Agent。",
+      },
+      {
         shot: "hero-start",
         label: "开始：New Agent 对话框",
         alt: "粉色沙丘前的浅色 Codans 窗口，上面是 New Agent 对话框：inboxlm 项目、名为 feat/label-rules 的新 worktree、提示词，已选 Claude Code。",
@@ -31,27 +36,22 @@ export const zh: Dictionary = {
       {
         shot: "hero-build",
         label: "工作：Agent 和开发服务器",
-        alt: "火星地貌前的深色 Codans 窗口。宽 pane 里 Claude Code 正在工作，旁边的窄 pane 运行开发服务器。",
+        alt: "Gruvbox Dark 主题的 Codans 窗口，背景是地球的蓝色边缘，月球在窗口后面。宽 pane 里 Claude Code 正在工作，旁边的窄 pane 运行开发服务器。",
       },
       {
         shot: "hero-review",
         label: "工作：Agent 和实时 diff",
-        alt: "Tokyo Night 主题的 Codans 窗口，背景是地球的蓝色边缘，月球在窗口后面。窄 pane 里是 Codex，旁边是终端 diff 查看器。",
+        alt: "Rosé Pine Dawn 主题的 Codans 窗口，背景是蓝色波浪。窄 pane 里是 Codex，旁边是终端 diff 查看器。",
       },
       {
         shot: "hero-team",
         label: "工作：一个 worktree 里的五个 Agent",
-        alt: "Rosé Pine 主题、隐藏侧栏的 Codans 窗口。五个 pane：第一列 Claude Code，第二列 Codex 和 omp，第三列 OpenCode 和 Pi。",
+        alt: "月球表面上方、隐藏侧栏的深色 Codans 窗口。五个 pane：第一列 Claude Code，第二列 Codex 和 omp，第三列 OpenCode 和 Pi。Claude Code 正在等待推送的批准。",
       },
       {
         shot: "hero-pr",
         label: "交付：GitHub Pull Request",
         alt: "纯绿色背景上的浅色 Codans 窗口。顶栏下方的 PR 弹出面板显示三项通过的检查和 Merge 按钮。",
-      },
-      {
-        shot: "hero-mr",
-        label: "交付：GitLab Merge Request",
-        alt: "月球表面上方的深色 Codans 窗口。顶栏下方的 MR 弹出面板显示三项通过的检查和 Merge 按钮。",
       },
     ],
   },

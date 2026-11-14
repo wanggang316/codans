@@ -69,7 +69,7 @@ repository.
 
 | Ids | What they show |
 |---|---|
-| `hero-start`, `hero-build`, `hero-review`, `hero-team`, `hero-pr`, `hero-mr` | The tour scenes: the full window, one tab, in front of a backdrop. New Agent dialog; agent beside a dev server (7:3); agent beside a live diff (4:6); five agents without the sidebar; the pull request popover; the merge request popover. Each scene has its own theme. |
+| `hero-palette`, `hero-start`, `hero-build`, `hero-review`, `hero-team`, `hero-pr` | The tour scenes: the full window, one tab, in front of a backdrop. Command palette; New Agent dialog; agent beside a dev server (7:3); agent beside a live diff (4:6); five agents without the sidebar; the pull request popover. Themes: GitHub Dark Default, GitHub Light Default, Gruvbox Dark, Rosé Pine Dawn. |
 | `agents-view`, `new-agent`, `skills`, `queue`, `sessions`, `profile`, `handoff`, `notifications`, `persistence` | The Agent-first cards: one cropped detail for each feature. |
 | `sidebar`, `panes-team` (recording), `layout` | The Parallel section. |
 | `pr-popover`, `mr-popover`, `diff` | The Pull requests section: GitHub, GitLab, and the diff window. |
@@ -92,6 +92,13 @@ Capture rules:
   use the wallpapers that come with macOS.
 - Make the app window key and give one pane the focus before each capture.
   Panes without focus are dimmed.
+- Start each terminal program in the theme of the capture. Some programs read
+  the background color only when they start.
+- Show more than one agent state in the Agents View: working, waiting for
+  approval, done, and idle.
+- A tour scene is a 1920 x 1048 point region with the 1440 x 900 window in the
+  center. `build-shots.py` crops it to 1664 x 1044; `global.css` uses the same
+  numbers to make the window as wide as the text column.
 - Use one tab in each worktree.
 - Keep recordings under 15 seconds and under 2 MB. They loop without sound.
 - The numbers in the Parallel section are measurements. Measure again before you

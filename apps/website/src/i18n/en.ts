@@ -27,6 +27,11 @@ export const en = {
     // One task from start to merge. Each view has its own theme and backdrop.
     views: [
       {
+        shot: "hero-palette",
+        label: "Command palette",
+        alt: "A dark Codans window in front of a mountain on Mars, with the command palette open: New Agent, New Workspace, Open Project and other actions. The Agents View in the sidebar shows agents that work, wait for approval, and are done.",
+      },
+      {
         shot: "hero-start",
         label: "Start: the New Agent dialog",
         alt: "The New Agent dialog over a light Codans window in front of pink sand dunes: the inboxlm project, a new worktree named feat/label-rules, a prompt, and Claude Code selected.",
@@ -34,27 +39,22 @@ export const en = {
       {
         shot: "hero-build",
         label: "Work: an agent beside a dev server",
-        alt: "A dark Codans window in front of a Mars landscape. Claude Code works in a wide pane beside a narrow pane that runs a dev server.",
+        alt: "A Codans window in the Gruvbox Dark theme above the blue edge of Earth, with the Moon behind it. Claude Code works in a wide pane beside a narrow pane that runs a dev server.",
       },
       {
         shot: "hero-review",
         label: "Work: an agent beside a live diff",
-        alt: "A Codans window in the Tokyo Night theme above the blue edge of Earth, with the Moon behind it. Codex works in a narrow pane beside a terminal diff viewer.",
+        alt: "A Codans window in the Rosé Pine Dawn theme on a backdrop of blue waves. Codex works in a narrow pane beside a terminal diff viewer.",
       },
       {
         shot: "hero-team",
         label: "Work: five agents in one worktree",
-        alt: "A Codans window in the Rosé Pine theme without the sidebar. Five panes: Claude Code in the first column, Codex and omp in the second, OpenCode and Pi in the third.",
+        alt: "A dark Codans window without the sidebar, above the surface of the Moon. Five panes: Claude Code in the first column, Codex and omp in the second, OpenCode and Pi in the third. Claude Code waits for approval to push.",
       },
       {
         shot: "hero-pr",
         label: "Ship: a GitHub pull request",
         alt: "A light Codans window on a plain green backdrop. The pull request popover under the header shows three passed checks and a Merge button.",
-      },
-      {
-        shot: "hero-mr",
-        label: "Ship: a GitLab merge request",
-        alt: "A dark Codans window above the surface of the Moon. The merge request popover under the header shows three passed checks and a Merge button.",
       },
     ],
   },

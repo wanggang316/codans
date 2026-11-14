@@ -292,6 +292,13 @@ const noteColumn = Math.max(...terminal.map((entry) => entry.line?.length ?? 0))
         tabs[current].focus();
       });
     });
+    // A click on the left half of a scene goes back; on the right half, forward.
+    const views = tour.querySelector<HTMLElement>(".tour-views");
+    views?.addEventListener("click", (event) => {
+      const box = views.getBoundingClientRect();
+      stop();
+      show(current + (event.clientX < box.left + box.width / 2 ? -1 : 1));
+    });
     tour.addEventListener("pointerdown", stop);
 
     if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {

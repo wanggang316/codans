@@ -4,14 +4,14 @@ from PIL import Image
 src, out, manifest = sys.argv[1], sys.argv[2], sys.argv[3]
 os.makedirs(out, exist_ok=True)
 full = None
-SCENE = (240, 74, 3600, 2022)
+SCENE = (256, 4, 3584, 2092)
 jobs = [
   # id, source, crop box in source pixels (None = whole), max width
-  # A tour scene keeps half of the captured margin around the window.
+  # A tour scene is 1664 x 1044 points around the 1440 x 900 window; global.css uses this size.
   # The tour scenes: the window with its shadow in front of a backdrop, captured as a screen region.
-  ("hero-start", "stage-start.png", SCENE, 3200), ("hero-build", "stage-build.png", SCENE, 3200),
-  ("hero-review", "stage-review.png", SCENE, 3200), ("hero-team", "stage-team.png", SCENE, 3200),
-  ("hero-pr", "stage-pr.png", SCENE, 3200), ("hero-mr", "stage-mr.png", SCENE, 3200),
+  ("hero-palette", "stage-palette.png", SCENE, 3200), ("hero-start", "stage-start.png", SCENE, 3200),
+  ("hero-build", "stage-build.png", SCENE, 3200), ("hero-review", "stage-review.png", SCENE, 3200),
+  ("hero-team", "stage-team.png", SCENE, 3200), ("hero-pr", "stage-pr.png", SCENE, 3200),
   ("agents-view", "full-agents.png", (0, 1050, 1120, 1750), 1120),
   ("new-agent", "hero-start.png", (800, 500, 2080, 1300), 1280),
   ("skills", "full-skills.png", (840, 380, 2120, 1180), 1280),
@@ -49,7 +49,7 @@ for v, poster in (("panes-team.mp4", "panes-team-poster.png"),):
     im = Image.open(os.path.join(src, poster)).convert("RGB")
     im.save(os.path.join(out, "panes-team.webp"), "WEBP", quality=80, method=6)
     sizes["panes-team"] = {"width": im.width, "height": im.height, "video": True}
-og = Image.open(os.path.join(src, "stage-build.png")).convert("RGB")
+og = Image.open(os.path.join(src, "stage-palette.png")).convert("RGB")
 og = og.resize((1200, round(og.height * 1200 / og.width)), Image.LANCZOS).crop((0, 12, 1200, 642))
 og.save(os.path.join(out, "og.png"), optimize=True)
 json.dump(sizes, open(manifest, "w"), indent=2, sort_keys=True)

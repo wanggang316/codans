@@ -24,27 +24,27 @@
     "width": 1280
   },
   "hero-build": {
-    "height": 1855,
+    "height": 2008,
     "width": 3200
   },
-  "hero-mr": {
-    "height": 1855,
+  "hero-palette": {
+    "height": 2008,
     "width": 3200
   },
   "hero-pr": {
-    "height": 1855,
+    "height": 2008,
     "width": 3200
   },
   "hero-review": {
-    "height": 1855,
+    "height": 2008,
     "width": 3200
   },
   "hero-start": {
-    "height": 1855,
+    "height": 2008,
     "width": 3200
   },
   "hero-team": {
-    "height": 1855,
+    "height": 2008,
     "width": 3200
   },
   "layout": {

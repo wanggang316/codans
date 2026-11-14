@@ -206,14 +206,16 @@
     box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 12%, transparent);
   }
 
-  /* The tour: a wide stage of full scenes, and one segment for each scene. */
+  /* The tour: full scenes on a stage. A scene is 1664 x 1044 and its window is 1440 wide, so at
+     full size the window is as wide as the text column and the backdrop extends past it. */
   .tour {
-    max-width: 1480px;
+    position: relative;
+    width: min(100% - 32px, (1200px - 48px) * 1664 / 1440);
     margin: 56px auto 0;
-    padding-inline: 16px;
   }
   .tour-views {
     display: grid;
+    cursor: pointer;
   }
   .tour-view {
     grid-area: 1 / 1;
@@ -233,35 +235,59 @@
     border-radius: clamp(12px, 1.6vw, 26px);
     box-shadow: none;
   }
+  /* The segments sit on the backdrop, in the margin below the window (72 of 1044). A dark pill
+     keeps them readable on every backdrop. */
   .tour-tabs {
+    position: absolute;
+    bottom: calc(3.45% - 10px);
+    left: 50%;
+    height: 20px;
+    padding: 0 10px;
     display: flex;
-    justify-content: center;
     gap: 6px;
-    margin-top: 18px;
+    border-radius: 999px;
+    background: rgb(0 0 0 / 0.32);
+    backdrop-filter: blur(10px);
+    transform: translateX(-50%);
   }
-  /* The hit area is taller than the 3px bar it shows. */
+  @media (max-width: 640px) {
+    .tour-tabs {
+      bottom: calc(3.45% - 5px);
+      height: 10px;
+      padding: 0 6px;
+      gap: 4px;
+    }
+  }
   .tour-tab {
     position: relative;
-    width: 44px;
-    height: 24px;
+    width: clamp(18px, 3vw, 40px);
+    height: 100%;
     cursor: pointer;
   }
   .tour-tab::before,
   .tour-tab::after {
     content: "";
     position: absolute;
+    inset: calc(50% - 1.5px) 0 auto;
+    height: 3px;
+    border-radius: 2px;
+    background: rgb(255 255 255 / 0.4);
+  }
+  .tour-tab::after {
+    content: "";
+    position: absolute;
     inset: 10px 0 auto;
     height: 3px;
     border-radius: 2px;
-    background: var(--line);
+    background: rgb(255 255 255 / 0.4);
   }
   .tour-tab::after {
-    background: var(--ink);
+    background: #fff;
     transform: scaleX(0);
     transform-origin: left;
   }
   .tour-tab:hover::before {
-    background: var(--muted);
+    background: rgb(255 255 255 / 0.65);
   }
   .tour-tab[aria-selected="true"]::after {
     transform: scaleX(1);
