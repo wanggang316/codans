@@ -533,7 +533,7 @@
   /* A card in a light shade of the color of its tab. */
   .card-tinted {
     padding: 12px;
-    background: color-mix(in srgb, var(--tab) 14%, var(--sunken));
+    background: color-mix(in srgb, var(--tab) 7%, var(--sunken));
   }
 
   /* A switcher list: the selected item is raised, the others are quiet. */
