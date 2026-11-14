@@ -119,24 +119,76 @@
     "height": 1600,
     "width": 1100
   },
+  "theme-ayu": {
+    "height": 400,
+    "width": 640
+  },
+  "theme-dracula": {
+    "height": 400,
+    "width": 640
+  },
+  "theme-everforest": {
+    "height": 400,
+    "width": 640
+  },
+  "theme-github-dark": {
+    "height": 400,
+    "width": 640
+  },
+  "theme-github-light": {
+    "height": 400,
+    "width": 640
+  },
   "theme-gruvbox": {
-    "height": 1000,
-    "width": 1600
+    "height": 400,
+    "width": 640
+  },
+  "theme-gruvbox-light": {
+    "height": 400,
+    "width": 640
+  },
+  "theme-kanagawa": {
+    "height": 400,
+    "width": 640
   },
   "theme-latte": {
-    "height": 1000,
-    "width": 1600
+    "height": 400,
+    "width": 640
   },
   "theme-mocha": {
-    "height": 1000,
-    "width": 1600
+    "height": 400,
+    "width": 640
+  },
+  "theme-monokai": {
+    "height": 400,
+    "width": 640
+  },
+  "theme-night-owl": {
+    "height": 400,
+    "width": 640
+  },
+  "theme-nord": {
+    "height": 400,
+    "width": 640
+  },
+  "theme-one-dark": {
+    "height": 400,
+    "width": 640
   },
   "theme-rosepine": {
-    "height": 1000,
-    "width": 1600
+    "height": 400,
+    "width": 640
+  },
+  "theme-rosepine-dawn": {
+    "height": 400,
+    "width": 640
+  },
+  "theme-solarized": {
+    "height": 400,
+    "width": 640
   },
   "theme-tokyonight": {
-    "height": 1000,
-    "width": 1600
+    "height": 400,
+    "width": 640
   }
 }

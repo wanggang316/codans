@@ -210,13 +210,6 @@ export const en = {
     themes: {
       title: "Themes",
       body: "Every Ghostty theme is built in, 463 of them. Choose one for light and one for dark; the window follows the system and takes its colors from the terminal.",
-      items: [
-        { shot: "theme-tokyonight", name: "TokyoNight Storm" },
-        { shot: "theme-rosepine", name: "Rose Pine Dawn" },
-        { shot: "theme-gruvbox", name: "Gruvbox Dark" },
-        { shot: "theme-latte", name: "Catppuccin Latte" },
-        { shot: "theme-mocha", name: "Catppuccin Mocha" },
-      ],
       altSuffix: "theme in the Codans window",
     },
     speed: {

@@ -29,9 +29,10 @@ jobs = [
   ("filter-workspace", "full-filter-workspace.png", (0, 100, 700, 700), 700),
   ("filter-remote", "full-filter-remote.png", (0, 100, 700, 700), 700),
   ("filter-pr", "full-filter-pr.png", (0, 100, 700, 700), 700),
-  ("theme-mocha", "theme-mocha.png", None, 1600), ("theme-gruvbox", "theme-gruvbox.png", None, 1600),
-  ("theme-tokyonight", "theme-tokyonight.png", None, 1600), ("theme-rosepine", "theme-rosepine.png", None, 1600),
-  ("theme-latte", "theme-latte.png", None, 1600),
+  # The theme wall: the whole window in each theme, as a small tile.
+] + [("theme-" + n, "theme-" + n + ".png", None, 640) for n in (
+  "dracula latte tokyonight gruvbox nord rosepine-dawn github-dark monokai github-light kanagawa one-dark "
+  "everforest mocha gruvbox-light night-owl solarized rosepine ayu").split()] + [
   ("palette", "full-palette.png", (660, 180, 1940, 980), 1280),
   ("run-menu", "full-run.png", (1248, 40, 2880, 1060), 1280),
   ("shortcuts", "set-shortcuts.png", None, 1280),

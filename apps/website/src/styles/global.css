@@ -357,6 +357,49 @@
     letter-spacing: -0.012em;
   }
 
+  /* The theme wall: three rows of tiles that move slowly to the left. It is as wide as a tour
+     scene, and each row starts half a tile after the row above it. */
+  .themes {
+    --tile-gap: 14px;
+    --wall: min(100vw - 32px, (1200px - 48px) * 1664 / 1440);
+    --tile: max(170px, (var(--wall) - 5 * var(--tile-gap)) / 6);
+    width: var(--wall);
+    margin: 28px 0 0 50%;
+    overflow: hidden;
+    transform: translateX(-50%);
+    mask-image: linear-gradient(to right, transparent, #000 5%, #000 95%, transparent);
+  }
+  .themes-row + .themes-row {
+    margin-top: 18px;
+  }
+  .themes-track {
+    display: flex;
+    width: max-content;
+    animation: themes-move 120s linear infinite;
+  }
+  /* One tile takes a twelfth of the loop twice over: 10s is half a tile. */
+  .themes-row:nth-child(2) .themes-track {
+    animation-delay: -10s;
+  }
+  .themes:hover .themes-track {
+    animation-play-state: paused;
+  }
+  .themes-track > li {
+    flex: none;
+    width: var(--tile);
+    margin-right: var(--tile-gap);
+  }
+  @keyframes themes-move {
+    to {
+      transform: translateX(-50%);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .themes-track {
+      animation: none;
+    }
+  }
+
   /* A card: media on top, then a title and one short paragraph. */
   .card {
     padding: 12px 12px 22px;

@@ -207,13 +207,6 @@ export const zh: Dictionary = {
     themes: {
       title: "主题",
       body: "内置全部 463 个 Ghostty 主题。浅色和深色各选一个，窗口跟随系统外观，并从终端取色。",
-      items: [
-        { shot: "theme-tokyonight", name: "TokyoNight Storm" },
-        { shot: "theme-rosepine", name: "Rose Pine Dawn" },
-        { shot: "theme-gruvbox", name: "Gruvbox Dark" },
-        { shot: "theme-latte", name: "Catppuccin Latte" },
-        { shot: "theme-mocha", name: "Catppuccin Mocha" },
-      ],
       altSuffix: "主题下的 Codans 窗口",
     },
     speed: {
