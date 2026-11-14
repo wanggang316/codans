@@ -1,7 +1,23 @@
 {
-  "agents-view": {
-    "height": 700,
-    "width": 1120
+  "agents-view-1": {
+    "height": 462,
+    "width": 740
+  },
+  "agents-view-2": {
+    "height": 462,
+    "width": 740
+  },
+  "agents-view-3": {
+    "height": 462,
+    "width": 740
+  },
+  "cli-1": {
+    "height": 650,
+    "width": 1040
+  },
+  "cli-2": {
+    "height": 458,
+    "width": 732
   },
   "diff": {
     "height": 1440,
@@ -88,15 +104,27 @@
     "height": 883,
     "width": 1280
   },
-  "queue": {
+  "queue-1": {
     "height": 800,
     "width": 1280
+  },
+  "queue-2": {
+    "height": 700,
+    "width": 1120
   },
   "run-menu": {
     "height": 800,
     "width": 1280
   },
-  "sessions": {
+  "sessions-1": {
+    "height": 800,
+    "width": 1280
+  },
+  "sessions-2": {
+    "height": 800,
+    "width": 1280
+  },
+  "sessions-3": {
     "height": 800,
     "width": 1280
   },
@@ -107,10 +135,6 @@
   "sidebar": {
     "height": 1600,
     "width": 1100
-  },
-  "skills": {
-    "height": 800,
-    "width": 1280
   },
   "theme-gruvbox": {
     "height": 1000,

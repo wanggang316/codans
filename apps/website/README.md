@@ -61,6 +61,11 @@ The home page shows real captures of the app. Each shot has an id, and the
 | `public/shots/<id>.mp4` | Optional. A silent screen recording that plays in place of the still. |
 | `src/data/shots.json` | Pixel size of each still, and the ids that have a recording. |
 
+A card with more than one shot id shows them as frames (`Frames` component):
+the first frame is the still, and the others play while the pointer is over the
+card. A recording plays in the same way. On a device without hover, both play
+while they are on screen.
+
 `scripts/build-shots.py <captures dir> public/shots src/data/shots.json` makes
 all three from the raw captures: it crops, scales, encodes WebP, and writes the
 manifest. The job list at the top of the script names each raw capture and its
@@ -70,7 +75,7 @@ repository.
 | Ids | What they show |
 |---|---|
 | `hero-palette`, `hero-start`, `hero-build`, `hero-review`, `hero-team`, `hero-pr` | The tour scenes: the full window, one tab, in front of a backdrop. Command palette; New Agent dialog; agent beside a dev server (7:3); agent beside a live diff (4:6); five agents without the sidebar; the pull request popover. Themes: GitHub Dark Default, GitHub Light Default, Gruvbox Dark, Rosé Pine Dawn. |
-| `agents-view`, `new-agent`, `skills`, `queue`, `sessions`, `profile`, `handoff`, `notifications`, `persistence` | The Agent-first cards: one cropped detail for each feature. |
+| `agents-view-1..3`, `new-agent`, `queue-1..2`, `sessions-1..3`, `profile`, `handoff`, `notifications`, `persistence`, `cli-1..2` | The Agent-first cards: one cropped detail for each feature. Ids with a number are the frames of one flow. |
 | `sidebar`, `panes-team` (recording), `layout` | The Parallel section. |
 | `pr-popover`, `mr-popover`, `diff` | The Pull requests section: GitHub, GitLab, and the diff window. |
 | `filter-*`, `theme-*`, `palette`, `run-menu`, `shortcuts`, `open-in` | The last section. |

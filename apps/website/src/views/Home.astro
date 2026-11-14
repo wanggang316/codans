@@ -2,6 +2,7 @@
 import Base from "../layouts/Base.astro";
 import BrewCommand from "../components/BrewCommand.astro";
 import Download from "../components/Download.astro";
+import Frames from "../components/Frames.astro";
 import GitHubIcon from "../components/GitHubIcon.astro";
 import Shot from "../components/Shot.astro";
 import { dictionary, type Locale } from "../i18n";
@@ -13,19 +14,6 @@ interface Props {
 
 const { locale } = Astro.props;
 const t = dictionary(locale);
-
-// Commands and their output stay in English in every locale.
-const terminal = [
-  { line: "codans agent status" },
-  { output: "p5   claude-code  working  3m18s  handbyte/feat/parallel-walk" },
-  { output: "p6   codex        done     2m04s  handbyte/feat/parallel-walk" },
-  { output: "p10  claude-code  blocked  1m24s  inboxlm/feat/digest-email" },
-  { line: "codans agent wait p5 --until idle", note: "block until it stops" },
-  { line: "codans worktree new feat/retry --agent codex", note: "worktree + agent" },
-  { line: "codans pane send p6 'cargo test' --capture", note: "run, get the output" },
-  { line: "codans handoff to codex --brief -", note: "pass the task on" },
-];
-const noteColumn = Math.max(...terminal.map((entry) => entry.line?.length ?? 0)) + 3;
 ---
 
 <Base locale={locale} page="/" title={t.meta.title} description={t.meta.description}>
@@ -88,26 +76,12 @@ const noteColumn = Math.max(...terminal.map((entry) => entry.line?.length ?? 0))
         {
           t.agentFirst.cards.map((card) => (
             <article class="card">
-              <Shot id={card.shot} alt={card.alt} class="card-shot" />
+              <Frames ids={card.shots} alt={card.alt} class="card-shot" />
               <h3 class="card-title" set:html={card.title} />
               <p class="copy card-body" set:html={card.body} />
             </article>
           ))
         }
-      </div>
-      <div class="panel mt-4 grid items-center gap-8 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-12">
-        <div>
-          <h3 class="subheading">{t.agentFirst.cli.title}</h3>
-          {t.agentFirst.cli.body.map((paragraph) => <p class="copy mt-4" set:html={paragraph} />)}
-        </div>
-        <pre
-          class="terminal"><code>{terminal.map((entry) =>
-  entry.line ? (
-    <><span class="terminal-prompt">$ </span>{entry.line}{entry.note && <span class="terminal-note">{" ".repeat(noteColumn - entry.line.length)}# {entry.note}</span>}{"\n"}</>
-  ) : (
-    <><span class="terminal-output">{entry.output}</span>{"\n"}</>
-  ),
-)}</code></pre>
       </div>
     </section>
 
@@ -258,6 +232,55 @@ const noteColumn = Math.max(...terminal.map((entry) => entry.line?.length ?? 0))
 </Base>
 
 <script>
+  // Frames and recordings in a card play while the pointer is over the card. On a device
+  // without hover they play while they are on screen.
+  const canHover = window.matchMedia("(hover: hover)").matches;
+  const whileActive = (target: Element, start: () => void, stop: () => void) => {
+    if (canHover) {
+      target.addEventListener("mouseenter", start);
+      target.addEventListener("mouseleave", stop);
+    } else {
+      new IntersectionObserver(([entry]) => (entry.isIntersecting ? start() : stop()), {
+        threshold: 0.7,
+      }).observe(target);
+    }
+  };
+
+  for (const frames of document.querySelectorAll<HTMLElement>("[data-frames]")) {
+    const items = [...frames.querySelectorAll<HTMLElement>(".frame")];
+    const dots = [...frames.querySelectorAll<HTMLElement>(".frames-dots i")];
+    let current = 0;
+    let timer: number | undefined;
+    const show = (index: number) => {
+      current = index % items.length;
+      items.forEach((item, i) => item.toggleAttribute("data-active", i === current));
+      dots.forEach((dot, i) => dot.toggleAttribute("data-active", i === current));
+    };
+    whileActive(
+      frames.closest(".card") ?? frames,
+      () => {
+        window.clearInterval(timer);
+        show(1);
+        timer = window.setInterval(() => show(current + 1), 1700);
+      },
+      () => {
+        window.clearInterval(timer);
+        show(0);
+      },
+    );
+  }
+
+  for (const video of document.querySelectorAll<HTMLVideoElement>("video[data-hover-play]")) {
+    whileActive(
+      video.closest(".card") ?? video,
+      () => void video.play().catch(() => {}),
+      () => {
+        video.pause();
+        video.currentTime = 0;
+      },
+    );
+  }
+
   // The tour advances by itself until the reader takes over.
   for (const tour of document.querySelectorAll<HTMLElement>("[data-tour]")) {
     const tabs = [...tour.querySelectorAll<HTMLButtonElement>("[data-view]")];
