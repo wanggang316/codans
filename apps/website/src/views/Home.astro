@@ -303,6 +303,34 @@ const FILTER_COLORS: Record<string, string> = {
 </Base>
 
 <script>
+  // Reveal on scroll: a block below the first screen fades in and rises when it comes into
+  // view. Blocks that share a row come in one after the other.
+  if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    const blocks = document.querySelectorAll<HTMLElement>(
+      "main .section-head, main article.card, main .panel, main .card-flush, main .pill-tabs, main [data-switcher] > .frames, main .themes, main .cta",
+    );
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          (entry.target as HTMLElement).dataset.reveal = "in";
+          observer.unobserve(entry.target);
+        }
+      },
+      { rootMargin: "0px 0px -8% 0px" },
+    );
+    for (const block of blocks) {
+      // A block that is on screen at the start stays as it is.
+      if (block.getBoundingClientRect().top < window.innerHeight) continue;
+      const row = [...(block.parentElement?.children ?? [])].filter(
+        (item) => (item as HTMLElement).offsetTop === block.offsetTop,
+      );
+      block.style.setProperty("--reveal-delay", `${Math.min(row.indexOf(block), 3) * 90}ms`);
+      block.dataset.reveal = "";
+      observer.observe(block);
+    }
+  }
+
   // Frames in a card play while the pointer is over the card. On a device
   // without hover they play while they are on screen.
   const canHover = window.matchMedia("(hover: hover)").matches;
