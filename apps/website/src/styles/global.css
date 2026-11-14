@@ -328,24 +328,6 @@
   .section-head {
     max-width: 46em;
   }
-  .section-name {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    color: var(--muted);
-    font-family: var(--font-mono);
-    font-size: 13px;
-  }
-  .section-name::before {
-    content: "";
-    width: 7px;
-    height: 7px;
-    border-radius: 2px;
-    background: var(--accent);
-  }
-  .section-head .heading {
-    margin-top: 14px;
-  }
   .section-head .copy {
     margin-top: 16px;
     font-size: 15px;

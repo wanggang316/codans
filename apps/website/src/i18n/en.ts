@@ -58,7 +58,6 @@ export const en = {
     ],
   },
   agentFirst: {
-    name: "Agent-first",
     title: "Built around the agent, not the editor.",
     lede: "Codans knows which panes run agents and what state each one is in. It can start, queue, resume, and hand over their work.",
     cards: [
@@ -119,7 +118,6 @@ export const en = {
     ],
   },
   parallel: {
-    name: "Parallel",
     title: "Work in many worktrees at the same time.",
     lede: "Give each task its own worktree and let them all move at once. The sidebar shows the state of every one.",
     points: [
@@ -144,7 +142,6 @@ export const en = {
       "The sidebar with five projects and twelve worktrees; most worktrees show a diff size and a pull request number.",
   },
   pr: {
-    name: "Pull requests",
     title: "The pull request, from open to merged.",
     lede: "Codans reads pull requests through the <code>gh</code> and <code>glab</code> CLIs that you are already logged in to. It sends no HTTP request of its own and stores no token.",
     // The capabilities that Settings > Git Platforms lists, in the same order.
@@ -182,7 +179,6 @@ export const en = {
     ],
   },
   more: {
-    name: "And the rest",
     title: "The parts you set up once and then rely on.",
     projects: {
       title: "Projects",

@@ -55,7 +55,6 @@ export const zh: Dictionary = {
     ],
   },
   agentFirst: {
-    name: "Agent 优先",
     title: "围绕 Agent 设计，而不是围绕编辑器。",
     lede: "Codans 知道哪些 pane 在跑 Agent、各自是什么状态，也能启动、排队、恢复和交接它们的工作。",
     cards: [
@@ -116,7 +115,6 @@ export const zh: Dictionary = {
     ],
   },
   parallel: {
-    name: "并行",
     title: "多个 worktree，高效并行。",
     lede: "每个任务一个 worktree，同时推进。所有 worktree 的状态都在侧栏里。",
     points: [
@@ -141,7 +139,6 @@ export const zh: Dictionary = {
       "侧栏里有五个项目和十二个 worktree，多数 worktree 显示 diff 大小和 PR 编号。",
   },
   pr: {
-    name: "Pull Request",
     title: "PR，从创建到合并。",
     lede: "Codans 通过你已经登录的 <code>gh</code> 和 <code>glab</code> CLI 读取 PR。它自己不发任何 HTTP 请求，也不保存 token。",
     // The capabilities that Settings > Git Platforms lists, in the same order.
@@ -179,7 +176,6 @@ export const zh: Dictionary = {
     ],
   },
   more: {
-    name: "其他",
     title: "配置一次，之后一直依赖的那些部分。",
     projects: {
       title: "项目管理",
