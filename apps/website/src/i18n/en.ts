@@ -137,7 +137,7 @@ export const en = {
       },
       {
         title: "Built for many terminals",
-        body: "Deeply optimized for many terminals that work in parallel. Terminals that you have not opened stay asleep.",
+        body: "Deeply optimized for many terminals that work in parallel: memory stays low and the app stays fast. Terminals that you have not opened stay asleep.",
       },
     ],
     sidebarAlt:
