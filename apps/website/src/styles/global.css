@@ -357,17 +357,15 @@
     letter-spacing: -0.012em;
   }
 
-  /* The theme wall: a tilted plane of six columns in a band as wide as a tour scene. The band
-     cuts the columns at the top and the bottom only; all six are whole from side to side.
-     Sizes are in container units, so the plane keeps its fit at every width. */
+  /* The theme wall: a tilted plane of tiles behind a window as wide as a tour scene. Every
+     second column sits half a tile lower. */
   .themes {
     position: relative;
-    container-type: inline-size;
     width: min(100vw - 32px, (1200px - 48px) * 1664 / 1440);
-    aspect-ratio: 3 / 1;
+    height: clamp(280px, 36vw, 460px);
     margin: 28px 0 0 50%;
-    overflow-x: visible;
-    overflow-y: clip;
+    overflow: hidden;
+    border-radius: clamp(12px, 1.6vw, 26px);
     transform: translateX(-50%);
   }
   .themes-plane {
@@ -375,26 +373,19 @@
     top: 50%;
     left: 50%;
     display: flex;
-    gap: 1.05cqw;
+    gap: 14px;
     width: max-content;
     transform: translate(-50%, -50%) rotateX(42deg) rotateZ(-22deg);
   }
   .themes-column {
     flex: none;
-    width: 11.7cqw;
+    width: 190px;
   }
-  /* Every second column sits half a tile higher. */
   .themes-column:nth-child(even) {
-    transform: translateY(-5cqw);
+    transform: translateY(-76px);
   }
   .themes-column > li {
-    padding-bottom: 1.05cqw;
-  }
-  .themes-column .copy {
-    margin-top: 0.45cqw;
-    font-size: 0.86cqw;
-    line-height: 1.3;
-    white-space: nowrap;
+    padding-bottom: 14px;
   }
 
   /* A card: media on top, then a title and one short paragraph. */
