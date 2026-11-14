@@ -177,7 +177,7 @@ export const zh: Dictionary = {
   },
   more: {
     projects: {
-      title: "项目管理",
+      title: "多个仓库，本地或远程，一处管理。",
       lede: "用 Workspace 跨多个仓库工作，用远程项目在另一台机器上工作。过滤器让侧栏保持简短。",
       // One item for each sidebar filter, in the order of the filter bar in the app.
       items: [

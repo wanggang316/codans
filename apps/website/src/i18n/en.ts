@@ -180,7 +180,7 @@ export const en = {
   },
   more: {
     projects: {
-      title: "Projects",
+      title: "Many repositories, local or remote, in one place.",
       lede: "Work across several repositories in one workspace, and on projects that live on another machine. Filters keep the sidebar short.",
       // One item for each sidebar filter, in the order of the filter bar in the app.
       items: [
