@@ -117,39 +117,28 @@ export const zh: Dictionary = {
   },
   parallel: {
     name: "并行",
-    title: "多个项目，多个 worktree，一个窗口。",
-    lede: "并行工作失败，往往是因为你跟丢了。Codans 把整棵树放在侧栏，每条工作线都有自己的目录。",
+    title: "多个 worktree，高效并行。",
+    lede: "每个任务一个 worktree，同时推进。所有 worktree 的状态都在侧栏里。",
     points: [
       {
-        title: "worktree 是一等公民",
-        body: "项目下列出它的 git worktree。每个 worktree 有自己的目录、分支、标签页和 pane，两个 Agent 不会改同一份代码，除非你有意如此。",
+        title: "一个任务，一个 worktree",
+        body: "每个 worktree 有自己的目录、分支、标签页和 pane，Agent 不会改到同一份代码。",
       },
       {
-        title: "每一层都有状态",
-        body: "侧栏显示每个 worktree 的 diff 大小、PR、正在运行的命令和未读铃铛。不用点进去就知道哪里有变化。",
+        title: "状态都在侧栏",
+        body: "每个 worktree 的 diff 大小、PR、正在运行的命令和未读铃铛。不用点进去就知道哪里有变化。",
       },
       {
-        title: "切换没有延迟",
-        body: "每个 worktree 的标签页和分屏布局都保持原样，重启之后也一样。",
+        title: "切换不丢现场",
+        body: "标签页和分屏布局保持原样，重启之后也一样。",
+      },
+      {
+        title: "为多终端并行而优化",
+        body: "为大量终端并行工作做了深度优化。没打开过的终端保持休眠。",
       },
     ],
-    sidebarAlt: "侧栏里有五个项目和十二个 worktree，多数 worktree 显示 diff 大小和 PR 编号。",
-    teamTitle: "五个 Agent，一个 worktree",
-    teamBody: "导览里那个布局的录屏：每个 pane 是一个 Agent，在同一个分支上各做各的事。",
-    teamAlt: "五个 Agent pane 同时输出内容的录屏。",
-    layoutTitle: "每个 pane 都是真正的终端",
-    layoutBody:
-      "渲染基于 libghostty，Ghostty 里能跑的这里都能跑：Agent、系统监视器、git 提交图，或者等测试时玩一局贪吃蛇。",
-    layoutAlt: "四个 pane：Claude Code、htop、贪吃蛇和 git log 提交图。",
-    statsTitle: "用真实 Agent 测出来的数字",
-    stats: [
-      { value: "14", label: "个 Agent 同时运行，分布在 5 个项目的 20 个 pane 里" },
-      { value: "0.6%", label: "Agent 等待时 Codans 的 CPU 占用，输出滚动时约 5%" },
-      { value: "200 MB", label: "屏幕上显示一个 worktree 时应用的内存" },
-      { value: "1.1 MB", label: "每个让 pane 保持存活的会话守护进程" },
-    ],
-    statsNote:
-      "Codans 0.12.1，8 核 Apple Silicon Mac，16 GB 内存。没打开过的终端保持休眠。20 个终端全部打开过之后，应用占用约 600 MB。Agent 自身的内存另算。",
+    sidebarAlt:
+      "侧栏里有五个项目和十二个 worktree，多数 worktree 显示 diff 大小和 PR 编号。",
   },
   pr: {
     name: "Pull Request",

@@ -106,32 +106,6 @@ const t = dictionary(locale);
           }
         </ul>
       </div>
-      <div class="mt-4 grid gap-4 lg:grid-cols-2">
-        <article class="card">
-          <Shot id="panes-team" alt={t.parallel.teamAlt} class="card-shot" />
-          <h3 class="card-title">{t.parallel.teamTitle}</h3>
-          <p class="copy card-body">{t.parallel.teamBody}</p>
-        </article>
-        <article class="card">
-          <Shot id="layout" alt={t.parallel.layoutAlt} class="card-shot" />
-          <h3 class="card-title">{t.parallel.layoutTitle}</h3>
-          <p class="copy card-body">{t.parallel.layoutBody}</p>
-        </article>
-      </div>
-      <div class="inverse mt-4">
-        <h3 class="subheading">{t.parallel.statsTitle}</h3>
-        <dl class="mt-8 grid gap-x-10 gap-y-8 sm:grid-cols-2 lg:grid-cols-4">
-          {
-            t.parallel.stats.map((stat) => (
-              <div>
-                <dt class="stat-value">{stat.value}</dt>
-                <dd class="copy mt-2">{stat.label}</dd>
-              </div>
-            ))
-          }
-        </dl>
-        <p class="copy mt-10 max-w-[70em] border-t border-current/15 pt-5 text-[12.5px]">{t.parallel.statsNote}</p>
-      </div>
     </section>
 
     <section class="section" id="pull-requests">

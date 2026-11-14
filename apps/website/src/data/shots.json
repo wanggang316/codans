@@ -63,10 +63,6 @@
     "height": 2008,
     "width": 3200
   },
-  "layout": {
-    "height": 1500,
-    "width": 2400
-  },
   "mr-popover": {
     "height": 594,
     "width": 950
@@ -90,11 +86,6 @@
   "palette": {
     "height": 800,
     "width": 1280
-  },
-  "panes-team": {
-    "height": 862,
-    "video": true,
-    "width": 1472
   },
   "persistence": {
     "height": 800,

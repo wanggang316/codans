@@ -120,40 +120,28 @@ export const en = {
   },
   parallel: {
     name: "Parallel",
-    title: "Many projects, many worktrees, one window.",
-    lede: "Parallel work fails when you lose track of it. Codans keeps the whole tree in the sidebar and each line of work in its own directory.",
+    title: "Work in many worktrees at the same time.",
+    lede: "Give each task its own worktree and let them all move at once. The sidebar shows the state of every one.",
     points: [
       {
-        title: "Worktrees are first-class",
-        body: "A project lists its git worktrees. Each one has its own directory, branch, tabs, and panes, so two agents never edit the same checkout unless you want them to.",
+        title: "One task, one worktree",
+        body: "Each worktree has its own directory, branch, tabs, and panes. Agents never edit the same checkout.",
       },
       {
-        title: "State at every level",
-        body: "The sidebar shows the diff size, the pull request, running commands, and unread bells for each worktree. You see what moved without opening it.",
+        title: "State in the sidebar",
+        body: "Diff size, pull request, running commands, and unread bells for every worktree. You see what moved without opening it.",
       },
       {
-        title: "Switching is instant",
-        body: "Tabs and split layouts stay as you left them, in every worktree, across restarts.",
+        title: "Switch without losing your place",
+        body: "Tabs and split layouts stay as you left them, across restarts.",
+      },
+      {
+        title: "Built for many terminals",
+        body: "Deeply optimized for many terminals that work in parallel. Terminals that you have not opened stay asleep.",
       },
     ],
     sidebarAlt:
       "The sidebar with five projects and twelve worktrees; most worktrees show a diff size and a pull request number.",
-    teamTitle: "Five agents, one worktree",
-    teamBody: "A recording of the layout from the tour: each pane is an agent with its own job on the same branch.",
-    teamAlt: "A screen recording of five agent panes that produce output at the same time.",
-    layoutTitle: "A pane is a real terminal",
-    layoutBody:
-      "Rendering is libghostty, so anything that runs in Ghostty runs here: an agent, a system monitor, a git graph, or a game of Snake while the tests run.",
-    layoutAlt: "Four panes: Claude Code, htop, a Snake game, and a git log graph.",
-    statsTitle: "Measured with real agents",
-    stats: [
-      { value: "14", label: "agents running at the same time, in 20 panes across 5 projects" },
-      { value: "0.6%", label: "CPU used by Codans while they wait, and about 5% while they stream output" },
-      { value: "200 MB", label: "app memory with one worktree on screen" },
-      { value: "1.1 MB", label: "for each session daemon that keeps a pane alive" },
-    ],
-    statsNote:
-      "Codans 0.12.1 on an 8-core Apple Silicon Mac with 16 GB of memory. Terminals that you have not opened stay asleep. After every one of the 20 terminals was opened, the app used about 600 MB. The agents use their own memory.",
   },
   pr: {
     name: "Pull requests",
