@@ -76,8 +76,8 @@
     "width": 1280
   },
   "palette": {
-    "height": 800,
-    "width": 1280
+    "height": 900,
+    "width": 1440
   },
   "persistence": {
     "height": 800,
@@ -96,8 +96,8 @@
     "width": 1120
   },
   "run-menu": {
-    "height": 800,
-    "width": 1280
+    "height": 900,
+    "width": 1440
   },
   "sessions-1": {
     "height": 800,

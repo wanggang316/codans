@@ -213,30 +213,30 @@ export const en = {
       altSuffix: "theme in the Codans window",
     },
     speed: {
-      title: "Speed",
+      title: "Quick actions",
       items: [
         {
           shot: "palette",
           title: "Command palette",
-          body: "<kbd>⌘P</kbd> finds every action: switch worktree, launch an agent, run a command, split a pane.",
+          body: "<kbd>⌘P</kbd> finds every action.",
           alt: "The command palette with the query agent and a list of Launch Agent actions.",
         },
         {
           shot: "run-menu",
-          title: "Project and global commands",
-          body: "Bind build, test, and dev-server commands to the Run button and to shortcuts. Codans reads package.json, Makefile, justfile, Cargo.toml and more, and offers the commands it finds.",
+          title: "Run commands",
+          body: "Bind build, test, and dev-server commands to the Run button. Codans finds the scripts in your project files.",
           alt: "The Run menu with four project commands and the scripts found in package.json.",
         },
         {
           shot: "shortcuts",
-          title: "Shortcuts for everything",
-          body: "Every action has a shortcut that you can change, disable, or search for.",
+          title: "Shortcuts",
+          body: "Every action has a shortcut that you can change.",
           alt: "The Shortcuts pane of Settings with a table of actions and key combinations.",
         },
         {
           shot: "open-in",
-          title: "Your editor, one key away",
-          body: "<kbd>⌘O</kbd> opens the worktree in VS Code, Cursor, Zed, Xcode, or a JetBrains IDE. Codans is not an IDE and does not try to be.",
+          title: "Open in your editor",
+          body: "<kbd>⌘O</kbd> opens the worktree in your editor.",
           alt: "The Open in menu with a list of editors, terminals, and git clients.",
         },
       ],

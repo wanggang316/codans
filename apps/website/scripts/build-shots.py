@@ -33,8 +33,8 @@ jobs = [
 ] + [("theme-" + n, "theme-" + n + ".png", None, 640) for n in (
   "dracula latte tokyonight gruvbox nord rosepine-dawn github-dark monokai github-light kanagawa one-dark "
   "everforest mocha gruvbox-light night-owl solarized rosepine ayu").split()] + [
-  ("palette", "full-palette.png", (660, 180, 1940, 980), 1280),
-  ("run-menu", "full-run.png", (1248, 40, 2880, 1060), 1280),
+  ("palette", "full-palette.png", (723, 190, 2163, 1090), 1440),
+  ("run-menu", "full-run.png", (1248, 0, 2880, 1020), 1440),
   ("shortcuts", "set-shortcuts.png", None, 1280),
   ("open-in", "full-open.png", (1400, 60, 2880, 985), 1280),
 ]

@@ -210,30 +210,30 @@ export const zh: Dictionary = {
       altSuffix: "主题下的 Codans 窗口",
     },
     speed: {
-      title: "效率",
+      title: "快捷操作",
       items: [
         {
           shot: "palette",
           title: "命令面板",
-          body: "<kbd>⌘P</kbd> 查找所有操作：切换 worktree、启动 Agent、运行命令、分屏。",
+          body: "<kbd>⌘P</kbd> 查找所有操作。",
           alt: "命令面板，输入 agent 后列出 Launch Agent 操作。",
         },
         {
           shot: "run-menu",
-          title: "项目命令与全局命令",
-          body: "把构建、测试、开发服务器命令绑定到 Run 按钮和快捷键。Codans 会读取 package.json、Makefile、justfile、Cargo.toml 等文件，把找到的命令列出来。",
+          title: "运行命令",
+          body: "把构建、测试、开发服务器绑定到 Run 按钮。Codans 会从项目文件里找出脚本。",
           alt: "Run 菜单：四个项目命令，以及在 package.json 里找到的脚本。",
         },
         {
           shot: "shortcuts",
-          title: "完整的快捷键",
-          body: "每个操作都有快捷键，可以修改、停用，也可以搜索。",
+          title: "快捷键",
+          body: "每个操作都有快捷键，可以修改。",
           alt: "设置里的 Shortcuts 面板：操作与按键组合的表格。",
         },
         {
           shot: "open-in",
-          title: "一个按键打开编辑器",
-          body: "<kbd>⌘O</kbd> 在 VS Code、Cursor、Zed、Xcode 或 JetBrains IDE 中打开 worktree。Codans 不是 IDE，也不打算成为 IDE。",
+          title: "打开编辑器",
+          body: "<kbd>⌘O</kbd> 在你的编辑器里打开 worktree。",
           alt: "Open in 菜单：编辑器、终端和 git 客户端列表。",
         },
       ],

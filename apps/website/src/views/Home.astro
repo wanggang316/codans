@@ -188,16 +188,40 @@ const t = dictionary(locale);
       </div>
 
       <h3 class="group-title">{t.more.speed.title}</h3>
-      <div class="grid gap-4 sm:grid-cols-2">
-        {
-          t.more.speed.items.map((item) => (
-            <article class="card">
-              <Shot id={item.shot} alt={item.alt} class="card-shot" />
-              <h4 class="card-title">{item.title}</h4>
-              <p class="copy card-body" set:html={item.body} />
-            </article>
-          ))
-        }
+      <div class="grid gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]" data-switcher>
+        <div class="panel switcher-list" role="tablist" aria-orientation="vertical" aria-label={t.more.speed.title}>
+          {
+            t.more.speed.items.map((item, index) => (
+              <button
+                type="button"
+                role="tab"
+                class="switcher-item"
+                id={`quick-tab-${index}`}
+                aria-controls={`quick-panel-${index}`}
+                aria-selected={index === 0 ? "true" : "false"}
+                tabindex={index === 0 ? 0 : -1}
+              >
+                <span class="subheading">{item.title}</span>
+                <span class="copy" set:html={item.body} />
+              </button>
+            ))
+          }
+        </div>
+        <div class="card card-flush frames">
+          {
+            t.more.speed.items.map((item, index) => (
+              <div
+                class="frame"
+                id={`quick-panel-${index}`}
+                role="tabpanel"
+                aria-labelledby={`quick-tab-${index}`}
+                data-active={index === 0 ? "" : undefined}
+              >
+                <Shot id={item.shot} alt={item.alt} class="card-shot" />
+              </div>
+            ))
+          }
+        </div>
       </div>
     </section>
 
@@ -272,6 +296,30 @@ const t = dictionary(locale);
         video.currentTime = 0;
       },
     );
+  }
+
+  // A switcher: a list of tabs on one side and one picture for each tab on the other.
+  for (const switcher of document.querySelectorAll<HTMLElement>("[data-switcher]")) {
+    const tabs = [...switcher.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    const panels = [...switcher.querySelectorAll<HTMLElement>('[role="tabpanel"]')];
+    const select = (index: number) => {
+      const next = (index + tabs.length) % tabs.length;
+      tabs.forEach((tab, i) => {
+        tab.setAttribute("aria-selected", String(i === next));
+        tab.tabIndex = i === next ? 0 : -1;
+      });
+      panels.forEach((panel, i) => panel.toggleAttribute("data-active", i === next));
+      return next;
+    };
+    tabs.forEach((tab, i) => {
+      tab.addEventListener("click", () => select(i));
+      tab.addEventListener("keydown", (event) => {
+        const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
+        if (!step) return;
+        event.preventDefault();
+        tabs[select(i + step)].focus();
+      });
+    });
   }
 
   // The tour advances by itself until the reader takes over.
