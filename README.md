@@ -22,13 +22,64 @@ Codans is a native macOS terminal for people who work through coding agents. It 
 
 ## Features
 
-- **Agent-first.** The Agents View shows every agent in every project with its live state. Start an agent with its worktree in one step, queue prompts for it, resume old sessions, and get a notification when it asks or finishes.
-- **Many worktrees in parallel.** Each task has its own worktree, tabs, and panes. The sidebar shows the diff size, pull request, running commands, and unread bells of each one. The app is optimized for many terminals: memory stays low.
-- **Pull requests.** Follow checks, merge, mark ready, and rerun failed checks for GitHub and GitLab, through the `gh` and `glab` CLIs that you are already logged in to.
-- **Workspaces and remote projects.** Work on several repositories in one workspace like a monorepo, and on projects on another machine over SSH.
-- **A CLI and an Agent Skill.** Everything in the window is a `codans` command, so agents can create worktrees, start other agents, and read their output.
-- **Quick actions.** A command palette, project commands on the Run button, a shortcut for every action, and one key to open a worktree in your editor.
-- **Native.** Built on Ghostty, with every Ghostty theme built in. Sessions keep running when you quit the app.
+### Built around the agent, not the editor
+
+Codans knows which panes run agents and what state each one is in. It can start, queue, resume, and hand over their work.
+
+- **Agents View**: every agent in every project, with its live state. Click a row to go to its pane.
+- **New Agent**: press <kbd>⌘⇧N</kbd>, pick a project, name a branch, write the prompt. The worktree and the agent start together.
+- **Command Queue**: line up prompts while the agent is busy: after the current task, now, or on a schedule.
+- **Session History**: every Claude Code and Codex session of a worktree. Resume one in a new tab, in place, or in a split.
+- **Agent Profiles**: launch presets with agent, model, effort, mode, placement, arguments, and environment.
+- **Workflows** (beta): hand a task to another agent with a briefing, or chain agents into loops such as author and reviewer.
+- **Notifications**: a bell marks the worktree where an agent asked or finished. A macOS banner takes you to the pane.
+- **Sessions outlive the window**: quit Codans and the agents keep working. The next launch brings every terminal back.
+- **CLI and Agent Skill**: everything in the window is a `codans` command. Agents use it to create worktrees, start other agents, and read their output.
+
+Works with Claude Code, Codex, OpenCode, Pi, omp, Gemini CLI, and anything else with a CLI.
+
+### Work in many worktrees at the same time
+
+Give each task its own worktree and let them all move at once.
+
+- **One task, one worktree**: each worktree has its own directory, branch, tabs, and panes. Agents never edit the same checkout.
+- **State in the sidebar**: diff size, pull request, running commands, and unread bells for every worktree.
+- **Switch without losing your place**: tabs and split layouts stay as you left them, across restarts.
+- **Built for many terminals**: deeply optimized for many terminals that work in parallel. Memory stays low, and terminals that you have not opened stay asleep.
+
+### The pull request, from open to merged
+
+Codans reads pull requests through the `gh` and `glab` CLIs that you are already logged in to. It sends no HTTP request of its own and stores no token.
+
+| | GitHub | GitLab |
+|---|---|---|
+| Pull request and merge request badges | ✓ | ✓ |
+| Check and pipeline status | ✓ | ✓ |
+| Merge commit | ✓ | ✓ |
+| Squash and merge | ✓ | ✓ |
+| Rebase and merge | ✓ | The project's merge method applies |
+| Mark ready for review | ✓ | ✓ |
+| Rerun failed checks or pipeline jobs | ✓ | ✓ |
+| Review status | ✓ | ✓ |
+
+GitLab works on gitlab.com and on self-managed instances.
+
+### Many repositories, local or remote, in one place
+
+- **Workspaces**: put several projects in one space and work on them like a monorepo: one branch name, one checkout in each project, one place for your agents.
+- **Remote projects**: work on a project on another machine as if it were local. Its terminals run over a persistent SSH session.
+- **Filters**: cut the sidebar down to remote projects, workspaces, worktrees with a pull request, or worktrees with unread notifications.
+
+### Themes
+
+Every Ghostty theme is built in, 463 of them. Choose one for light and one for dark; the window follows the system and takes its colors from the terminal.
+
+### Quick actions
+
+- **Command palette**: <kbd>⌘P</kbd> finds every action.
+- **Run commands**: bind build, test, and dev-server commands to the Run button. Codans finds the scripts in your project files.
+- **Shortcuts**: every action has a shortcut that you can change.
+- **Open in your editor**: <kbd>⌘O</kbd> opens the worktree in VS Code, Cursor, Zed, Xcode, or a JetBrains IDE.
 
 ## Install
 
