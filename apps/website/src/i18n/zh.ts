@@ -178,21 +178,21 @@ export const zh: Dictionary = {
   more: {
     projects: {
       title: "项目管理",
-      lede: "用侧栏过滤器只看你需要的：远程主机、workspace、PR 或未读通知。",
+      lede: "用 Workspace 跨多个仓库工作，用远程项目在另一台机器上工作。过滤器让侧栏保持简短。",
       // One item for each sidebar filter, in the order of the filter bar in the app.
       items: [
         {
           id: "remote",
           tab: "Remote",
           title: "远程项目",
-          body: "通过 SSH 使用另一台机器上的 worktree 和 pane，沿用你现有的 SSH 配置。",
+          body: "远程项目用起来和本地一样。终端跑在持久化的 SSH 会话上，断线也不会丢。",
           alt: "打开 Remote 过滤器的 Codans 窗口：名为 Mac mini 的主机上的一个项目。",
         },
         {
           id: "workspace",
           tab: "Workspace",
           title: "Workspace",
-          body: "把多个仓库的 checkout 编成一组来做一件事：一个分支名，每个项目各 checkout 一份。",
+          body: "把多个项目放进同一个空间，像 monorepo 一样工作：一个分支名，每个项目各 checkout 一份，Agent 在同一处协作。",
           alt: "打开 Workspace 过滤器的 Codans 窗口：一个 workspace，含 default 组和一个 release 组。",
         },
         {

@@ -181,21 +181,21 @@ export const en = {
   more: {
     projects: {
       title: "Projects",
-      lede: "Filter the sidebar down to what you need: remote hosts, workspaces, pull requests, or unread notifications.",
+      lede: "Work across several repositories in one workspace, and on projects that live on another machine. Filters keep the sidebar short.",
       // One item for each sidebar filter, in the order of the filter bar in the app.
       items: [
         {
           id: "remote",
           tab: "Remote",
           title: "Remote projects",
-          body: "Worktrees and panes on another machine over SSH, with the SSH config you already have.",
+          body: "Work on a project on another machine as if it were local. Its terminals run over a persistent SSH session, so they survive a dropped connection.",
           alt: "The Codans window with the Remote filter on: a project on a host named Mac mini.",
         },
         {
           id: "workspace",
           tab: "Workspace",
           title: "Workspaces",
-          body: "Group checkouts from several repositories for one task: one branch name, one checkout in each project.",
+          body: "Put several projects in one space and work on them like a monorepo: one branch name, one checkout in each project, one place for your agents.",
           alt: "The Codans window with the Workspace filter on: a workspace with a default group and a release group.",
         },
         {
