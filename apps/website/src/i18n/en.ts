@@ -99,10 +99,10 @@ export const en = {
         alt: "The Hand Off panel with a list of agent profiles and Codex Reviewer selected.",
       },
       {
-        shots: ["notifications"],
+        shots: ["notifications-1", "notifications-2"],
         title: "Notifications",
         body: "A bell marks the worktree where an agent asked or finished. A macOS banner takes you to the pane.",
-        alt: "The sidebar with the Unread filter on: six worktrees with a bell.",
+        alt: "Two Codans notifications in the macOS Notification Center: Claude waits for input, and a task is complete. Then the sidebar with the Unread filter on: six worktrees with a bell.",
       },
       {
         shots: ["persistence"],

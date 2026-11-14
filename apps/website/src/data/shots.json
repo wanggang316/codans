@@ -75,7 +75,11 @@
     "height": 800,
     "width": 1280
   },
-  "notifications": {
+  "notifications-1": {
+    "height": 461,
+    "width": 738
+  },
+  "notifications-2": {
     "height": 800,
     "width": 1280
   },

@@ -96,10 +96,10 @@ export const zh: Dictionary = {
         alt: "Hand Off 面板里的 Agent profile 列表，已选中 Codex Reviewer。",
       },
       {
-        shots: ["notifications"],
+        shots: ["notifications-1", "notifications-2"],
         title: "通知",
         body: "Agent 提问或完成时，它所在的 worktree 会出现铃铛。点 macOS 通知直达 pane。",
-        alt: "打开 Unread 过滤器的侧栏：六个带铃铛的 worktree。",
+        alt: "macOS 通知中心里的两条 Codans 通知：Claude 在等待输入，以及一个任务已完成。随后是打开 Unread 过滤器的侧栏：六个带铃铛的 worktree。",
       },
       {
         shots: ["persistence"],

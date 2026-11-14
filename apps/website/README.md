@@ -76,7 +76,7 @@ repository.
 | Ids | What they show |
 |---|---|
 | `hero-palette`, `hero-start`, `hero-build`, `hero-review`, `hero-team`, `hero-pr` | The tour scenes: the full window, one tab, in front of a backdrop. Command palette; New Agent dialog; agent beside a dev server (7:3); agent beside a live diff (4:6); five agents without the sidebar; the pull request popover. Themes: GitHub Dark Default, GitHub Light Default, Gruvbox Dark, Rosé Pine Dawn. |
-| `agents-view-1..3`, `new-agent`, `queue-1..2`, `sessions-1..3`, `profile`, `handoff`, `notifications`, `persistence`, `cli-1..2` | The Agent-first cards: one cropped detail for each feature. Ids with a number are the frames of one flow. |
+| `agents-view-1..3`, `new-agent`, `queue-1..2`, `sessions-1..3`, `profile`, `handoff`, `notifications-1..2`, `persistence`, `cli-1..2` | The Agent-first cards: one cropped detail for each feature. Ids with a number are the frames of one flow. |
 | `sidebar`, `panes-team` (recording), `layout` | The Parallel section. |
 | `pr-popover`, `mr-popover`, `diff` | The Pull requests section: GitHub, GitLab, and the diff window. |
 | `filter-*`, `theme-*`, `palette`, `run-menu`, `shortcuts`, `open-in` | The last section. |
