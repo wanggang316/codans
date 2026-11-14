@@ -3,38 +3,32 @@
 /* The page follows the system appearance, like the app does. */
 :root {
   color-scheme: light dark;
-  --canvas: #f4f5f7;
+  --canvas: #fafaf9;
   --surface: #ffffff;
-  --sunken: #eaecf0;
-  --ink: #16181d;
-  --muted: #5f6672;
-  --line: #dcdfe5;
+  --sunken: #efefec;
+  --ink: #131313;
+  --muted: #5c5c58;
+  --line: #dddbd6;
   --accent: #0a60ff;
   --accent-ink: #ffffff;
-  --stage-from: #0b56e8;
-  --stage-to: #062b86;
-  --state-working: #0a60ff;
-  --state-blocked: #e08a00;
-  --state-done: #1f9d57;
-  --state-idle: #8a909b;
+  --inverse: #1b1b1a;
+  --inverse-ink: #f4f4f1;
+  --inverse-muted: #a9a9a3;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --canvas: #17181b;
-    --surface: #1f2125;
-    --sunken: #121316;
-    --ink: #eceef1;
-    --muted: #9aa0aa;
-    --line: #2f3238;
+    --canvas: #111112;
+    --surface: #202022;
+    --sunken: #19191b;
+    --ink: #ededeb;
+    --muted: #a1a19c;
+    --line: #2d2d30;
     --accent: #4c8dff;
     --accent-ink: #0b1020;
-    --stage-from: #0a48c6;
-    --stage-to: #051f63;
-    --state-working: #4c8dff;
-    --state-blocked: #f5a524;
-    --state-done: #3ccb7f;
-    --state-idle: #6b717c;
+    --inverse: #222224;
+    --inverse-ink: #ededeb;
+    --inverse-muted: #a1a19c;
   }
 }
 
@@ -122,14 +116,14 @@
   .display {
     font-size: clamp(34px, 4.7vw, 58px);
     line-height: 1.06;
-    font-weight: 650;
+    font-weight: 500;
     letter-spacing: -0.032em;
     text-wrap: balance;
   }
   .heading {
     font-size: clamp(25px, 2.6vw, 33px);
     line-height: 1.16;
-    font-weight: 620;
+    font-weight: 500;
     letter-spacing: -0.022em;
     text-wrap: balance;
   }
@@ -178,57 +172,256 @@
     text-underline-offset: 2px;
   }
 
-  /* Agent state marks: the same four states the Agents View shows. */
-  .state {
-    position: relative;
-    display: inline-block;
-    flex: none;
-    width: 12px;
-    height: 12px;
+  /* Body copy is set in the monospaced face; headings stay in the system sans. */
+  .copy {
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 14px;
+    line-height: 1.62;
+    text-wrap: pretty;
+  }
+  .copy kbd,
+  .copy code {
+    padding: 1px 5px;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    background: var(--surface);
+    color: var(--ink);
+    font-family: var(--font-mono);
+    font-size: 0.92em;
+  }
+  .subheading {
+    font-size: 17px;
+    line-height: 1.3;
+    font-weight: 550;
+    letter-spacing: -0.01em;
+  }
+
+  /* Product media. */
+  .shot {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 10px;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 12%, transparent);
+  }
+
+  /* The tour: one stage, a tab for each view, grouped by step. */
+  .tour {
+    padding: 14px;
+    border-radius: 18px;
+    background: var(--sunken);
+  }
+  .tour-steps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px 36px;
+    padding: 6px 6px 16px;
+  }
+  .tour-step-name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+  }
+  .tour-step-number {
+    display: inline-grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
     border-radius: 50%;
+    box-shadow: inset 0 0 0 1px var(--line);
+    font-size: 11px;
   }
-  .state-idle {
-    box-shadow: inset 0 0 0 1.5px var(--state-idle);
+  .tour-tab {
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 8px;
+    color: var(--muted);
+    font-size: 14px;
+    cursor: pointer;
   }
-  .state-working {
-    border: 2px solid color-mix(in srgb, var(--state-working) 25%, transparent);
-    border-top-color: var(--state-working);
-    animation: state-spin 0.9s linear infinite;
+  .tour-tab:hover {
+    color: var(--ink);
   }
-  .state-blocked {
-    background: var(--state-blocked);
+  .tour-tab[aria-selected="true"] {
+    background: var(--surface);
+    box-shadow: 0 0 0 1px var(--line);
+    color: var(--ink);
   }
-  .state-blocked::after {
-    content: "!";
-    position: absolute;
-    inset: 0;
-    color: var(--canvas);
-    font: 700 9px/12px var(--font-sans);
-    text-align: center;
+  .tour-views {
+    display: grid;
   }
-  .state-done {
-    background: var(--state-done);
+  .tour-view {
+    grid-area: 1 / 1;
+    visibility: hidden;
+    opacity: 0;
+    transition:
+      opacity 0.25s ease,
+      visibility 0s linear 0.25s;
   }
-  .state-done::after {
-    content: "";
-    position: absolute;
-    left: 3.2px;
-    top: 2.2px;
-    width: 3px;
-    height: 5.5px;
-    border: solid var(--canvas);
-    border-width: 0 1.6px 1.6px 0;
-    transform: rotate(42deg);
-  }
-  @keyframes state-spin {
-    to {
-      transform: rotate(360deg);
-    }
+  .tour-view[data-active] {
+    visibility: visible;
+    opacity: 1;
+    transition: opacity 0.25s ease;
   }
   @media (prefers-reduced-motion: reduce) {
-    .state-working {
-      animation: none;
-      border-color: var(--state-working);
+    .tour-view,
+    .tour-view[data-active] {
+      transition: none;
     }
+  }
+
+  /* Sections. */
+  .section {
+    margin-top: 112px;
+  }
+  .section-head {
+    max-width: 46em;
+  }
+  .section-name {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 13px;
+  }
+  .section-name::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 2px;
+    background: var(--accent);
+  }
+  .section-head .heading {
+    margin-top: 14px;
+  }
+  .section-head .copy {
+    margin-top: 16px;
+    font-size: 15px;
+  }
+  .group-title {
+    margin: 56px 0 16px;
+    font-size: 19px;
+    font-weight: 550;
+    letter-spacing: -0.012em;
+  }
+
+  /* A card: media on top, then a title and one short paragraph. */
+  .card {
+    padding: 12px 12px 22px;
+    border-radius: 14px;
+    background: var(--sunken);
+  }
+  .card-flush {
+    padding: 12px;
+  }
+  .card-shot {
+    aspect-ratio: 16 / 10;
+    border-radius: 8px;
+    object-fit: cover;
+    object-position: top left;
+  }
+  .card-shot-natural {
+    aspect-ratio: auto;
+  }
+  .card-shot-portrait {
+    aspect-ratio: 7 / 6;
+  }
+  .card-title {
+    margin: 18px 8px 0;
+    font-size: 16px;
+    font-weight: 550;
+    letter-spacing: -0.008em;
+  }
+  .card-title .tag {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 8px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-weight: 400;
+    vertical-align: 2px;
+  }
+  .card-body {
+    margin: 6px 8px 0;
+    font-size: 13.5px;
+  }
+
+  .panel {
+    padding: 28px;
+    border-radius: 14px;
+    background: var(--sunken);
+  }
+  .rows > li {
+    padding: 22px 0;
+    border-top: 1px solid var(--line);
+  }
+  .rows > li:first-child {
+    padding-top: 4px;
+    border-top: 0;
+  }
+  .rows > li:last-child {
+    padding-bottom: 4px;
+  }
+  .rows-tight > li,
+  .rows-tight > li:first-child {
+    padding: 11px 0;
+  }
+
+  /* The block that turns the page colors around. */
+  .inverse {
+    padding: 40px 32px;
+    border-radius: 14px;
+    background: var(--inverse);
+    color: var(--inverse-ink);
+  }
+  .inverse .copy {
+    color: var(--inverse-muted);
+  }
+  .inverse .btn-primary {
+    background: var(--inverse-ink);
+    color: var(--inverse);
+  }
+  .inverse .btn-quiet {
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--inverse-ink) 28%, transparent);
+  }
+  .inverse .btn-quiet:hover {
+    background: color-mix(in srgb, var(--inverse-ink) 10%, transparent);
+  }
+  .stat-value {
+    font-size: clamp(34px, 3.6vw, 46px);
+    line-height: 1;
+    font-weight: 500;
+    letter-spacing: -0.035em;
+  }
+
+  /* Terminal text is dark in both appearances, like the product shots. */
+  .terminal {
+    overflow-x: auto;
+    padding: 20px 22px;
+    border-radius: 10px;
+    background: #101113;
+    color: #e9e9e6;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.75;
+  }
+  .terminal-prompt {
+    color: #6f7580;
+    user-select: none;
+  }
+  .terminal-output {
+    color: #a3a9b3;
+  }
+  .terminal-note {
+    color: #666c76;
   }
 }

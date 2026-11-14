@@ -13,103 +13,254 @@ interface Props {
 const { locale } = Astro.props;
 const t = dictionary(locale);
 
-// Shell comments stay in English in every locale, like the commands.
-const commands = [
-  { line: "codans worktree new feat/retry --agent codex", note: "worktree + agent" },
+// The tour is one flat list of views; each view remembers its step.
+const views = t.hero.steps.flatMap((step, stepIndex) => step.views.map((view) => ({ ...view, stepIndex })));
+
+// Commands and their output stay in English in every locale.
+const terminal = [
   { line: "codans agent status" },
-  { output: 'p7  claude-code  working  3m12s  api/main  "dev server"' },
-  { line: "codans agent wait p7 --until idle", note: "block until it stops" },
-  { line: "codans pane send 'make test' --capture", note: "run, get the output" },
-  { line: "codans broadcast --label agent 'reload'", note: "fan out to many panes" },
+  { output: "p5   claude-code  working  3m18s  handbyte/feat/parallel-walk" },
+  { output: "p6   codex        done     2m04s  handbyte/feat/parallel-walk" },
+  { output: "p10  claude-code  blocked  1m24s  inboxlm/feat/digest-email" },
+  { line: "codans agent wait p5 --until idle", note: "block until it stops" },
+  { line: "codans worktree new feat/retry --agent codex", note: "worktree + agent" },
+  { line: "codans pane send p6 'cargo test' --capture", note: "run, get the output" },
   { line: "codans handoff to codex --brief -", note: "pass the task on" },
 ];
-const noteColumn = Math.max(...commands.map((command) => command.line?.length ?? 0)) + 3;
+const noteColumn = Math.max(...terminal.map((entry) => entry.line?.length ?? 0)) + 3;
 ---
 
 <Base locale={locale} page="/" title={t.meta.title} description={t.meta.description}>
   <div class="wrap">
-    <section class="pt-10 pb-10 sm:pt-18">
-      <h1 class="display max-w-[17em]" set:html={t.hero.title} />
-      <p class="mt-5.5 max-w-[37em] text-[19px] text-pretty text-muted">{t.hero.lede}</p>
-      <div class="mt-7.5 flex flex-wrap items-center gap-3">
+    <section class="pt-12 sm:pt-20">
+      <h1 class="display max-w-[16em]" set:html={t.hero.title} />
+      <p class="copy mt-6 max-w-[46em] text-[16px]">{t.hero.lede}</p>
+      <div class="mt-8 flex flex-wrap items-center gap-3">
         <Download locale={locale} />
         <BrewCommand locale={locale} />
       </div>
-      <p class="mt-3.5 text-sm text-muted">{t.hero.requirements}</p>
-
-      <div class="stage mt-11">
-        <Shot id="hero" alt={t.hero.shotAlt} eager />
-      </div>
-      <ul class="mt-4.5 flex flex-wrap gap-x-7 gap-y-2.5 px-0.5 text-sm text-muted">
-        {
-          t.states.map((state) => (
-            <li class="flex items-center gap-2">
-              <i class={`state state-${state.key}`} />
-              <span>
-                <b class="font-[550] text-ink">{state.name}</b> {state.detail}
-              </span>
-            </li>
-          ))
-        }
-      </ul>
+      <p class="copy mt-3.5 text-[13px]">{t.hero.requirements}</p>
     </section>
 
-    <p class="mt-4 flex flex-wrap items-baseline gap-x-6.5 gap-y-2 border-y border-line py-5.5 text-[15px] text-muted">
-      <span>{t.agents.lead}</span>
-      {t.agents.names.map((name) => <b class="text-base font-[550] text-ink">{name}</b>)}
-      <span>{t.agents.tail}</span>
-    </p>
-
-    {
-      t.features.map((feature) => (
-        <section class="grid items-center gap-7 pt-16 md:grid-cols-[minmax(0,4fr)_minmax(0,7fr)] md:gap-14 md:pt-22">
-          <div>
-            <h2 class="heading" set:html={feature.title} />
-            {feature.body.map((paragraph) => (
-              <p class="prose-copy mt-3.5 max-w-[30em]" set:html={paragraph} />
-            ))}
-          </div>
-          <Shot id={feature.shot} alt={feature.alt} />
-        </section>
-      ))
-    }
-
-    <section
-      class="mt-18 grid items-start gap-7 border-t border-line py-14 md:mt-26 md:grid-cols-[minmax(0,4fr)_minmax(0,7fr)] md:gap-14"
-    >
-      <div>
-        <h2 class="heading" set:html={t.cli.title} />
-        {t.cli.body.map((paragraph) => <p class="prose-copy mt-3.5 max-w-[30em]" set:html={paragraph} />)}
-      </div>
-      <pre
-        class="terminal overflow-x-auto rounded-xl px-5.5 py-5 font-mono text-[13px] leading-[1.75]">{commands.map((command) =>
-          command.line ? (
-            <>
-              <span class="prompt">$ </span>{command.note ? command.line.padEnd(noteColumn) : command.line}{command.note && <span class="dim"># {command.note}</span>}{"\n"}
-            </>
-          ) : (
-            <><span class="dim">{command.output}</span>{"\n"}</>
-          ),
-        )}</pre>
-    </section>
-
-    <section class="border-t border-line pt-14">
-      <h2 class="heading">{t.more.title}</h2>
-      <dl class="mt-8 grid gap-x-12 sm:grid-cols-2 lg:grid-cols-3">
+    <section class="tour mt-12" data-tour aria-label={t.hero.tabsLabel}>
+      <div class="tour-steps" role="tablist" aria-label={t.hero.tabsLabel}>
         {
-          t.more.items.map((item) => (
-            <div class="border-t border-line py-4.5">
-              <dt class="font-semibold">{item.title}</dt>
-              <dd class="mt-1 text-[15px] text-muted">{item.body}</dd>
+          t.hero.steps.map((step, stepIndex) => (
+            <div class="tour-step">
+              <p class="tour-step-name">
+                <span class="tour-step-number">{stepIndex + 1}</span>
+                {step.name}
+              </p>
+              <div class="flex flex-wrap gap-1.5">
+                {views.map(
+                  (view, index) =>
+                    view.stepIndex === stepIndex && (
+                      <button
+                        type="button"
+                        role="tab"
+                        class="tour-tab"
+                        id={`tour-tab-${index}`}
+                        aria-controls={`tour-view-${index}`}
+                        aria-selected={index === 0 ? "true" : "false"}
+                        tabindex={index === 0 ? 0 : -1}
+                        data-view={index}
+                      >
+                        {view.label}
+                      </button>
+                    ),
+                )}
+              </div>
             </div>
           ))
         }
-      </dl>
+      </div>
+      <div class="tour-views">
+        {
+          views.map((view, index) => (
+            <figure
+              class="tour-view"
+              id={`tour-view-${index}`}
+              role="tabpanel"
+              aria-labelledby={`tour-tab-${index}`}
+              data-active={index === 0 ? "" : undefined}
+            >
+              <Shot id={view.shot} alt={view.alt} eager={index === 0} />
+              <figcaption class="copy mt-4 px-1 text-[14px]">{view.caption}</figcaption>
+            </figure>
+          ))
+        }
+      </div>
     </section>
 
-    <section
-      class="mt-24 flex flex-wrap items-center justify-between gap-7 rounded-[18px] bg-surface px-6 py-14 shadow-[0_0_0_1px_var(--line)] sm:px-16"
-    >
+    <p class="copy mt-10 flex flex-wrap items-baseline gap-x-6 gap-y-2 border-y border-line py-5 text-[14px]">
+      <span>{t.agents.lead}</span>
+      {t.agents.names.map((name) => <b class="font-sans text-[15px] font-[550] text-ink">{name}</b>)}
+      <span>{t.agents.tail}</span>
+    </p>
+
+    <section class="section" id="agent-first">
+      <header class="section-head">
+        <p class="section-name">{t.agentFirst.name}</p>
+        <h2 class="heading">{t.agentFirst.title}</h2>
+        <p class="copy">{t.agentFirst.lede}</p>
+      </header>
+      <div class="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {
+          t.agentFirst.cards.map((card) => (
+            <article class="card">
+              <Shot id={card.shot} alt={card.alt} class="card-shot" />
+              <h3 class="card-title" set:html={card.title} />
+              <p class="copy card-body" set:html={card.body} />
+            </article>
+          ))
+        }
+      </div>
+      <div class="panel mt-4 grid items-center gap-8 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-12">
+        <div>
+          <h3 class="subheading">{t.agentFirst.cli.title}</h3>
+          {t.agentFirst.cli.body.map((paragraph) => <p class="copy mt-4" set:html={paragraph} />)}
+        </div>
+        <pre
+          class="terminal"><code>{terminal.map((entry) =>
+  entry.line ? (
+    <><span class="terminal-prompt">$ </span>{entry.line}{entry.note && <span class="terminal-note">{" ".repeat(noteColumn - entry.line.length)}# {entry.note}</span>}{"\n"}</>
+  ) : (
+    <><span class="terminal-output">{entry.output}</span>{"\n"}</>
+  ),
+)}</code></pre>
+      </div>
+    </section>
+
+    <section class="section" id="parallel">
+      <header class="section-head">
+        <p class="section-name">{t.parallel.name}</p>
+        <h2 class="heading">{t.parallel.title}</h2>
+        <p class="copy">{t.parallel.lede}</p>
+      </header>
+      <div class="mt-10 grid gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+        <div class="card card-flush">
+          <Shot id="sidebar" alt={t.parallel.sidebarAlt} class="h-full max-h-[620px] object-cover object-top" />
+        </div>
+        <ul class="rows panel flex flex-col justify-center">
+          {
+            t.parallel.points.map((point) => (
+              <li>
+                <h3 class="subheading">{point.title}</h3>
+                <p class="copy mt-2">{point.body}</p>
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+      <div class="mt-4 grid gap-4 lg:grid-cols-2">
+        <article class="card">
+          <Shot id="panes-team" alt={t.parallel.teamAlt} class="card-shot" />
+          <h3 class="card-title">{t.parallel.teamTitle}</h3>
+          <p class="copy card-body">{t.parallel.teamBody}</p>
+        </article>
+        <article class="card">
+          <Shot id="layout" alt={t.parallel.layoutAlt} class="card-shot" />
+          <h3 class="card-title">{t.parallel.layoutTitle}</h3>
+          <p class="copy card-body">{t.parallel.layoutBody}</p>
+        </article>
+      </div>
+      <div class="inverse mt-4">
+        <h3 class="subheading">{t.parallel.statsTitle}</h3>
+        <dl class="mt-8 grid gap-x-10 gap-y-8 sm:grid-cols-2 lg:grid-cols-4">
+          {
+            t.parallel.stats.map((stat) => (
+              <div>
+                <dt class="stat-value">{stat.value}</dt>
+                <dd class="copy mt-2">{stat.label}</dd>
+              </div>
+            ))
+          }
+        </dl>
+        <p class="copy mt-10 max-w-[70em] border-t border-current/15 pt-5 text-[12.5px]">{t.parallel.statsNote}</p>
+      </div>
+    </section>
+
+    <section class="section" id="pull-requests">
+      <header class="section-head">
+        <p class="section-name">{t.pr.name}</p>
+        <h2 class="heading">{t.pr.title}</h2>
+        <p class="copy prose-copy" set:html={t.pr.lede} />
+      </header>
+      <div class="mt-10 grid gap-4 sm:grid-cols-2">
+        {
+          t.pr.cards.map((card) => (
+            <article class="card">
+              <Shot id={card.shot} alt={card.alt} class="card-shot" />
+              <h3 class="card-title">{card.title}</h3>
+              <p class="copy card-body">{card.body}</p>
+            </article>
+          ))
+        }
+      </div>
+      <div class="mt-4 grid gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+        <div class="panel">
+          <h3 class="subheading">{t.pr.capsTitle}</h3>
+          <ul class="rows rows-tight copy mt-5">
+            {t.pr.caps.map((cap) => <li>{cap}</li>)}
+          </ul>
+        </div>
+        <article class="card">
+          <Shot id="diff" alt={t.pr.diffAlt} class="card-shot card-shot-natural" />
+          <h3 class="card-title">{t.pr.diffTitle}</h3>
+          <p class="copy card-body">{t.pr.diffBody}</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="more">
+      <header class="section-head">
+        <p class="section-name">{t.more.name}</p>
+        <h2 class="heading">{t.more.title}</h2>
+      </header>
+
+      <h3 class="group-title">{t.more.projects.title}</h3>
+      <div class="grid gap-4 sm:grid-cols-3">
+        {
+          t.more.projects.items.map((item) => (
+            <article class="card">
+              <Shot id={item.shot} alt={item.alt} class="card-shot card-shot-portrait" />
+              <h4 class="card-title">{item.title}</h4>
+              <p class="copy card-body">{item.body}</p>
+            </article>
+          ))
+        }
+      </div>
+
+      <h3 class="group-title">{t.more.themes.title}</h3>
+      <div class="panel">
+        <p class="copy max-w-[52em]">{t.more.themes.body}</p>
+        <ul class="mt-7 grid grid-cols-2 gap-4 lg:grid-cols-5">
+          {
+            t.more.themes.items.map((item, index) => (
+              <li class:list={[index === 0 && "col-span-2 lg:col-span-1"]}>
+                <Shot id={item.shot} alt={`${item.name} ${t.more.themes.altSuffix}`} class="rounded-md" />
+                <p class="copy mt-2.5 text-[12.5px]">{item.name}</p>
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+
+      <h3 class="group-title">{t.more.speed.title}</h3>
+      <div class="grid gap-4 sm:grid-cols-2">
+        {
+          t.more.speed.items.map((item) => (
+            <article class="card">
+              <Shot id={item.shot} alt={item.alt} class="card-shot" />
+              <h4 class="card-title">{item.title}</h4>
+              <p class="copy card-body" set:html={item.body} />
+            </article>
+          ))
+        }
+      </div>
+    </section>
+
+    <section class="inverse mt-24 flex flex-wrap items-center justify-between gap-7">
       <h2 class="heading">{t.cta.title}</h2>
       <div class="flex flex-wrap items-center gap-3">
         <Download locale={locale} />
@@ -119,51 +270,45 @@ const noteColumn = Math.max(...commands.map((command) => command.line?.length ??
   </div>
 </Base>
 
-<style>
-  /* The stage behind the hero shot: the logo's stacked blocks, enlarged. */
-  .stage {
-    position: relative;
-    overflow: hidden;
-    padding: clamp(14px, 4.5vw, 56px);
-    border-radius: 18px;
-    background: linear-gradient(160deg, var(--stage-from), var(--stage-to));
-  }
-  .stage::before {
-    content: "";
-    position: absolute;
-    right: -3%;
-    bottom: -30%;
-    width: 58%;
-    aspect-ratio: 1;
-    opacity: 0.5;
-    background:
-      linear-gradient(#2f8bff, #2f8bff) 0 0 / 31% 31% no-repeat,
-      linear-gradient(#04174f, #04174f) 0 50% / 31% 31% no-repeat,
-      linear-gradient(#63bcff, #63bcff) 50% 50% / 31% 31% no-repeat,
-      linear-gradient(#0a4fe0, #0a4fe0) 0 100% / 31% 31% no-repeat,
-      linear-gradient(#1f7bff, #1f7bff) 50% 100% / 31% 31% no-repeat,
-      linear-gradient(#c3e0ff, #c3e0ff) 100% 100% / 31% 31% no-repeat;
-  }
-  .stage :global(img),
-  .stage :global(video),
-  .stage :global([role="img"]) {
-    position: relative;
-    box-shadow:
-      0 0 0 1px rgb(255 255 255 / 0.1),
-      0 30px 70px -20px rgb(0 8 40 / 0.75);
-  }
+<script>
+  // The tour advances by itself until the reader takes over.
+  for (const tour of document.querySelectorAll<HTMLElement>("[data-tour]")) {
+    const tabs = [...tour.querySelectorAll<HTMLButtonElement>("[data-view]")];
+    const panels = [...tour.querySelectorAll<HTMLElement>(".tour-view")];
+    let current = 0;
+    let timer: number | undefined;
 
-  /* A terminal is dark in both appearances. */
-  .terminal {
-    background: #1b1d21;
-    color: #c9cdd5;
-    box-shadow: 0 0 0 1px var(--line);
+    const show = (index: number) => {
+      current = (index + tabs.length) % tabs.length;
+      tabs.forEach((tab, i) => {
+        tab.setAttribute("aria-selected", String(i === current));
+        tab.tabIndex = i === current ? 0 : -1;
+      });
+      panels.forEach((panel, i) => panel.toggleAttribute("data-active", i === current));
+    };
+    const stop = () => {
+      window.clearInterval(timer);
+      timer = undefined;
+    };
+
+    tabs.forEach((tab, i) => {
+      tab.addEventListener("click", () => {
+        stop();
+        show(i);
+      });
+      tab.addEventListener("keydown", (event) => {
+        const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+        if (!step) return;
+        event.preventDefault();
+        stop();
+        show(current + step);
+        tabs[current].focus();
+      });
+    });
+    tour.addEventListener("pointerdown", stop);
+
+    if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      timer = window.setInterval(() => show(current + 1), 6000);
+    }
   }
-  .terminal .prompt {
-    color: #4c8dff;
-    user-select: none;
-  }
-  .terminal .dim {
-    color: #8c929d;
-  }
-</style>
+</script>

@@ -1,0 +1,131 @@
+{
+  "agents-view": {
+    "height": 700,
+    "width": 1120
+  },
+  "diff": {
+    "height": 1440,
+    "width": 2200
+  },
+  "filter-pr": {
+    "height": 600,
+    "width": 700
+  },
+  "filter-remote": {
+    "height": 600,
+    "width": 700
+  },
+  "filter-workspace": {
+    "height": 600,
+    "width": 700
+  },
+  "handoff": {
+    "height": 800,
+    "width": 1280
+  },
+  "hero-build": {
+    "height": 1500,
+    "width": 2400
+  },
+  "hero-pr": {
+    "height": 1500,
+    "width": 2400
+  },
+  "hero-review": {
+    "height": 1500,
+    "width": 2400
+  },
+  "hero-start": {
+    "height": 1500,
+    "width": 2400
+  },
+  "hero-team": {
+    "height": 1500,
+    "width": 2400
+  },
+  "layout": {
+    "height": 1500,
+    "width": 2400
+  },
+  "mr-popover": {
+    "height": 594,
+    "width": 950
+  },
+  "new-agent": {
+    "height": 800,
+    "width": 1280
+  },
+  "notifications": {
+    "height": 800,
+    "width": 1280
+  },
+  "open-in": {
+    "height": 800,
+    "width": 1280
+  },
+  "palette": {
+    "height": 800,
+    "width": 1280
+  },
+  "panes-team": {
+    "height": 862,
+    "video": true,
+    "width": 1472
+  },
+  "persistence": {
+    "height": 800,
+    "width": 1280
+  },
+  "pr-popover": {
+    "height": 594,
+    "width": 950
+  },
+  "profile": {
+    "height": 883,
+    "width": 1280
+  },
+  "queue": {
+    "height": 800,
+    "width": 1280
+  },
+  "run-menu": {
+    "height": 800,
+    "width": 1280
+  },
+  "sessions": {
+    "height": 800,
+    "width": 1280
+  },
+  "shortcuts": {
+    "height": 883,
+    "width": 1280
+  },
+  "sidebar": {
+    "height": 1600,
+    "width": 1100
+  },
+  "skills": {
+    "height": 800,
+    "width": 1280
+  },
+  "theme-gruvbox": {
+    "height": 1000,
+    "width": 1600
+  },
+  "theme-latte": {
+    "height": 1000,
+    "width": 1600
+  },
+  "theme-mocha": {
+    "height": 1000,
+    "width": 1600
+  },
+  "theme-rosepine": {
+    "height": 1000,
+    "width": 1600
+  },
+  "theme-tokyonight": {
+    "height": 1000,
+    "width": 1600
+  }
+}

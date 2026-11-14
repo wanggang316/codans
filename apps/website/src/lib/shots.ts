@@ -1,41 +1,32 @@
-import fs from "node:fs";
-import path from "node:path";
+import sizes from "../data/shots.json";
 
-// Product media lives in `public/shots/`, one file set per shot id:
-//   <id>.png        still image (also the poster of a recording)
-//   <id>-dark.png   optional variant for the dark appearance
-//   <id>.mp4        optional screen recording, shown in place of the still
-// The shot list and the capture rules are in the website README.
+// Product media lives in `public/shots/`:
+//   <id>.webp   still image (also the poster of a recording)
+//   <id>.mp4    optional screen recording, shown in place of the still
+// `src/data/shots.json` holds the pixel size of each still, so `<img>` reserves
+// its space, and marks the ids that have a recording. The shot list and the
+// capture rules are in the website README.
 
-const SHOTS_DIR = path.resolve(process.cwd(), "public/shots");
+interface ShotSize {
+  width: number;
+  height: number;
+  video?: boolean;
+}
 
 export interface ShotMedia {
-  image: { src: string; width: number; height: number } | null;
-  darkImage: string | null;
+  src: string;
+  width: number;
+  height: number;
   video: string | null;
 }
 
 export function resolveShot(id: string): ShotMedia {
-  const has = (name: string) => fs.existsSync(path.join(SHOTS_DIR, name));
-  const png = `${id}.png`;
+  const size = (sizes as Record<string, ShotSize>)[id];
+  if (!size) throw new Error(`unknown shot "${id}": add it to src/data/shots.json`);
   return {
-    image: has(png) ? { src: `/shots/${png}`, ...pngSize(path.join(SHOTS_DIR, png)) } : null,
-    darkImage: has(`${id}-dark.png`) ? `/shots/${id}-dark.png` : null,
-    video: has(`${id}.mp4`) ? `/shots/${id}.mp4` : null,
+    src: `/shots/${id}.webp`,
+    width: size.width,
+    height: size.height,
+    video: size.video ? `/shots/${id}.mp4` : null,
   };
-}
-
-/** Width and height from the IHDR chunk, so `<img>` reserves its space. */
-function pngSize(file: string): { width: number; height: number } {
-  const header = Buffer.alloc(24);
-  const fd = fs.openSync(file, "r");
-  try {
-    fs.readSync(fd, header, 0, 24, 0);
-  } finally {
-    fs.closeSync(fd);
-  }
-  if (header.toString("latin1", 12, 16) !== "IHDR") {
-    throw new Error(`${file} is not a PNG file`);
-  }
-  return { width: header.readUInt32BE(16), height: header.readUInt32BE(20) };
 }
