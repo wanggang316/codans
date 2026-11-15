@@ -32,9 +32,9 @@ const FILTER_COLORS: Record<string, string> = {
   <div class="wrap">
     <section class="pt-12 sm:pt-20">
       <h1 class="display hero-title max-w-[16em]" data-hero-title set:html={t.hero.title} />
-      <p class="copy mt-6 max-w-[46em] text-[16px]">
+      <p class="copy mt-6 max-w-[56em] text-[16px] text-balance">
         <Fragment set:html={ledeStart} /><span class="rotator" data-rotator={JSON.stringify([t.hero.ledeAgent, ...HERO_AGENTS])}>{t.hero.ledeAgent}</span>{ledeEnd}
-        <span class="block">{t.hero.ledeMore}</span>
+        <span class="block" set:html={t.hero.ledeMore} />
       </p>
       <div class="mt-8">
         <Download locale={locale} />
