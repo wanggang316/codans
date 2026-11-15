@@ -279,6 +279,53 @@ struct CommandPaletteItemsTests {
     #expect(!items.contains { $0.id == "worktree.toggle-pin" })
   }
 
+  // MARK: - Focus Pane N
+
+  /// Builds a selected Worktree whose selected Tab has `paneCount` Panes in a
+  /// row, and returns the palette items for the given focus precision.
+  private static func focusPaneItems(paneCount: Int, precise: Bool) throws -> [CommandPaletteItem] {
+    let ids = (0..<paneCount).map { _ in PaneID() }
+    var tree = SplitTree(leaf: ids[0])
+    for index in ids.indices.dropFirst() {
+      tree = try tree.inserting(ids[index], at: ids[index - 1], direction: .right)
+    }
+    let tab = Tab(splitTree: tree, panes: ids.map { Pane(id: $0, workingDirectory: "/tmp") })
+    var project = Project(name: "P", rootPath: "/tmp/p", gitRoot: "/tmp/p")
+    let worktree = Worktree(
+      name: "wt", path: "/tmp/p-wt", branch: "wt", tabs: [tab], selectedTabID: tab.id)
+    project.worktrees = [worktree]
+    return withEmptySettings {
+      CommandPaletteItems.build(
+        selection: HierarchySelection(projectID: project.id, worktreeID: worktree.id),
+        catalog: Catalog(projects: [project]),
+        focusedPaneID: ids[0],
+        paneFocusPrecise: precise)
+    }
+  }
+
+  @Test
+  func focusPaneItemsListOnlyExistingPanes() throws {
+    let items = try Self.focusPaneItems(paneCount: 3, precise: true)
+    let focusItems = items.filter { $0.id.hasPrefix("pane.focus.number.") }
+    #expect(focusItems.map(\.title) == ["Focus Pane 1", "Focus Pane 2", "Focus Pane 3"])
+    #expect(focusItems.map(\.commandID) == [.focusPane1, .focusPane2, .focusPane3])
+    #expect(focusItems.last?.kind == .paneAction(.focusPane(number: 3)))
+  }
+
+  @Test
+  func focusPaneItemsStopAtTheNinthPane() throws {
+    let items = try Self.focusPaneItems(paneCount: 11, precise: true)
+    let focusItems = items.filter { $0.id.hasPrefix("pane.focus.number.") }
+    #expect(focusItems.count == 9)
+    #expect(focusItems.last?.title == "Focus Pane 9")
+  }
+
+  @Test
+  func focusPaneItemsNeedPreciseFocus() throws {
+    let items = try Self.focusPaneItems(paneCount: 3, precise: false)
+    #expect(!items.contains { $0.id.hasPrefix("pane.focus.number.") })
+  }
+
   // MARK: - Focused pane resolution
 
   @Test
