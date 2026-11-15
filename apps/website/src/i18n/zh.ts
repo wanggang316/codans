@@ -12,7 +12,8 @@ export const zh: Dictionary = {
     github: "GitHub",
   },
   hero: {
-    title: "与 Coding&nbsp;Agent 共舞。",
+    title: '与 {agent} <br class="min-[480px]:hidden" />共舞。',
+    titleAgent: "Coding Agent",
     lede: "Codans 是 macOS 原生开发环境，支持 Claude Code、Codex 和所有跑在终端里的 Agent。在独立的 worktree 里开始任务，看清每个 Agent 的状态，直到 PR 合并。",
     download: "下载 macOS 版",
     copy: "复制",

@@ -7,6 +7,7 @@ import GitHubIcon from "../components/GitHubIcon.astro";
 import GitLabIcon from "../components/GitLabIcon.astro";
 import Shot from "../components/Shot.astro";
 import { dictionary, type Locale } from "../i18n";
+import { HERO_AGENTS } from "../lib/agents";
 import { LINKS } from "../lib/links";
 import { THEME_COLUMNS } from "../lib/themes";
 
@@ -16,6 +17,7 @@ interface Props {
 
 const { locale } = Astro.props;
 const t = dictionary(locale);
+const [titleStart, titleEnd] = t.hero.title.split("{agent}");
 
 // The colors of the sidebar filter pills in the app.
 const FILTER_COLORS: Record<string, string> = {
@@ -29,7 +31,7 @@ const FILTER_COLORS: Record<string, string> = {
 <Base locale={locale} page="/" title={t.meta.title} description={t.meta.description}>
   <div class="wrap">
     <section class="pt-12 sm:pt-20">
-      <h1 class="display max-w-[16em]" set:html={t.hero.title} />
+      <h1 class="display max-w-[16em]"><Fragment set:html={titleStart} /><span class="rotator" data-rotator={JSON.stringify([t.hero.titleAgent, ...HERO_AGENTS])}>{t.hero.titleAgent}</span><Fragment set:html={titleEnd} /></h1>
       <p class="copy mt-6 max-w-[46em] text-[16px]">{t.hero.lede}</p>
       <div class="mt-8">
         <Download locale={locale} />
@@ -303,6 +305,22 @@ const FILTER_COLORS: Record<string, string> = {
 </Base>
 
 <script>
+  // Hero title: the agent names take turns in the place of the generic term.
+  const rotator = document.querySelector<HTMLElement>("[data-rotator]");
+  if (rotator && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    const names: string[] = JSON.parse(rotator.dataset.rotator ?? "[]");
+    let index = 0;
+    window.setInterval(() => {
+      if (document.hidden) return;
+      rotator.dataset.state = "out";
+      window.setTimeout(() => {
+        index = (index + 1) % names.length;
+        rotator.textContent = names[index];
+        rotator.dataset.state = "in";
+      }, 260);
+    }, 2600);
+  }
+
   // Reveal on scroll: a block below the first screen fades in and rises when it comes into
   // view. Blocks that share a row come in one after the other.
   if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {

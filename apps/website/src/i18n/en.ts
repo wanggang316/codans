@@ -14,7 +14,9 @@ export const en = {
     github: "GitHub",
   },
   hero: {
-    title: "Dance with coding agents.",
+    // `{agent}` is the place of `titleAgent`; agent names take turns there.
+    title: 'Dance with <br class="min-[480px]:hidden" />{agent}.',
+    titleAgent: "coding agents",
     lede: "Codans is a native macOS development environment for Claude Code, Codex, and any agent that runs in a terminal. Start a task in its own worktree, see what each agent is doing, and merge the pull request.",
     download: "Download for macOS",
     copy: "Copy",
