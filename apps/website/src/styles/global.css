@@ -239,9 +239,28 @@
     letter-spacing: -0.032em;
     text-wrap: balance;
   }
-  .hero-title {
-    transform-origin: left bottom;
-    will-change: opacity, transform;
+  /* The hero title goes out in the first part of the scroll. The scroll position drives the
+     animation, so it runs with the scroll and not after it. */
+  @supports (animation-timeline: scroll()) {
+    @media (prefers-reduced-motion: no-preference) {
+      .hero-title {
+        transform-origin: left bottom;
+        will-change: opacity, transform;
+        /* Longhand properties: the build puts a timeline into the `animation` shorthand, and
+           browsers do not accept it there. */
+        animation-name: hero-title-out;
+        animation-timing-function: linear;
+        animation-fill-mode: both;
+        animation-timeline: scroll(root);
+        animation-range: 0px 96px;
+      }
+    }
+  }
+  @keyframes hero-title-out {
+    to {
+      opacity: 0;
+      transform: scale(0.82);
+    }
   }
   .heading {
     font-size: clamp(25px, 2.6vw, 33px);

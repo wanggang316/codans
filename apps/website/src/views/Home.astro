@@ -303,7 +303,7 @@ const FILTER_COLORS: Record<string, string> = {
 </Base>
 
 <script>
-  // The hero title goes out while it moves under the header. During a scroll the tiles of the
+  // During a scroll the tiles of the
   // mark flicker in rounds; a round that has started always plays to its end. A faster scroll
   // makes the flicker faster.
   const header = document.querySelector<HTMLElement>(".site-header");
@@ -318,20 +318,16 @@ const FILTER_COLORS: Record<string, string> = {
     let speed = 0;
     let rate = 1;
     let settleTimer = 0;
+    // CSS moves the title where the browser has scroll-driven animations. In other browsers
+    // the script changes the opacity only.
+    const scripted = !still && !CSS.supports("animation-timeline: scroll()");
     let ticking = false;
     const update = () => {
       ticking = false;
-      const rect = heroTitle.getBoundingClientRect();
-      const travel = rect.bottom + window.scrollY - header.offsetHeight;
-      const progress = Math.min(1, Math.max(0, window.scrollY / travel));
-      const out = Math.min(1, progress / 0.7);
-      if (!still) {
-        heroTitle.style.opacity = String(1 - out);
-        heroTitle.style.transform = `scale(${1 - 0.18 * out})`;
-      }
+      heroTitle.style.opacity = String(1 - Math.min(1, Math.max(0, window.scrollY / 96)));
     };
     const onScroll = () => {
-      if (!ticking) {
+      if (scripted && !ticking) {
         ticking = true;
         window.requestAnimationFrame(update);
       }
@@ -377,8 +373,7 @@ const FILTER_COLORS: Record<string, string> = {
       }
     });
     window.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("resize", update);
-    update();
+    if (scripted) update();
   }
 
   // Reveal on scroll: a block below the first screen fades in and rises when it comes into
