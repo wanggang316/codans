@@ -5,6 +5,40 @@ import Testing
 
 struct SplitTreeTests {
   @Test
+  func paneNumbersFollowPaneOrder() throws {
+    let a = PaneID(), b = PaneID(), c = PaneID()
+    let tree = try SplitTree(leaf: a)
+      .inserting(b, at: a, direction: .right)
+      .inserting(c, at: a, direction: .down)
+    #expect(tree.leaves() == [a, c, b])
+    #expect(tree.leaf(paneNumber: 1) == a)
+    #expect(tree.leaf(paneNumber: 2) == c)
+    #expect(tree.leaf(paneNumber: 3) == b)
+    #expect(tree.paneNumber(of: c) == 2)
+  }
+
+  @Test
+  func missingPaneNumberHasNoLeaf() {
+    let a = PaneID()
+    let tree = SplitTree(leaf: a)
+    #expect(tree.leaf(paneNumber: 0) == nil)
+    #expect(tree.leaf(paneNumber: 2) == nil)
+    #expect(tree.paneNumber(of: PaneID()) == nil)
+  }
+
+  @Test
+  func leavesAfterTheNinthHaveNoPaneNumber() throws {
+    let ids = (0..<10).map { _ in PaneID() }
+    var tree = SplitTree(leaf: ids[0])
+    for index in 1..<ids.count {
+      tree = try tree.inserting(ids[index], at: ids[index - 1], direction: .right)
+    }
+    #expect(tree.paneNumber(of: ids[8]) == 9)
+    #expect(tree.paneNumber(of: ids[9]) == nil)
+    #expect(tree.leaf(paneNumber: 10) == nil)
+  }
+
+  @Test
   func emptyTreeHasNoLeaves() {
     let tree = SplitTree<PaneID>()
     #expect(tree.isEmpty)

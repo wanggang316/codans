@@ -180,6 +180,26 @@ public nonisolated struct SplitTree<Leaf: Hashable & Codable & Sendable>: Equata
     }?.leaf
   }
 
+  /// The Pane numbers that have a chord and an overlay label. Leaves after the ninth have no
+  /// number (GLOSSARY: Pane number).
+  public static var paneNumbers: ClosedRange<Int> { 1...9 }
+
+  /// The leaf with Pane number `number` (1-based position in `leaves()`), or `nil` when the
+  /// number is outside `paneNumbers` or no leaf has it.
+  public func leaf(paneNumber number: Int) -> Leaf? {
+    guard Self.paneNumbers.contains(number) else { return nil }
+    let all = leaves()
+    return number <= all.count ? all[number - 1] : nil
+  }
+
+  /// The Pane number of `leaf`, or `nil` when the tree does not contain it or it sits after
+  /// the ninth leaf.
+  public func paneNumber(of leaf: Leaf) -> Int? {
+    guard let index = leaves().firstIndex(of: leaf) else { return nil }
+    let number = index + 1
+    return Self.paneNumbers.contains(number) ? number : nil
+  }
+
   public func focusTargetAfterClosing(_ leaf: Leaf) -> Leaf? {
     guard let root, root.contains(leaf) else { return nil }
     let all = root.leaves()
