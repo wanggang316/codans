@@ -405,6 +405,69 @@ extension ShortcutSchema {
       defaultBinding: .init(keyCode: UInt16(kVK_DownArrow), modifiers: [.command, .option])
     ),
     .init(
+      id: .focusPane1,
+      title: "Focus Pane 1",
+      category: .terminal,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_1), modifiers: [.command, .option])
+    ),
+    .init(
+      id: .focusPane2,
+      title: "Focus Pane 2",
+      category: .terminal,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_2), modifiers: [.command, .option])
+    ),
+    .init(
+      id: .focusPane3,
+      title: "Focus Pane 3",
+      category: .terminal,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_3), modifiers: [.command, .option])
+    ),
+    .init(
+      id: .focusPane4,
+      title: "Focus Pane 4",
+      category: .terminal,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_4), modifiers: [.command, .option])
+    ),
+    .init(
+      id: .focusPane5,
+      title: "Focus Pane 5",
+      category: .terminal,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_5), modifiers: [.command, .option])
+    ),
+    .init(
+      id: .focusPane6,
+      title: "Focus Pane 6",
+      category: .terminal,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_6), modifiers: [.command, .option])
+    ),
+    .init(
+      id: .focusPane7,
+      title: "Focus Pane 7",
+      category: .terminal,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_7), modifiers: [.command, .option])
+    ),
+    .init(
+      id: .focusPane8,
+      title: "Focus Pane 8",
+      category: .terminal,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_8), modifiers: [.command, .option])
+    ),
+    .init(
+      id: .focusPane9,
+      title: "Focus Pane 9",
+      category: .terminal,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_9), modifiers: [.command, .option])
+    ),
+    .init(
       id: .switchToTab1,
       title: "Switch to Tab 1",
       category: .terminal,

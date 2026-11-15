@@ -43,6 +43,15 @@ public enum CommandID: String, CaseIterable, Hashable, Sendable, Codable, Coding
   case focusSplitRight
   case focusSplitUp
   case focusSplitDown
+  case focusPane1
+  case focusPane2
+  case focusPane3
+  case focusPane4
+  case focusPane5
+  case focusPane6
+  case focusPane7
+  case focusPane8
+  case focusPane9
 
   // Worktree row operations.
   case revealCurrentWorktreeInFinder
@@ -164,6 +173,23 @@ extension CommandID {
     case 7: return .focusAgentAt7
     case 8: return .focusAgentAt8
     case 9: return .focusAgentAt9
+    default: return nil
+    }
+  }
+
+  /// Maps a Pane number to the matching `focusPaneN` case, or `nil` if `number` is outside
+  /// `1...9`.
+  public static func focusPane(number: Int) -> CommandID? {
+    switch number {
+    case 1: return .focusPane1
+    case 2: return .focusPane2
+    case 3: return .focusPane3
+    case 4: return .focusPane4
+    case 5: return .focusPane5
+    case 6: return .focusPane6
+    case 7: return .focusPane7
+    case 8: return .focusPane8
+    case 9: return .focusPane9
     default: return nil
     }
   }
