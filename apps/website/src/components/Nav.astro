@@ -1,14 +1,16 @@
 ---
 import GitHubIcon from "./GitHubIcon.astro";
-import { dictionary, localePath, type Locale } from "../i18n";
+import { dictionary, localePath, otherLocale, type Locale } from "../i18n";
 import { LINKS } from "../lib/links";
 import Logo from "./Logo.astro";
 
 interface Props {
   locale: Locale;
+  /** Locale-independent path of the page: "/" or "/changelog". */
+  page: string;
 }
 
-const { locale } = Astro.props;
+const { locale, page } = Astro.props;
 const t = dictionary(locale);
 ---
 
@@ -18,7 +20,32 @@ const t = dictionary(locale);
       <Logo />
       <span class="brand-name">Codans</span>
     </a>
-    <a href={localePath(locale, "/changelog")} class="text-muted hover:text-ink">{t.nav.changelog}</a>
+    <a
+      href={localePath(otherLocale(locale), page)}
+      hreflang={otherLocale(locale)}
+      class="nav-icon -mr-3 flex-none sm:-mr-5"
+      aria-label={t.footer.otherLocaleLabel}
+      title={t.footer.otherLocaleLabel}
+    >
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="m5 8 6 6"></path>
+        <path d="m4 14 6-6 2-3"></path>
+        <path d="M2 5h12"></path>
+        <path d="M7 2h1"></path>
+        <path d="m22 22-5-10-5 10"></path>
+        <path d="M14 18h6"></path>
+      </svg>
+    </a>
     <a href={LINKS.repo} class="nav-icon flex-none" aria-label={t.nav.github} title={t.nav.github}>
       <GitHubIcon size={18} />
     </a>
