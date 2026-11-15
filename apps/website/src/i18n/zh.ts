@@ -4,7 +4,7 @@ export const zh: Dictionary = {
   meta: {
     title: "Codans：并行运行你的 Coding Agent",
     description:
-      "一款 macOS 原生终端，把所有项目、worktree 和 Coding Agent 放进同一个窗口，并告诉你哪些 Agent 在等你。",
+      "并行运行 Coding Agent 的 macOS 原生终端：每个任务一个 worktree，每个 Agent 一个 pane，哪些 Agent 在等你一眼可见。",
     changelogTitle: "更新日志：Codans",
   },
   nav: {
@@ -12,7 +12,7 @@ export const zh: Dictionary = {
     github: "GitHub",
   },
   hero: {
-    title: "在一个窗口里，<br />并行运行所有 Coding Agent。",
+    title: "并行运行 Coding Agent 的终端。",
     lede: "Codans 是为使用 Coding Agent 工作的人做的 macOS 原生终端。每个任务一个 worktree，每个 Agent 一个 pane，哪些在工作、哪些在等你，一眼可见。",
     download: "下载 macOS 版",
     copy: "复制",
@@ -175,8 +175,8 @@ export const zh: Dictionary = {
   },
   more: {
     projects: {
-      title: "多个仓库，本地或远程，一处管理。",
-      lede: "用 Workspace 跨多个仓库工作，用远程项目在另一台机器上工作。过滤器让侧栏保持简短。",
+      title: "跨仓库、跨机器工作。",
+      lede: "Workspace 把多个仓库归到同一个分支名下，远程项目通过 SSH 跑在另一台机器上。过滤器让侧栏保持简短。",
       // One item for each sidebar filter, in the order of the filter bar in the app.
       items: [
         {
@@ -190,7 +190,7 @@ export const zh: Dictionary = {
           id: "workspace",
           tab: "Workspace",
           title: "Workspace",
-          body: "把多个项目放进同一个空间，像 monorepo 一样工作：一个分支名，每个项目各 checkout 一份，Agent 在同一处协作。",
+          body: "把多个项目放进同一个空间，像 monorepo 一样工作：一个分支名，每个项目各 checkout 一份，一个 Agent 就能同时改动所有项目。",
           alt: "打开 Workspace 过滤器的 Codans 窗口：一个 workspace，含 default 组和一个 release 组。",
         },
         {
