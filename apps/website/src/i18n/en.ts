@@ -6,7 +6,7 @@ export const en = {
   meta: {
     title: "Codans: run your coding agents in parallel",
     description:
-      "A native macOS terminal that keeps every project, worktree, and coding agent in one window, and shows you which agents need you.",
+      "A native macOS terminal for running coding agents in parallel: a worktree for every task, a pane for every agent, and a view of which agents need you.",
     changelogTitle: "Changelog: Codans",
   },
   nav: {
@@ -14,7 +14,7 @@ export const en = {
     github: "GitHub",
   },
   hero: {
-    title: "Run your coding agents in parallel, in one window.",
+    title: "The terminal for parallel coding agents.",
     lede: "Codans is a native macOS terminal for people who work through coding agents. It gives every task a worktree, every agent a pane, and shows you which ones are working and which ones need you.",
     download: "Download for macOS",
     copy: "Copy",
@@ -178,8 +178,8 @@ export const en = {
   },
   more: {
     projects: {
-      title: "Many repositories, local or remote, in one place.",
-      lede: "Work across several repositories in one workspace, and on projects that live on another machine. Filters keep the sidebar short.",
+      title: "Work across repositories and machines.",
+      lede: "A workspace groups several repositories under one branch name. A remote project runs on another machine over SSH. Filters keep the sidebar short.",
       // One item for each sidebar filter, in the order of the filter bar in the app.
       items: [
         {
@@ -193,7 +193,7 @@ export const en = {
           id: "workspace",
           tab: "Workspace",
           title: "Workspaces",
-          body: "Put several projects in one space and work on them like a monorepo: one branch name, one checkout in each project, one place for your agents.",
+          body: "Put several projects in one space and work on them like a monorepo: one branch name and one checkout in each project, so one agent can change all of them.",
           alt: "The Codans window with the Workspace filter on: a workspace with a default group and a release group.",
         },
         {
