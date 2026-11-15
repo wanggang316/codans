@@ -54,6 +54,58 @@ struct CommandPaletteItemsTests {
     #expect(!item.hiddenWhenQueryEmpty)
   }
 
+  // MARK: - Place
+
+  /// A selected worktree whose only tab holds `paneCount` panes; returns the
+  /// first pane as the focused one.
+  private static func placeFixture(paneCount: Int) -> (Catalog, HierarchySelection, PaneID) {
+    let panes = (0..<paneCount).map { _ in Pane(workingDirectory: "/tmp/p/wt") }
+    let ids = panes.map(\.id)
+    var root: SplitTree<PaneID>.Node = .leaf(ids[0])
+    for id in ids.dropFirst() {
+      root = .split(.init(direction: .horizontal, ratio: 0.5, left: root, right: .leaf(id)))
+    }
+    let tab = Tab(splitTree: SplitTree(root: root), panes: panes)
+    var worktree = Worktree(name: "wt", path: "/tmp/p/wt", branch: "main")
+    worktree.tabs = [tab]
+    worktree.selectedTabID = tab.id
+    var project = Project(name: "P", rootPath: "/tmp/p", gitRoot: "/tmp/p")
+    project.worktrees = [worktree]
+    var catalog = Catalog()
+    catalog.projects = [project]
+    return (catalog, HierarchySelection(projectID: project.id, worktreeID: worktree.id), ids[0])
+  }
+
+  private static func placeIDs(paneCount: Int, precise: Bool) -> [String] {
+    let (catalog, selection, focused) = placeFixture(paneCount: paneCount)
+    return withEmptySettings {
+      CommandPaletteItems.build(
+        selection: selection, catalog: catalog, focusedPaneID: focused, paneFocusPrecise: precise)
+    }
+    .map(\.id).filter { $0.hasPrefix("pane.place.") }
+  }
+
+  @Test
+  func placeItemsListEveryRegionWithTwoPanesAndExactFocus() throws {
+    #expect(Self.placeIDs(paneCount: 2, precise: true) == PlaceRegion.allCases.map { "pane.place.\($0.rawValue)" })
+
+    let (catalog, selection, focused) = Self.placeFixture(paneCount: 3)
+    let items = Self.withEmptySettings {
+      CommandPaletteItems.build(
+        selection: selection, catalog: catalog, focusedPaneID: focused, paneFocusPrecise: true)
+    }
+    let left = try #require(items.first { $0.id == "pane.place.leftHalf" })
+    #expect(left.title == "Place in Left Half")
+    #expect(left.commandID == .placeLeftHalf)
+    #expect(left.kind == .paneAction(.place(.leftHalf)))
+  }
+
+  @Test
+  func placeItemsAreOmittedForOnePaneOrInexactFocus() {
+    #expect(Self.placeIDs(paneCount: 1, precise: true).isEmpty)
+    #expect(Self.placeIDs(paneCount: 3, precise: false).isEmpty)
+  }
+
   // MARK: - Worktree context
 
   @Test
