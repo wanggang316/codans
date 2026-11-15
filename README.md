@@ -5,7 +5,7 @@
 <h1 align="center">Codans</h1>
 
 <p align="center">
-  <strong>The development environment for coding agents.</strong>
+  <strong>Dance with coding agents.</strong>
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@
   <img src="apps/website/public/shots/hero-palette-1280.webp" alt="The Codans window with the command palette open: a sidebar of projects and worktrees, the Agents View, and Claude Code beside a dev server." width="900" />
 </p>
 
-Codans is a native macOS app for Claude Code, Codex, and any agent that runs in a terminal. Start a task in its own worktree, see what each agent is doing, and merge the pull request.
+Codans is a native macOS development environment for Claude Code, Codex, and any agent that runs in a terminal. Start a task in its own worktree, see what each agent is doing, and merge the pull request.
 
 ## Features
 
