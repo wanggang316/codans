@@ -118,13 +118,34 @@ struct SplitTreePlaceTests {
     #expect(after.root == expected)
   }
 
+  /// With one other Pane the center region cannot have Panes on both sides.
+  /// Place still ends zoom, as every Place does, and keeps the shape.
   @Test
-  func centerThirdWithOneOtherPaneIsIgnored() throws {
+  func centerThirdWithOneOtherPaneOnlyEndsZoom() throws {
     let a = PaneID()
     let b = PaneID()
-    let before = Tree(root: split(.horizontal, 0.5, leaf(a), leaf(b)), zoomed: a)
-    #expect(try before.placing(a, in: .centerThird) == before)
-    #expect(try before.placing(b, in: .middleThird) == before)
+    let root = split(.horizontal, 0.5, leaf(a), leaf(b))
+    let before = Tree(root: root, zoomed: a)
+    #expect(try before.placing(a, in: .centerThird) == Tree(root: root))
+    #expect(try before.placing(b, in: .middleThird) == Tree(root: root))
+  }
+
+  /// When the other Panes' root split runs across the region, its two parts go
+  /// to the two sides: each part keeps its own subtree, and only the seam
+  /// between the parts turns to the region's direction.
+  @Test
+  func centerThirdAcrossAPerpendicularRootSplitKeepsEachPart() throws {
+    let f = Fixture()
+    // a | ((b | c) / d): without `a` the root split is vertical.
+    let before = Tree(
+      root: split(
+        .horizontal, 0.5, leaf(f.a),
+        split(.vertical, 0.3, split(.horizontal, 0.4, leaf(f.b), leaf(f.c)), leaf(f.d))))
+    let after = try before.placing(f.a, in: .centerThird)
+    let expected = split(
+      .horizontal, 1.0 / 3.0, split(.horizontal, 0.4, leaf(f.b), leaf(f.c)),
+      split(.horizontal, 0.5, leaf(f.a), leaf(f.d)))
+    #expect(after.root == expected)
   }
 
   // MARK: - Ratio-only path

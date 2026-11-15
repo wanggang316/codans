@@ -142,8 +142,10 @@ public nonisolated struct SplitTree<Leaf: Hashable & Codable & Sendable>: Equata
   ///
   /// A center region needs the other leaves on both sides: the tree without
   /// `leaf` is divided at its root split, and `leaf` goes into a nested split
-  /// between the two parts. When the other leaves are one leaf, they cannot
-  /// be divided and the tree is returned unchanged, as for a one-leaf tree.
+  /// between the two parts. Each part keeps its subtree; only the seam
+  /// between the parts takes the region's direction. When the other leaves
+  /// are one leaf, they cannot be divided: the shape stays and only zoom ends.
+  /// A one-leaf tree is returned unchanged.
   ///
   /// When the tree already has the target shape, the same construction gives
   /// back that shape with only the ratios changed. The leaf set is preserved
@@ -163,7 +165,7 @@ public nonisolated struct SplitTree<Leaf: Hashable & Codable & Sendable>: Equata
       newRoot = .split(
         Split(direction: direction, ratio: 1 - region.span.fraction, left: rest, right: placed))
     case .center:
-      guard case .split(let parts) = rest else { return self }
+      guard case .split(let parts) = rest else { return Self(root: root, zoomed: nil) }
       // The outer split gives the first part one third; the inner split
       // halves the remaining two thirds between `leaf` and the last part.
       let inner: Node = .split(
