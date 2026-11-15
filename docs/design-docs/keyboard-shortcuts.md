@@ -215,7 +215,7 @@ Settings → Shortcuts 面板：按 `ShortcutSchema` 分类分组、可搜索（
 
 - **`⌘T` / `⌘W` 在响应链上压过 Ghostty 内部绑定。** 这是菜单绑定优先级——SwiftUI 菜单项在 responder chain 上先于内嵌终端的键绑定，故 New Tab / Close Tab 胜出。这是**预期行为，不是 bug**；不要试图"修复"成让 Ghostty 抢先。
 - **窗口级和弦不占用文本编辑键。** 在整个主窗口生效的菜单和弦（如 Archive / Delete Worktree）不得使用终端或文本框已有含义的键（`⌘⌫`、`⌘⇧⌫` 等）：菜单 key equivalent 先于 responder chain 匹配，会抢走该键。不要再按焦点位置启用或禁用菜单项来"让出"按键——同一和弦在同一窗口内会有两种行为（ADR 0010）。
-- **默认和弦不用 `⌃⌥`。** Magnet 等窗口管理器把 `⌃⌥` 加方向键 / 字母注册为全局热键，codans 收不到。Place 命令只有左右半有默认和弦 `⌃⌘←` / `⌃⌘→`；上下半、三分之一与三分之二默认不绑定（`⌃⌘↑` / `⌃⌘↓` 已属 Select Previous / Next Worktree），用户可在 Settings → Shortcuts 绑定（[ADR 0012](../adr/0012-place-chords-avoid-the-magnet-modifiers.md)，`ShortcutSchemaAuditTests` 守护）。
+- **默认和弦不用 `⌃⌥`。** Magnet 等窗口管理器把 `⌃⌥` 加方向键 / 字母注册为全局热键，codans 收不到。Place 的四个半区默认用 `⌃⌘` 加方向键；三分之一与三分之二默认不绑定，用户可在 Settings → Shortcuts 绑定。Select Previous / Next Worktree 因此由 `⌃⌘↑` / `⌃⌘↓` 改为 `⌃⌘[` / `⌃⌘]`，与 `⌘[` / `⌘]`（历史）、`⌘⇧[` / `⌘⇧]`（Tab）同属方括号序列导航；已有用户覆盖不受影响（[ADR 0012](../adr/0012-place-chords-avoid-the-magnet-modifiers.md)，`ShortcutSchemaAuditTests` 守护）。
 - **`selectAdjacentTab` 必经 `selectTab`。** 相邻 tab 切换（`previousTab` / `nextTab` / 编号切换）的路由必须走 `selectTab`；直接写 `selectedTabID` 会**绕过焦点恢复**，使键盘 tab 切换跳过该 tab 记住的 pane。这是路由不变量，非性能优化。
 
 ## 风险

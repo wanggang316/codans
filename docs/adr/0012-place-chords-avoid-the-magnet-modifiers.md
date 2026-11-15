@@ -19,12 +19,16 @@ similar window manager.
 2. The third and two-thirds regions have no default chord. The user can bind
    them in Settings → Shortcuts, and they are in the Command Palette.
 
-## Implementation note
+## Consequences
 
-`⌃⌘↑` and `⌃⌘↓` are already the default chords of Select Previous / Next
-Worktree (ADR 0002). Two commands cannot share a default chord, so the top and
-bottom halves ship with no default chord, like the thirds. Only the left and
-right halves have default chords: `⌃⌘←` and `⌃⌘→`.
+`⌃⌘↑` and `⌃⌘↓` were the default chords of Select Previous / Next Worktree
+(ADR 0002). Two commands cannot share a default chord, so those two commands
+move to `⌃⌘[` and `⌃⌘]`. The bracket keys already step through sequences:
+`⌘[` / `⌘]` for Worktree history and `⌘⇧[` / `⌘⇧]` for tabs. A user override of
+the old chords stays as it is.
+
+As menu chords, `⌃⌘` + arrow take precedence over the Ghostty default
+`resize_split` chords on macOS.
 
 ## Reconsider when
 

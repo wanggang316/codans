@@ -45,7 +45,8 @@ Sections cannot nest, and `List(children:)` / `OutlineGroup` do not support
 7. **Filters.** The Remote filter stays. Under a filter, a Host row shows only
    when at least one of its Projects matches. Thus the Remote filter hides
    This Mac.
-8. **Keyboard.** The ⌃1…⌃0 slots and ⌘⌃↑ / ⌘⌃↓ skip Host rows, because Host
+8. **Keyboard.** The ⌃1…⌃0 slots and Select Previous / Next Worktree
+   (`⌃⌘[` / `⌃⌘]`; `⌘⌃↑` / `⌘⌃↓` before ADR 0012) skip Host rows, because Host
    rows are not selectable. Rows under a collapsed Host get no slot, as rows
    under a collapsed Project do now.
 9. **Delivery order.** Three changes, each mergeable alone:

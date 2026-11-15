@@ -223,7 +223,7 @@ extension Catalog {
   /// Project row that stands for a worktree, then — while the Project is
   /// expanded — its child rows. Host rows cannot be selected. Rows inside a
   /// collapsed Host or Project and the rows of a Project that failed to load
-  /// are not on screen, so they are left out. Drives the ⌃1…⌃0 slots and ⌘⌃↑ / ⌘⌃↓.
+  /// are not on screen, so they are left out. Drives the ⌃1…⌃0 slots and Select Previous / Next Worktree.
   public var sidebarSelectionOrder: [SidebarRowAddress] {
     sidebarSelectionOrder(pullRequestWorktreeIDs: [], notifiedWorktreeIDs: [])
   }

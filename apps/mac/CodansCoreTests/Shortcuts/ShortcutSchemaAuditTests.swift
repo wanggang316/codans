@@ -143,7 +143,9 @@ struct ShortcutSchemaAuditTests {
       let entry = ShortcutSchema.app.entry(for: .place(region))
       #expect(entry?.title == "Place in \(region.title)")
       #expect(entry?.category == .terminal)
-      if region.span != .half {
+      if region.span == .half {
+        #expect(entry?.defaultBinding != nil, "\(region) must have a default chord.")
+      } else {
         #expect(entry?.defaultBinding == nil, "\(region) must have no default chord.")
       }
     }
@@ -192,8 +194,10 @@ struct ShortcutSchemaAuditTests {
     (.copyCurrentWorktreePath, (0x08, [.command, .shift])),  // ⌘⇧C
     (.toggleCurrentWorktreePinned, (0x23, [.command, .option])),  // ⌘⌥P
     (.revealCurrentWorktreeInSidebar, (0x26, [.command, .shift])),  // ⌘⇧J
-    (.selectPreviousWorktree, (0x7E, [.command, .control])),  // ⌘⌃↑
-    (.selectNextWorktree, (0x7D, [.command, .control])),  // ⌘⌃↓
+    // ADR 0012: ⌃⌘↑ / ⌃⌘↓ went to the top and bottom halves; the Worktree steps moved to
+    // the bracket family next to ⌘[ / ⌘] (history) and ⌘⇧[ / ⌘⇧] (tabs).
+    (.selectPreviousWorktree, (0x21, [.command, .control])),  // ⌃⌘[
+    (.selectNextWorktree, (0x1E, [.command, .control])),  // ⌃⌘]
     (.worktreeHistoryBack, (0x21, [.command])),  // ⌘[
     (.worktreeHistoryForward, (0x1E, [.command])),  // ⌘]
     (.newTab, (0x11, [.command])),  // t
@@ -220,12 +224,11 @@ struct ShortcutSchemaAuditTests {
     (.selectWorktreeAt8, (0x1C, [.control])),
     (.selectWorktreeAt9, (0x19, [.control])),
     (.selectWorktreeAt10, (0x1D, [.control])),  // 0
-    // ADR 0012: ⌃⌘← / ⌃⌘→ for the left and right halves. ⌃⌘↑ / ⌃⌘↓ already select the
-    // previous / next Worktree, so the top and bottom halves have no default.
+    // ADR 0012: ⌃⌘ + arrow for the four halves; the thirds and two thirds have no default.
     (.placeLeftHalf, (0x7B, [.command, .control])),  // ⌃⌘←
     (.placeRightHalf, (0x7C, [.command, .control])),  // ⌃⌘→
-    (.placeTopHalf, nil),
-    (.placeBottomHalf, nil),
+    (.placeTopHalf, (0x7E, [.command, .control])),  // ⌃⌘↑
+    (.placeBottomHalf, (0x7D, [.command, .control])),  // ⌃⌘↓
     (.placeLeftThird, nil),
     (.placeCenterThird, nil),
     (.placeRightThird, nil),

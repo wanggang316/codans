@@ -202,14 +202,15 @@ extension ShortcutSchema {
       title: "Select Previous Worktree",
       category: .projectAndWorktree,
       scope: .configurable,
-      defaultBinding: .init(keyCode: UInt16(kVK_UpArrow), modifiers: [.command, .control])
+      // ⌃⌘[ / ⌃⌘]: ⌃⌘ + arrow belongs to the Place halves (ADR 0012).
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_LeftBracket), modifiers: [.command, .control])
     ),
     .init(
       id: .selectNextWorktree,
       title: "Select Next Worktree",
       category: .projectAndWorktree,
       scope: .configurable,
-      defaultBinding: .init(keyCode: UInt16(kVK_DownArrow), modifiers: [.command, .control])
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_RightBracket), modifiers: [.command, .control])
     ),
     .init(
       id: .worktreeHistoryBack,
@@ -490,17 +491,19 @@ extension ShortcutSchema {
     ),
   ]
 
-  /// One entry per Place region. Only the left and right halves have a default chord:
-  /// ADR 0012 keeps the Place chords off the `⌃⌥` window-manager modifiers, and `⌃⌘↑` /
-  /// `⌃⌘↓` already select the previous / next Worktree, so the top and bottom halves start
-  /// unbound like the thirds.
+  /// One entry per Place region. The four halves take `⌃⌘` + arrow; the thirds and two
+  /// thirds have no default chord. ADR 0012 keeps the Place chords off the `⌃⌥`
+  /// window-manager modifiers.
   private static let placeEntries: [Entry] = PlaceRegion.allCases.map { region in
-    let defaultBinding: ShortcutBinding? =
+    let arrow: Int? =
       switch region {
-      case .leftHalf: .init(keyCode: UInt16(kVK_LeftArrow), modifiers: [.command, .control])
-      case .rightHalf: .init(keyCode: UInt16(kVK_RightArrow), modifiers: [.command, .control])
+      case .leftHalf: kVK_LeftArrow
+      case .rightHalf: kVK_RightArrow
+      case .topHalf: kVK_UpArrow
+      case .bottomHalf: kVK_DownArrow
       default: nil
       }
+    let defaultBinding = arrow.map { ShortcutBinding(keyCode: UInt16($0), modifiers: [.command, .control]) }
     return Entry(
       id: .place(region),
       title: "Place in \(region.title)",

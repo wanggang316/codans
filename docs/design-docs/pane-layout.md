@@ -35,7 +35,7 @@ Place 是 `CodansCore` 里的纯 split-tree 变换 `SplitTree.placing(_:in:)`，
 `rest` 是去掉聚焦 Pane 后的旧树（`Node.removing` 会折叠单子 split），其他 Pane 的子树原样保留。`span` 为 1/2、1/3 或 2/3。
 
 - **只改 ratio。** 树已是目标形状时，同一构造给出同一棵树，只有 ratio 变化；Place 两次与一次结果相同。
-- **中三分之一。** 需要两侧都有 Pane：`rest` 在其根 split 处一分为二，前一半去前三分之一，后一半去后三分之一（根 split 与区域方向垂直时，这两部分从叠放变为并排）。`rest` 只有一个 Pane 时无法分成两侧，Place 被忽略，与单 Pane Tab 相同。
+- **中三分之一。** 需要两侧都有 Pane：`rest` 在其根 split 处一分为二，前一半去前三分之一，后一半去后三分之一。两部分各自的子树不变，只有两部分之间的接缝取区域方向：根 split 与区域方向垂直时，这两部分从叠放变为并排，原根 split 的 ratio 由 1/3 的布局取代——中间区域本身要求两侧各有一部分，无法保留它。`rest` 只有一个 Pane 时无法分成两侧（split tree 没有空白区域），这时形状不变、只结束 zoom；命令仍照常列出，与其他区域一致。
 - **Zoom。** Place 先结束 zoom：结果树的 `zoomed` 为 `nil`。
 - **单 Pane Tab。** 忽略 Place，不报错，树（含 zoom）不变。
 
@@ -58,7 +58,7 @@ Pane Layout 子菜单 ─────→ GhosttySurfaceView.onPaneAction(.place(
 
 ### 快捷键
 
-每个区域一个 `CommandID`（`CommandID.place(_:)`），Settings → Shortcuts 中标题为 "Place in <区域>"。默认和弦只给左右半：`⌃⌘←` / `⌃⌘→`。三分之一与三分之二没有默认和弦（[ADR 0012](../adr/0012-place-chords-avoid-the-magnet-modifiers.md)）；上下半也没有，因为 `⌃⌘↑` / `⌃⌘↓` 已是 Select Previous / Next Worktree 的默认和弦。菜单栏 key equivalent 先于终端匹配，因此 `⌃⌘←` / `⌃⌘→` 取代 Ghostty 默认的 `resize_split` 同名和弦。
+每个区域一个 `CommandID`（`CommandID.place(_:)`），Settings → Shortcuts 中标题为 "Place in <区域>"。四个半区的默认和弦是 `⌃⌘←` / `⌃⌘→` / `⌃⌘↑` / `⌃⌘↓`；三分之一与三分之二没有默认和弦（[ADR 0012](../adr/0012-place-chords-avoid-the-magnet-modifiers.md)）。Select Previous / Next Worktree 原先的 `⌃⌘↑` / `⌃⌘↓` 因此移到 `⌃⌘[` / `⌃⌘]`。菜单栏 key equivalent 先于终端匹配，因此 `⌃⌘` 加方向键取代 Ghostty 在 macOS 上默认的 `resize_split` 同名和弦。
 
 Pane 的 Layout 子菜单由 Runtime 构建（`GhosttySurfaceView.addPaneActionItems`），右键菜单与 Pane 卡片 Header 的操作菜单共用。它显示的和弦来自 app 注入的 `TerminalEngine.menuKeyEquivalent`（读 `ShortcutsStore.resolved`），Runtime 不直接读快捷键注册表。
 
