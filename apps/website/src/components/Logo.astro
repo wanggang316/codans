@@ -1,0 +1,35 @@
+---
+// The Codans mark: six tiles on a transparent background. The tiles flicker, each with its own
+// period, while the pointer is over the brand link or the link has the `data-spark` attribute.
+interface Props {
+  size?: number;
+}
+
+const { size = 24 } = Astro.props;
+
+const TILES = [
+  { x: 0, y: 0, fill: "#0065ff", delay: -0.3, duration: 3.1 },
+  { x: 0, y: 116, fill: "#073084", delay: -1.7, duration: 3.57 },
+  { x: 122, y: 116, fill: "#49bff0", delay: -0.8, duration: 4.04 },
+  { x: 0, y: 234, fill: "#064bd8", delay: -2.9, duration: 4.51 },
+  { x: 122, y: 234, fill: "#007cff", delay: -1.2, duration: 4.98 },
+  { x: 244, y: 234, fill: "#b3ddf9", delay: -3.8, duration: 5.45 },
+];
+---
+
+<svg class="logo" viewBox="-12 -16 374 366" width={size} height={size} fill="none" aria-hidden="true">
+  {
+    TILES.map((tile) => (
+      <rect
+        class="logo-tile"
+        x={tile.x}
+        y={tile.y}
+        width="106"
+        height="106"
+        rx="18"
+        fill={tile.fill}
+        style={`--delay:${tile.delay}s;--duration:${tile.duration}s`}
+      />
+    ))
+  }
+</svg>

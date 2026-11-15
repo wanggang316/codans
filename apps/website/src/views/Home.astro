@@ -31,7 +31,7 @@ const FILTER_COLORS: Record<string, string> = {
 <Base locale={locale} page="/" title={t.meta.title} description={t.meta.description}>
   <div class="wrap">
     <section class="pt-12 sm:pt-20">
-      <h1 class="display max-w-[16em]"><Fragment set:html={titleStart} /><span class="rotator" data-rotator={JSON.stringify([t.hero.titleAgent, ...HERO_AGENTS])}>{t.hero.titleAgent}</span><Fragment set:html={titleEnd} /></h1>
+      <h1 class="display hero-title max-w-[16em]" data-hero-title><Fragment set:html={titleStart} /><span class="rotator" data-rotator={JSON.stringify([t.hero.titleAgent, ...HERO_AGENTS])}>{t.hero.titleAgent}</span><Fragment set:html={titleEnd} /></h1>
       <p class="copy mt-6 max-w-[46em] text-[16px]">{t.hero.lede}</p>
       <div class="mt-8">
         <Download locale={locale} />
@@ -305,6 +305,44 @@ const FILTER_COLORS: Record<string, string> = {
 </Base>
 
 <script>
+  // The hero title goes out and the name in the header comes in while the title moves under
+  // the header. The tiles of the mark flicker during the scroll.
+  const header = document.querySelector<HTMLElement>(".site-header");
+  const heroTitle = document.querySelector<HTMLElement>("[data-hero-title]");
+  const brand = header?.querySelector<HTMLElement>(".brand");
+  if (header && heroTitle && brand) {
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    header.dataset.collapse = "";
+    let sparkTimer = 0;
+    let ticking = false;
+    const update = () => {
+      ticking = false;
+      const rect = heroTitle.getBoundingClientRect();
+      const travel = rect.bottom + window.scrollY - header.offsetHeight;
+      const progress = Math.min(1, Math.max(0, window.scrollY / travel));
+      // The title goes out in the first 70% of the way; the name comes in in the last 50%.
+      const out = Math.min(1, progress / 0.7);
+      const into = Math.min(1, Math.max(0, (progress - 0.5) / 0.5));
+      header.style.setProperty("--hero-out", String(into));
+      if (!still) {
+        heroTitle.style.opacity = String(1 - out);
+        heroTitle.style.transform = `scale(${1 - 0.18 * out})`;
+      }
+    };
+    const onScroll = () => {
+      if (!ticking) {
+        ticking = true;
+        window.requestAnimationFrame(update);
+      }
+      brand.dataset.spark = "";
+      window.clearTimeout(sparkTimer);
+      sparkTimer = window.setTimeout(() => delete brand.dataset.spark, 1400);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", update);
+    update();
+  }
+
   // Hero title: the agent names take turns in the place of the generic term.
   const rotator = document.querySelector<HTMLElement>("[data-rotator]");
   if (rotator && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
