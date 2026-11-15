@@ -177,6 +177,7 @@ struct ShortcutSchemaAuditTests {
     (.focusPane7, (0x1A, [.command, .option])),  // ⌘⌥7
     (.focusPane8, (0x1C, [.command, .option])),  // ⌘⌥8
     (.focusPane9, (0x19, [.command, .option])),  // ⌘⌥9
+    (.arrangeLayout, (0x25, [.command, .option])),  // ⌘⌥L
     (.revealCurrentWorktreeInFinder, (0x1F, [.command, .option])),  // ⌥O
     (.archiveCurrentWorktree, (0x33, [.command, .control])),  // ⌃⌘⌫
     (.deleteCurrentWorktree, (0x33, [.command, .control, .shift])),  // ⌃⌘⇧⌫
