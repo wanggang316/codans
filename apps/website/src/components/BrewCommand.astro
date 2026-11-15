@@ -16,21 +16,52 @@ const t = dictionary(Astro.props.locale);
   <span class="truncate">{LINKS.brew}</span>
   <button
     type="button"
-    class="h-[30px] flex-none cursor-pointer rounded-[7px] px-2.5 font-sans text-[13px] whitespace-nowrap text-muted hover:bg-sunken hover:text-ink"
+    class="group grid size-[30px] flex-none cursor-pointer place-items-center rounded-[7px] text-muted hover:bg-sunken hover:text-ink"
+    aria-label={t.hero.copy}
+    title={t.hero.copy}
     data-copy={LINKS.brew}
     data-copied={t.hero.copied}
   >
-    {t.hero.copy}
+    <svg
+      class="size-4 group-data-[done]:hidden"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="9" y="9" width="12" height="12" rx="2.5"></rect>
+      <path d="M5.5 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v.5"></path>
+    </svg>
+    <svg
+      class="hidden size-4 text-[#34c759] group-data-[done]:block"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2.4"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="m5 12.5 4.5 4.5L19 7.5"></path>
+    </svg>
   </button>
 </div>
 
 <script>
   for (const button of document.querySelectorAll<HTMLButtonElement>("button[data-copy]")) {
-    const label = button.textContent;
+    const label = button.ariaLabel;
     button.addEventListener("click", async () => {
       await navigator.clipboard.writeText(button.dataset.copy!);
-      button.textContent = button.dataset.copied!;
-      setTimeout(() => (button.textContent = label), 1400);
+      // The check mark shows while `data-done` is set.
+      button.dataset.done = "";
+      button.ariaLabel = button.title = button.dataset.copied!;
+      setTimeout(() => {
+        delete button.dataset.done;
+        button.ariaLabel = button.title = label!;
+      }, 1400);
     });
   }
 </script>
