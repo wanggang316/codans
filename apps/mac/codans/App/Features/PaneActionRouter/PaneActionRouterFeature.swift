@@ -218,6 +218,25 @@ struct PaneActionRouterFeature {
       toggleSplitZoom(paneID: paneID)
       return .none
 
+    case .place(let region):
+      // A one-pane Tab ignores Place; skip the focus hop as well.
+      guard let address = hierarchyClient.addressOf(paneID) else { return .none }
+      let catalog = hierarchyClient.snapshot()
+      guard
+        let tab = findTab(
+          tabID: address.tabID, worktreeID: address.worktreeID,
+          projectID: address.projectID, in: catalog
+        ), tab.panes.count > 1
+      else { return .none }
+      try? hierarchyClient.placePane(paneID, region)
+      // The reshape re-parents the pane views; give input back to the same
+      // pane once the split view has re-attached it, as `newSplit` does.
+      return .run { [client = hierarchyClient] _ in
+        await MainActor.run {
+          client.focusSurfaceView(paneID)
+        }
+      }
+
     case .presentTerminal:
       return .send(.delegate(.presentTerminalRequested(paneID)))
 

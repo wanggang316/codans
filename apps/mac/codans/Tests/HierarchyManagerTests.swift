@@ -139,6 +139,49 @@ struct HierarchyManagerTests {
     #expect(fakeRuntime.ensureSurfaceCalls[0].paneID == newPaneID)
   }
 
+  /// Place reshapes the tree in place: no surface is created, zoom ends, and
+  /// the result reaches `catalog.json` like any split, so it survives a
+  /// restart.
+  @Test
+  func placePaneReshapesTheTreeAndPersists() async throws {
+    let projectID = manager.addProject(name: "project", rootPath: "/tmp", gitRoot: "/tmp")
+    let worktreeID = try manager.createWorktree(in: projectID, name: "main", path: "/repo", branch: "main")
+    let tabID = try manager.createTab(in: worktreeID, in: projectID, name: nil)
+    let first = try await manager.openPane(
+      in: tabID, in: worktreeID, in: projectID, workingDirectory: "/tmp", initialCommand: nil)
+    let second = try await manager.splitPane(
+      first, direction: .right, in: tabID, in: worktreeID, in: projectID,
+      workingDirectory: "/tmp", initialCommand: nil)
+    let third = try await manager.splitPane(
+      second, direction: .down, in: tabID, in: worktreeID, in: projectID,
+      workingDirectory: "/tmp", initialCommand: nil)
+    try manager.focusPane(third, in: tabID, in: worktreeID, in: projectID)
+    #expect(manager.catalog.projects[0].worktrees[0].tabs[0].splitTree.zoomed == third)
+
+    fakeRuntime.reset()
+    try manager.placePane(third, in: .leftThird)
+
+    let tree = manager.catalog.projects[0].worktrees[0].tabs[0].splitTree
+    let expected: SplitTree<PaneID>.Node = .split(
+      .init(
+        direction: .horizontal, ratio: 1.0 / 3.0, left: .leaf(third),
+        right: .split(.init(direction: .horizontal, ratio: 0.5, left: .leaf(first), right: .leaf(second)))))
+    #expect(tree.root == expected)
+    #expect(tree.zoomed == nil)
+    #expect(fakeRuntime.ensureSurfaceCalls.isEmpty)
+
+    store.flushPending()
+    let reloaded = try store.load()
+    #expect(reloaded.projects[0].worktrees[0].tabs[0].splitTree == tree)
+  }
+
+  @Test
+  func placePaneOfAnUnknownPaneThrows() {
+    #expect(throws: HierarchyError.self) {
+      try manager.placePane(PaneID(), in: .leftHalf)
+    }
+  }
+
   /// Regression guard for the worktree-create double-seed race
   /// (`fix/resume-bug`). The create-worktree flow seeds its first pane via
   /// `createPaneRow` from a *synchronous* reducer body so the Pane row is

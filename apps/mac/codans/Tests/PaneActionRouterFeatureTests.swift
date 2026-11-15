@@ -407,6 +407,57 @@ struct PaneActionRouterFeatureTests {
     #expect(recorded.value?.1 == f.worktreeID)
   }
 
+  // MARK: - place
+
+  @Test
+  func placeInATwoPaneTabCallsPlacePaneAndRefocusesThePane() async {
+    let f = Fixture()
+    let other = PaneID()
+    let tab = Tab(
+      id: f.tabID,
+      splitTree: SplitTree(
+        root: .split(.init(direction: .horizontal, ratio: 0.5, left: .leaf(f.paneID), right: .leaf(other)))),
+      panes: [Pane(id: f.paneID, workingDirectory: "/cwd"), Pane(id: other, workingDirectory: "/cwd")]
+    )
+    let catalog = Catalog(projects: [
+      Project(
+        id: f.projectID, name: "p", rootPath: "/p", gitRoot: "/p",
+        worktrees: [Worktree(id: f.worktreeID, name: "w", path: "/w", tabs: [tab])])
+    ])
+    let placed = LockIsolated<(PaneID, PlaceRegion)?>(nil)
+    let focused = LockIsolated<PaneID?>(nil)
+    let store = TestStore(initialState: PaneActionRouterFeature.State()) {
+      PaneActionRouterFeature()
+    } withDependencies: {
+      $0.hierarchyClient = HierarchyClient.testValue
+      $0.hierarchyClient.addressOf = { _ in f.address }
+      $0.hierarchyClient.snapshot = { catalog }
+      $0.hierarchyClient.placePane = { paneID, region in placed.setValue((paneID, region)) }
+      $0.hierarchyClient.focusSurfaceView = { focused.setValue($0) }
+    }
+
+    await store.send(.requested(f.paneID, .place(.rightTwoThirds)))
+    await store.finish()
+    #expect(placed.value?.0 == f.paneID)
+    #expect(placed.value?.1 == .rightTwoThirds)
+    #expect(focused.value == f.paneID)
+  }
+
+  @Test
+  func placeInAOnePaneTabIsIgnored() async {
+    let f = Fixture()
+    // `placePane` / `focusSurfaceView` stay `unimplemented`: a call fails the test.
+    let store = TestStore(initialState: PaneActionRouterFeature.State()) {
+      PaneActionRouterFeature()
+    } withDependencies: {
+      $0.hierarchyClient = HierarchyClient.testValue
+      $0.hierarchyClient.addressOf = { _ in f.address }
+      $0.hierarchyClient.snapshot = { f.catalog() }
+    }
+
+    await store.send(.requested(f.paneID, .place(.leftHalf)))
+  }
+
   // MARK: - toggleSplitZoom (two branches)
 
   @Test
