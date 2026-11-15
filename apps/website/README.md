@@ -31,15 +31,18 @@ src/
 │   └── zh/                   #   /zh, /zh/changelog
 ├── views/                    # Home.astro, Changelog.astro
 ├── layouts/Base.astro        # <head>, nav, footer, download-link resolver
-├── components/               # Nav, Footer, Download, BrewCommand, Shot
+├── components/               # Nav, Footer, Logo, Download, BrewCommand, Shot, Frames, icons
 ├── i18n/                     # en.ts defines the dictionary shape; zh.ts must match it
 ├── lib/
 │   ├── changelog.ts          # parse CHANGELOG.md → structured releases
 │   ├── inline-markdown.ts    # changelog bullet → safe inline HTML
 │   ├── links.ts              # external URLs
-│   └── shots.ts              # media and size of a product shot
+│   ├── shots.ts              # media and size of a product shot
+│   ├── themes.ts             # themes of the theme section
+│   └── traits.ts             # color and icon of each trait in the hero
 └── styles/global.css
 public/shots/                 # product screenshots
+public/favicon.svg, .png      # the mark on a transparent background
 scripts/build-shots.py        # raw captures → public/shots + src/data/shots.json
 ```
 
@@ -49,6 +52,25 @@ serves the clean `/changelog` URL. The changelog page reads the repository-root
 
 To add a string, add it to `src/i18n/en.ts` and `src/i18n/zh.ts`. The type
 checker reports a key that is missing from `zh.ts`.
+
+## Header and hero
+
+The header stays at the top of the page. It has the mark (`Logo`, an inline
+SVG), the name, the language switch, and the GitHub link. The tiles of the mark
+flicker while the pointer is over the brand link, and one time for each scroll;
+a faster scroll makes a faster flicker. The changelog link and the appearance
+button are in the footer.
+
+The first sentence of the hero has a chip that shows one product trait at a
+time. `hero.traits` in the dictionaries has the label and the article of each
+trait, in the order they show. `src/lib/traits.ts` has the color and the icon
+for each trait id. To add a trait, add it to both dictionaries and to
+`traits.ts`. The chip changes its width smoothly, and on a phone it ends its
+line, so a longer label does not move the lines below it.
+
+The hero title fades out in the first 96 px of scroll. This is a CSS
+scroll-driven animation; a browser without it gets a script that changes only
+the opacity. All these effects are off when the system asks for reduced motion.
 
 ## Product shots
 
