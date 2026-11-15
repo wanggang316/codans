@@ -413,6 +413,11 @@ private struct LeafView: View {
     .opacity(isMoving ? PaneCardMetrics.movingOpacity : isFocusedCard ? 1 : PaneCardMetrics.unfocusedOpacity)
     .animation(.easeInOut(duration: 0.12), value: isFocused)
     .animation(.easeInOut(duration: 0.12), value: isMoving)
+    // Pane number while ⌘⌥ is held. After the card opacity so an
+    // unfocused card's number is not dimmed. A one-Pane Tab shows none.
+    .overlay {
+      PaneNumberOverlay(number: isSplit ? paneNumber : nil)
+    }
     .background {
       GeometryReader { geo in
         Color.clear.preference(
@@ -450,6 +455,15 @@ private struct LeafView: View {
         paneID, direction: direction,
         inTab: tabID, inWorktree: worktreeID, inProject: projectID,
         workingDirectory: workingDirectory))
+  }
+
+  /// This Pane's Pane number (1–9 in Pane order), or nil after the ninth.
+  private var paneNumber: Int? {
+    hierarchyManager.catalog
+      .projects.first(where: { $0.id == projectID })?
+      .worktrees.first(where: { $0.id == worktreeID })?
+      .tabs.first(where: { $0.id == tabID })?
+      .splitTree.paneNumber(of: paneID)
   }
 
   /// Read after `configReloadTick` so a ghostty theme reload repaints the
