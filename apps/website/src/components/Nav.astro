@@ -1,9 +1,8 @@
 ---
-import { Image } from "astro:assets";
-import logo from "../assets/logo-256.png";
 import GitHubIcon from "./GitHubIcon.astro";
 import { dictionary, localePath, type Locale } from "../i18n";
 import { LINKS } from "../lib/links";
+import Logo from "./Logo.astro";
 
 interface Props {
   locale: Locale;
@@ -13,11 +12,11 @@ const { locale } = Astro.props;
 const t = dictionary(locale);
 ---
 
-<header class="wrap">
-  <nav class="flex h-16 items-center gap-4 text-[15px] whitespace-nowrap sm:gap-6" aria-label="Main">
-    <a href={localePath(locale, "/")} class="mr-auto flex flex-none items-center gap-2.5 text-[17px] font-semibold">
-      <Image src={logo} alt="" width={26} height={26} densities={[1, 2, 3]} class="rounded-md" />
-      Codans
+<header class="site-header">
+  <nav class="wrap flex h-16 items-center gap-4 text-[15px] whitespace-nowrap sm:gap-6" aria-label="Main">
+    <a href={localePath(locale, "/")} class="brand mr-auto flex flex-none items-center gap-2.5 text-[17px] font-semibold" aria-label="Codans">
+      <Logo />
+      <span class="brand-name">Codans</span>
     </a>
     <a href={localePath(locale, "/changelog")} class="text-muted hover:text-ink">{t.nav.changelog}</a>
     <a href={LINKS.repo} class="nav-icon flex-none" aria-label={t.nav.github} title={t.nav.github}>
@@ -25,3 +24,13 @@ const t = dictionary(locale);
     </a>
   </nav>
 </header>
+
+<script>
+  // The header shows its bottom line when the page is not at the top.
+  const header = document.querySelector<HTMLElement>(".site-header");
+  if (header) {
+    const update = () => header.toggleAttribute("data-scrolled", window.scrollY > 4);
+    window.addEventListener("scroll", update, { passive: true });
+    update();
+  }
+</script>
