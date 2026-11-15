@@ -20,7 +20,8 @@ import SwiftUI
 ///   `ExcludeFromWindowsMenu` wired in `CodansApp.body`).
 /// - **Worktree**: worktree navigation + actions, the Git Viewer toggle, and
 ///   the user-defined Project + Global **commands** (merged in at the bottom).
-/// - **Window ▸ Layout**: Pane layout of the current Tab (Focus Pane 1…9).
+/// - **Window ▸ Layout**: Pane layout of the current Tab (Arrange…, Focus
+///   Pane 1…9).
 /// - **Tab**: tab lifecycle (New Tab / Close Tab) plus pane split / focus /
 ///   rename / switch.
 ///
@@ -266,6 +267,12 @@ struct MainWindowCommands: Commands {
     // (presets, Place) join this submenu.
     CommandGroup(before: .windowArrangement) {
       Menu("Layout") {
+        Button("Arrange…") {
+          store()?.send(.layoutPickerToggle(nil))
+        }
+        .appKeyboardShortcut(.arrangeLayout, in: shortcuts)
+        .disabled(!hasActiveWorktree)
+        Divider()
         ForEach(Array(SplitTree<PaneID>.paneNumbers), id: \.self) { number in
           if let id = CommandID.focusPane(number: number) {
             Button("Focus Pane \(number)") {

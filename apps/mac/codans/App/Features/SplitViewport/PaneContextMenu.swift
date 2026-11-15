@@ -16,6 +16,8 @@ struct PaneContextMenuModel {
   var closePane: () -> Void = {}
   /// Focuses a Pane of this pane's Tab and makes it first responder.
   var focusPane: (PaneID) -> Void = { _ in }
+  /// Opens the Layout picker for this pane's Tab.
+  var arrangeLayout: () -> Void = {}
 
   var isMuted: Bool {
     snapshot().pane(paneID)?.isNotificationsMuted ?? false
@@ -38,6 +40,12 @@ struct PaneContextMenuModel {
     return tab?.splitTree.leaf(paneNumber: number)
   }
 
+  /// `true` when this pane's Tab has two or more Panes, the minimum the
+  /// Layout picker arranges.
+  var canArrange: Bool {
+    pane(number: 2) != nil
+  }
+
   func focusPane(number: Int) {
     guard let target = pane(number: number) else { return }
     focusPane(target)
@@ -45,9 +53,9 @@ struct PaneContextMenuModel {
 }
 
 /// Right-click menu for a pane. Hosts the "Mute notifications" toggle,
-/// the Layout submenu (Focus Pane 1…9 of this pane's Tab), and a "Close"
-/// item that tears the pane down; future menu items can be added here
-/// without churning `LazyPaneHost`.
+/// the Layout submenu (Arrange… and Focus Pane 1…9 of this pane's Tab),
+/// and a "Close" item that tears the pane down; future menu items can be
+/// added here without churning `LazyPaneHost`.
 ///
 /// The menu reads `HierarchyClient.snapshot()` lazily inside
 /// `PaneContextMenuModel.isMuted` on every render so the checkmark
@@ -60,6 +68,7 @@ struct PaneContextMenu: View {
   let worktreeID: WorktreeID
   let projectID: ProjectID
   @Dependency(HierarchyClient.self) private var hierarchy
+  @Environment(\.openLayoutPicker) private var openLayoutPicker
 
   private var model: PaneContextMenuModel {
     PaneContextMenuModel(
@@ -74,7 +83,8 @@ struct PaneContextMenu: View {
       focusPane: { target in
         try? hierarchy.focusPane(target, tabID, worktreeID, projectID)
         hierarchy.focusSurfaceView(target)
-      }
+      },
+      arrangeLayout: { [openLayoutPicker, paneID] in openLayoutPicker(paneID) }
     )
   }
 
@@ -88,8 +98,14 @@ struct PaneContextMenu: View {
       )
     }
     Divider()
-    // The Layout submenu. Later layout commands (presets, Place) join it.
+    // The Layout submenu. Later layout commands (Place) join it.
     Menu("Layout") {
+      Button("Arrange…") {
+        model.arrangeLayout()
+      }
+      .appKeyboardShortcut(.arrangeLayout)
+      .disabled(!model.canArrange)
+      Divider()
       ForEach(Array(SplitTree<PaneID>.paneNumbers), id: \.self) { number in
         if let id = CommandID.focusPane(number: number) {
           Button("Focus Pane \(number)") {
