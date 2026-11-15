@@ -179,4 +179,36 @@ struct PaneContextMenuTests {
 
     #expect(model.isMuted == false)
   }
+
+  // MARK: - Layout ▸ Focus Pane N
+
+  @Test
+  func focusPaneNumberTargetsThePaneOfThisTabInPaneOrder() throws {
+    let first = PaneID()
+    let second = PaneID()
+    let tab = Tab(
+      splitTree: try SplitTree(leaf: first).inserting(second, at: first, direction: .right),
+      panes: [
+        Pane(id: first, workingDirectory: "/tmp"),
+        Pane(id: second, workingDirectory: "/tmp"),
+      ])
+    let catalog = Catalog(projects: [
+      Project(
+        name: "fixture", rootPath: "/tmp",
+        worktrees: [Worktree(name: "fixture", path: "/tmp", tabs: [tab])])
+    ])
+    var focused: [PaneID] = []
+    let model = PaneContextMenuModel(
+      paneID: second,
+      snapshot: { catalog },
+      setLabel: { _, _, _ in },
+      focusPane: { focused.append($0) }
+    )
+
+    #expect(model.pane(number: 1) == first)
+    #expect(model.pane(number: 3) == nil)
+    model.focusPane(number: 1)
+    model.focusPane(number: 3)
+    #expect(focused == [first])
+  }
 }

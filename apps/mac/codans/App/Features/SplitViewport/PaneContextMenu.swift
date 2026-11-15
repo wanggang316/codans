@@ -14,6 +14,8 @@ struct PaneContextMenuModel {
   /// only needs to fire the closure. Defaults to a no-op so label-only
   /// tests can construct the model without wiring close.
   var closePane: () -> Void = {}
+  /// Focuses a Pane of this pane's Tab and makes it first responder.
+  var focusPane: (PaneID) -> Void = { _ in }
 
   var isMuted: Bool {
     snapshot().pane(paneID)?.isNotificationsMuted ?? false
@@ -26,11 +28,26 @@ struct PaneContextMenuModel {
   func close() {
     closePane()
   }
+
+  /// The Pane with Pane number `number` in this pane's Tab, or `nil` when
+  /// the Tab has no Pane with that number.
+  func pane(number: Int) -> PaneID? {
+    let tab = snapshot().projects.lazy
+      .flatMap(\.worktrees).flatMap(\.tabs)
+      .first { $0.splitTree.contains(paneID) }
+    return tab?.splitTree.leaf(paneNumber: number)
+  }
+
+  func focusPane(number: Int) {
+    guard let target = pane(number: number) else { return }
+    focusPane(target)
+  }
 }
 
-/// Right-click menu for a pane. Hosts the "Mute notifications" toggle
-/// and a "Close" item that tears the pane down; future menu items can be
-/// added here without churning `LazyPaneHost`.
+/// Right-click menu for a pane. Hosts the "Mute notifications" toggle,
+/// the Layout submenu (Focus Pane 1…9 of this pane's Tab), and a "Close"
+/// item that tears the pane down; future menu items can be added here
+/// without churning `LazyPaneHost`.
 ///
 /// The menu reads `HierarchyClient.snapshot()` lazily inside
 /// `PaneContextMenuModel.isMuted` on every render so the checkmark
@@ -53,7 +70,11 @@ struct PaneContextMenu: View {
       // `SplitViewportFeature.closePaneButtonTapped`: a plain pane
       // teardown. Closing the tab's last pane leaves an empty tab, which
       // `SplitViewportView` renders as its "No panes" placeholder.
-      closePane: { try? hierarchy.closePane(paneID, tabID, worktreeID, projectID) }
+      closePane: { try? hierarchy.closePane(paneID, tabID, worktreeID, projectID) },
+      focusPane: { target in
+        try? hierarchy.focusPane(target, tabID, worktreeID, projectID)
+        hierarchy.focusSurfaceView(target)
+      }
     )
   }
 
@@ -65,6 +86,19 @@ struct PaneContextMenu: View {
         "Mute notifications",
         systemImage: model.isMuted ? "checkmark" : "bell.slash"
       )
+    }
+    Divider()
+    // The Layout submenu. Later layout commands (presets, Place) join it.
+    Menu("Layout") {
+      ForEach(Array(SplitTree<PaneID>.paneNumbers), id: \.self) { number in
+        if let id = CommandID.focusPane(number: number) {
+          Button("Focus Pane \(number)") {
+            model.focusPane(number: number)
+          }
+          .appKeyboardShortcut(id)
+          .disabled(model.pane(number: number) == nil)
+        }
+      }
     }
     Divider()
     Button {
