@@ -7,9 +7,9 @@ import GitHubIcon from "../components/GitHubIcon.astro";
 import GitLabIcon from "../components/GitLabIcon.astro";
 import Shot from "../components/Shot.astro";
 import { dictionary, type Locale } from "../i18n";
-import { HERO_AGENTS } from "../lib/agents";
 import { LINKS } from "../lib/links";
 import { THEME_COLUMNS } from "../lib/themes";
+import { TRAIT_STYLES } from "../lib/traits";
 
 interface Props {
   locale: Locale;
@@ -17,7 +17,10 @@ interface Props {
 
 const { locale } = Astro.props;
 const t = dictionary(locale);
-const [ledeStart, ledeEnd] = t.hero.lede.split("{agent}");
+const traits = t.hero.traits.map((trait) => ({ ...trait, ...TRAIT_STYLES[trait.id] }));
+const [ledeStart, ledeEnd] = t.hero.lede
+  .replace("{article}", `<span data-trait-article>${traits[0].article}</span>`)
+  .split("{trait}");
 
 // The colors of the sidebar filter pills in the app.
 const FILTER_COLORS: Record<string, string> = {
@@ -33,7 +36,7 @@ const FILTER_COLORS: Record<string, string> = {
     <section class="pt-12 sm:pt-20">
       <h1 class="display hero-title max-w-[16em]" data-hero-title set:html={t.hero.title} />
       <p class="copy mt-6 max-w-[56em] text-[16px] text-balance">
-        <Fragment set:html={ledeStart} /><span class="rotator" data-rotator={JSON.stringify([t.hero.ledeAgent, ...HERO_AGENTS])}>{t.hero.ledeAgent}</span>{ledeEnd}
+        <Fragment set:html={ledeStart} /><span class="trait" data-traits={JSON.stringify(traits)} style={`--trait:${traits[0].color}`}><svg class="trait-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" set:html={traits[0].icon} /><span class="trait-label">{traits[0].label}</span></span><Fragment set:html={ledeEnd} />
         <span class="block" set:html={t.hero.ledeMore} />
       </p>
       <div class="mt-8">
@@ -308,20 +311,36 @@ const FILTER_COLORS: Record<string, string> = {
 </Base>
 
 <script>
-  // Hero lede: the agent names take turns in the place of the generic term.
-  const rotator = document.querySelector<HTMLElement>("[data-rotator]");
-  if (rotator && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    const names: string[] = JSON.parse(rotator.dataset.rotator ?? "[]");
+  // Hero lede: the product traits take turns in the chip. The chip changes its width in a
+  // transition, so the words after it move, and do not jump.
+  const chip = document.querySelector<HTMLElement>("[data-traits]");
+  if (chip && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    const traits: { article: string; label: string; color: string; icon: string }[] = JSON.parse(
+      chip.dataset.traits ?? "[]",
+    );
+    const label = chip.querySelector<HTMLElement>(".trait-label")!;
+    const icon = chip.querySelector<SVGElement>(".trait-icon")!;
+    const article = document.querySelector<HTMLElement>("[data-trait-article]");
     let index = 0;
     window.setInterval(() => {
       if (document.hidden) return;
-      rotator.dataset.state = "out";
+      chip.dataset.state = "out";
       window.setTimeout(() => {
-        index = (index + 1) % names.length;
-        rotator.textContent = names[index];
-        rotator.dataset.state = "in";
-      }, 260);
-    }, 2600);
+        index = (index + 1) % traits.length;
+        const trait = traits[index];
+        const from = chip.getBoundingClientRect().width;
+        chip.style.width = "";
+        label.textContent = trait.label;
+        icon.innerHTML = trait.icon;
+        if (article) article.textContent = trait.article;
+        chip.style.setProperty("--trait", trait.color);
+        const to = chip.getBoundingClientRect().width;
+        chip.style.width = `${from}px`;
+        void chip.offsetWidth;
+        chip.style.width = `${to}px`;
+        chip.dataset.state = "in";
+      }, 180);
+    }, 2800);
   }
 
   // During a scroll the tiles of the

@@ -15,10 +15,17 @@ export const en = {
   },
   hero: {
     title: "Dance with coding agents.",
-    // `{agent}` is the place of `ledeAgent`; agent names take turns there.
-    lede: 'Work in parallel worktrees, from prompt to merged pull request, <br class="min-[480px]:hidden" />with {agent}.',
-    ledeAgent: "coding agents",
-    ledeMore: "A native macOS development environment, built on libghostty.",
+    // `{trait}` is the place of the trait chip; the traits take turns there, the first one
+    // first. `{article}` is the place of the article of the trait that shows.
+    lede: '{article} {trait} <br class="min-[480px]:hidden" />development environment for coding&nbsp;agents.',
+    traits: [
+      { id: "performance", article: "A", label: "high-performance" },
+      { id: "parallel", article: "A", label: "parallel" },
+      { id: "native", article: "A", label: "native" },
+      { id: "open", article: "An", label: "open-source" },
+      { id: "scriptable", article: "A", label: "scriptable" },
+    ],
+    ledeMore: "Work in worktrees, from prompt to merged pull request.",
     download: "Download for macOS",
     copy: "Copy",
     copied: "Copied",

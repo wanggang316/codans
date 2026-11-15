@@ -13,9 +13,15 @@ export const zh: Dictionary = {
   },
   hero: {
     title: "与 Coding&nbsp;Agent 共舞。",
-    lede: '在多个 worktree 里并行工作，<br class="min-[480px]:hidden" />从提示词到 PR 合并，<br class="min-[480px]:hidden" />支持 {agent}。',
-    ledeAgent: "Coding Agent",
-    ledeMore: 'macOS 原生开发环境，<br class="min-[480px]:hidden" />基于 libghostty 构建。',
+    lede: '{article}Coding Agent 的<br class="min-[480px]:hidden" />{trait}开发环境。',
+    traits: [
+      { id: "performance", article: "", label: "高性能" },
+      { id: "parallel", article: "", label: "并行" },
+      { id: "native", article: "", label: "原生" },
+      { id: "open", article: "", label: "开源" },
+      { id: "scriptable", article: "", label: "可脚本化" },
+    ],
+    ledeMore: "在 worktree 里工作，从提示词到 PR 合并。",
     download: "下载 macOS 版",
     copy: "复制",
     copied: "已复制",
