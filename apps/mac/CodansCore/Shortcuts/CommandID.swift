@@ -80,6 +80,22 @@ public enum CommandID: String, CaseIterable, Hashable, Sendable, Codable, Coding
   case toggleCommandQueue
   case showSessionHistory
 
+  // Window — pane layout: Place the focused Pane in a region (`PlaceRegion`).
+  case placeLeftHalf
+  case placeRightHalf
+  case placeTopHalf
+  case placeBottomHalf
+  case placeLeftThird
+  case placeCenterThird
+  case placeRightThird
+  case placeTopThird
+  case placeMiddleThird
+  case placeBottomThird
+  case placeLeftTwoThirds
+  case placeRightTwoThirds
+  case placeTopTwoThirds
+  case placeBottomTwoThirds
+
   // Sidebar row hotkeys.
   case selectWorktreeAt1
   case selectWorktreeAt2
@@ -165,6 +181,26 @@ extension CommandID {
     case 8: return .focusAgentAt8
     case 9: return .focusAgentAt9
     default: return nil
+    }
+  }
+
+  /// The command that places the focused Pane in `region`.
+  public static func place(_ region: PlaceRegion) -> CommandID {
+    switch region {
+    case .leftHalf: return .placeLeftHalf
+    case .rightHalf: return .placeRightHalf
+    case .topHalf: return .placeTopHalf
+    case .bottomHalf: return .placeBottomHalf
+    case .leftThird: return .placeLeftThird
+    case .centerThird: return .placeCenterThird
+    case .rightThird: return .placeRightThird
+    case .topThird: return .placeTopThird
+    case .middleThird: return .placeMiddleThird
+    case .bottomThird: return .placeBottomThird
+    case .leftTwoThirds: return .placeLeftTwoThirds
+    case .rightTwoThirds: return .placeRightTwoThirds
+    case .topTwoThirds: return .placeTopTwoThirds
+    case .bottomTwoThirds: return .placeBottomTwoThirds
     }
   }
 
