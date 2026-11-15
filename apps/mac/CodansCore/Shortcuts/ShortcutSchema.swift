@@ -468,6 +468,13 @@ extension ShortcutSchema {
       defaultBinding: .init(keyCode: UInt16(kVK_ANSI_9), modifiers: [.command, .option])
     ),
     .init(
+      id: .arrangeLayout,
+      title: "Arrange Layout…",
+      category: .terminal,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_L), modifiers: [.command, .option])
+    ),
+    .init(
       id: .switchToTab1,
       title: "Switch to Tab 1",
       category: .terminal,

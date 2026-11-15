@@ -52,6 +52,7 @@ public enum CommandID: String, CaseIterable, Hashable, Sendable, Codable, Coding
   case focusPane7
   case focusPane8
   case focusPane9
+  case arrangeLayout
 
   // Worktree row operations.
   case revealCurrentWorktreeInFinder
