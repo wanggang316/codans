@@ -214,6 +214,23 @@ struct PaneActionRouterFeature {
       )
       return .none
 
+    case .arrange(let preset):
+      guard let address = hierarchyClient.addressOf(paneID) else { return .none }
+      do {
+        try hierarchyClient.arrangeTab(
+          address.tabID, address.worktreeID, address.projectID, preset, paneID
+        )
+      } catch {
+        return .none
+      }
+      // The tree changed under the pane views; give the source pane first
+      // responder back so typing continues where it was.
+      return .run { [client = hierarchyClient] _ in
+        await MainActor.run {
+          client.focusSurfaceView(paneID)
+        }
+      }
+
     case .toggleSplitZoom:
       toggleSplitZoom(paneID: paneID)
       return .none

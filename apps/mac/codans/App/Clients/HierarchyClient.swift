@@ -458,6 +458,14 @@ nonisolated struct HierarchyClient: Sendable {
       _ tabID: TabID, _ inWorktree: WorktreeID, _ inProject: ProjectID
     ) throws -> Void
 
+  /// Applies a Layout preset to every Pane of the Tab and clears zoom.
+  /// `focus` is the focused Pane; main presets put it in the main area.
+  var arrangeTab:
+    @MainActor @Sendable (
+      _ tabID: TabID, _ inWorktree: WorktreeID, _ inProject: ProjectID,
+      _ preset: LayoutPreset, _ focus: PaneID?
+    ) throws -> Void
+
   /// Resizes a Pane in the SplitTree along the given direction by `amount`.
   /// `amount` is interpreted as a ratio delta (clamped by SplitTree) — the
   /// ghostty RESIZE_SPLIT action carries pixel amounts but codans's
@@ -1093,6 +1101,9 @@ extension HierarchyClient {
       },
       equalizeTabSplits: { tabID, worktreeID, projectID in
         try manager.equalizeTabSplits(tabID, in: worktreeID, in: projectID)
+      },
+      arrangeTab: { tabID, worktreeID, projectID, preset, focus in
+        try manager.arrangeTab(tabID, in: worktreeID, in: projectID, preset: preset, focus: focus)
       },
       resizePane: { paneID, direction, amount in
         try manager.resizePane(paneID, direction: direction, amount: amount)
@@ -2473,6 +2484,7 @@ extension HierarchyClient: DependencyKey {
     addressOf: { _ in fatalError("HierarchyClient.liveValue not configured") },
     moveTab: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     equalizeTabSplits: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    arrangeTab: { _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     resizePane: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     movePane: { _, _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     unzoomTab: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -2608,6 +2620,7 @@ extension HierarchyClient: DependencyKey {
     addressOf: unimplemented("HierarchyClient.addressOf", placeholder: nil),
     moveTab: unimplemented("HierarchyClient.moveTab"),
     equalizeTabSplits: unimplemented("HierarchyClient.equalizeTabSplits"),
+    arrangeTab: unimplemented("HierarchyClient.arrangeTab"),
     resizePane: unimplemented("HierarchyClient.resizePane"),
     movePane: unimplemented("HierarchyClient.movePane"),
     unzoomTab: unimplemented("HierarchyClient.unzoomTab"),
