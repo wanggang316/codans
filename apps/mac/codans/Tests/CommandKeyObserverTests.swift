@@ -25,6 +25,25 @@ struct CommandKeyObserverTests {
 
     #expect(seen.value == held)
   }
+
+  @Test(arguments: [true, false])
+  func commandOptionChangeNotificationReadsTheNewState(held: Bool) {
+    let observer = CommandKeyObserver()
+    if !held {
+      observer.setCommandOptionHeld(true)
+    }
+    let seen = SeenState()
+    withObservationTracking {
+      _ = observer.isCommandOptionHeld
+    } onChange: {
+      MainActor.assumeIsolated { seen.value = observer.isCommandOptionHeld }
+    }
+
+    observer.setCommandOptionHeld(held)
+
+    #expect(seen.value == held)
+    #expect(!observer.isCommandHeld)
+  }
 }
 
 @MainActor

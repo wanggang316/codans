@@ -91,6 +91,7 @@ struct CodansApp: App {
           .environment(appState.workflowCatalog)
           .environment(\.workflowEngine, appState.workflowEngine)
           .environment(commandKeyObserver)
+          .environment(mainWindowKeyObserver)
           .environment(\.resolvedShortcuts, appState.shortcutsStore.resolved)
           // Redirect ⌘W (claimed by AppKit's File ▸ Close) away from tearing
           // down the single main window. ⌘W escalates pane → tab → window:
