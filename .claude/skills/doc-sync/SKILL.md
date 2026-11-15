@@ -102,7 +102,7 @@ launchd（`~/Library/LaunchAgents/dev.codans.doc-sync.plist`，加载后每晚 0
 执行时严格按序：
 
 1. **取当天 diff**：`git log --since=midnight --oneline` 列出当日提交；`git diff --stat <first-commit>^..HEAD` 取文件清单与摘要，必要时 `git diff <first-commit>^..HEAD -- <path>` 看具体改动。无当日提交则直接跳到第 6 步。
-2. **映射受影响的 docs**：按改动的子系统 / 路径，找出 `docs/` 下对应被描述的文档（一个改动的 feature 对应它的 design-doc / product-spec）。只纳入被波及的文档。
+2. **映射受影响的 docs**：按改动的子系统 / 路径，找出 `docs/` 下对应被描述的文档（一个改动的 feature 对应它的 领域页 / product.md）。只纳入被波及的文档。
 3. **逐 doc 跑三类检测**：对每篇映射到的文档跑 §2 的 a/b/c；对每条引用核 liveness（必要时用 Grep/Read 回查代码确认符号是否可达）。
 4. **分类**：把每条发现归入 **apply-safe**（§3 低风险事实性）或 **propose**（实质改动）。
 5. **落盘 + 开 PR**：
