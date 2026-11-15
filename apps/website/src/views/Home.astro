@@ -304,7 +304,8 @@ const FILTER_COLORS: Record<string, string> = {
 
 <script>
   // The hero title goes out while it moves under the header. During a scroll the tiles of the
-  // mark flicker in rounds; a round that has started always plays to its end.
+  // mark flicker in rounds; a round that has started always plays to its end. A faster scroll
+  // makes the flicker faster.
   const header = document.querySelector<HTMLElement>(".site-header");
   const heroTitle = document.querySelector<HTMLElement>("[data-hero-title]");
   const brand = header?.querySelector<HTMLElement>(".brand");
@@ -313,6 +314,10 @@ const FILTER_COLORS: Record<string, string> = {
     let sparking = false;
     let ended = 0;
     let lastScroll = 0;
+    let lastY = window.scrollY;
+    let speed = 0;
+    let rate = 1;
+    let settleTimer = 0;
     let ticking = false;
     const update = () => {
       ticking = false;
@@ -330,13 +335,35 @@ const FILTER_COLORS: Record<string, string> = {
         ticking = true;
         window.requestAnimationFrame(update);
       }
-      lastScroll = performance.now();
-      if (!sparking && !still) startRound();
+      if (still) return;
+      // Scroll speed in pixels per second, smoothed. 0 gives rate 0.6; 2400 and more give rate 3.
+      const now = performance.now();
+      const elapsed = now - lastScroll;
+      const moved = Math.abs(window.scrollY - lastY);
+      if (elapsed > 0 && elapsed < 250) speed = speed * 0.7 + ((moved / elapsed) * 1000) * 0.3;
+      else speed = 0;
+      lastScroll = now;
+      lastY = window.scrollY;
+      rate = Math.min(3, 0.6 + speed / 1000);
+      if (!sparking) startRound();
+      applyRate();
+      // After the scroll stops, a slow round goes on at the usual speed.
+      window.clearTimeout(settleTimer);
+      settleTimer = window.setTimeout(() => {
+        rate = Math.max(rate, 1);
+        applyRate();
+      }, 160);
+    };
+    const applyRate = () => {
+      for (const animation of brand.getAnimations({ subtree: true })) {
+        if ((animation as CSSAnimation).animationName === "logo-spark-once") animation.updatePlaybackRate(rate);
+      }
     };
     const startRound = () => {
       sparking = true;
       ended = 0;
       brand.dataset.spark = "";
+      window.requestAnimationFrame(applyRate);
     };
     const tiles = brand.querySelectorAll(".logo-tile").length;
     brand.addEventListener("animationend", (event) => {
