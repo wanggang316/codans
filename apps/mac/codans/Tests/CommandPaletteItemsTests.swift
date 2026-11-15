@@ -288,4 +288,67 @@ struct CommandPaletteItemsTests {
     )
     #expect(id == nil)
   }
+
+  // MARK: - Layout presets
+
+  /// A selected Tab with `paneCount` Panes in one row of splits.
+  private static func layoutFixture(paneCount: Int) throws -> (Catalog, HierarchySelection, [PaneID]) {
+    let paneIDs = (0..<paneCount).map { _ in PaneID() }
+    var tree = SplitTree<PaneID>(leaf: paneIDs[0])
+    for index in 1..<paneCount {
+      tree = try tree.inserting(paneIDs[index], at: paneIDs[index - 1], direction: .right)
+    }
+    let tab = Tab(splitTree: tree, panes: paneIDs.map { Pane(id: $0, workingDirectory: "/tmp") })
+    var worktree = Worktree(name: "wt", path: "/tmp/p/wt", branch: "main")
+    worktree.tabs = [tab]
+    worktree.selectedTabID = tab.id
+    var project = Project(name: "P", rootPath: "/tmp/p", gitRoot: "/tmp/p")
+    project.worktrees = [worktree]
+    let selection = HierarchySelection(projectID: project.id, worktreeID: worktree.id)
+    return (Catalog(projects: [project]), selection, paneIDs)
+  }
+
+  private static func layoutItems(
+    paneCount: Int, precise: Bool
+  ) throws -> [CommandPaletteItem] {
+    let (catalog, selection, paneIDs) = try layoutFixture(paneCount: paneCount)
+    return withEmptySettings {
+      CommandPaletteItems.build(
+        selection: selection, catalog: catalog, focusedPaneID: paneIDs[0], paneFocusPrecise: precise)
+    }.filter { $0.id.hasPrefix("pane.layout.") }
+  }
+
+  @Test
+  func layoutItemsListThePresetsForThePaneCount() throws {
+    let items = try Self.layoutItems(paneCount: 2, precise: true)
+    #expect(
+      items.map(\.title) == [
+        "Layout: Columns 1:1", "Layout: Columns 2:1", "Layout: Columns 1:2",
+        "Layout: Rows 1:1", "Layout: Rows 2:1", "Layout: Rows 1:2",
+      ])
+    let twoToOne = try #require(items.first { $0.id == "pane.layout.columns-2-1" })
+    #expect(twoToOne.kind == .paneAction(.arrange(preset: .columnsTwoToOne)))
+
+    let five = try Self.layoutItems(paneCount: 5, precise: true)
+    #expect(
+      five.map(\.title) == [
+        "Layout: Columns", "Layout: Rows", "Layout: Grid 3×2", "Layout: Main Left", "Layout: Main Top",
+      ])
+  }
+
+  @Test
+  func onePaneTabHasNoLayoutItems() throws {
+    #expect(try Self.layoutItems(paneCount: 1, precise: true).isEmpty)
+  }
+
+  @Test
+  func mainPresetsNeedAPreciseFocusedPane() throws {
+    let precise = try Self.layoutItems(paneCount: 3, precise: true)
+    #expect(precise.map(\.id).contains("pane.layout.main-left"))
+    #expect(precise.count == 6)
+
+    let fallback = try Self.layoutItems(paneCount: 3, precise: false)
+    #expect(
+      fallback.map(\.id) == ["pane.layout.columns", "pane.layout.rows"])
+  }
 }
