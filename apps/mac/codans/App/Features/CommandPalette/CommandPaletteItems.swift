@@ -84,8 +84,54 @@ enum CommandPaletteItems {
         items.append(contentsOf: paneFocusDependentItems())
       }
       items.append(contentsOf: paneTabScopedItems())
+      items.append(
+        contentsOf: layoutItems(
+          paneCount: paneCount(of: focusedPaneID, in: catalog), includeMain: paneFocusPrecise))
     }
     return items
+  }
+
+  /// Pane count of the Tab that holds `paneID`; 0 when the pane is unknown.
+  private static func paneCount(of paneID: PaneID, in catalog: Catalog) -> Int {
+    for project in catalog.projects {
+      for worktree in project.worktrees {
+        if let tab = worktree.tabs.first(where: { $0.splitTree.contains(paneID) }) {
+          return tab.splitTree.leaves().count
+        }
+      }
+    }
+    return 0
+  }
+
+  /// One "Layout: <preset>" item per Layout preset for the Tab's Pane count.
+  /// Main presets put the focused Pane in the main area, so they are offered
+  /// only when the focused Pane is known exactly; a fallback pane would put
+  /// the wrong Pane there.
+  private static func layoutItems(paneCount: Int, includeMain: Bool) -> [CommandPaletteItem] {
+    LayoutPreset.presets(forPaneCount: paneCount)
+      .filter { includeMain || !$0.isMain }
+      .map { preset in
+        let title = preset.title(forPaneCount: paneCount)
+        return CommandPaletteItem(
+          id: "pane.layout.\(preset.id)",
+          title: "Layout: \(title)",
+          searchText: "pane layout arrange \(title)",
+          icon: layoutIcon(preset),
+          kind: .paneAction(.arrange(preset: preset))
+        )
+      }
+  }
+
+  private static func layoutIcon(_ preset: LayoutPreset) -> String {
+    switch preset {
+    case .columns, .columnsTwoToOne, .columnsOneToTwo: "rectangle.split.3x1"
+    case .rows, .rowsTwoToOne, .rowsOneToTwo: "rectangle.split.1x2"
+    case .grid: "square.grid.2x2"
+    case .mainLeft: "rectangle.lefthalf.inset.filled"
+    case .mainRight: "rectangle.righthalf.inset.filled"
+    case .mainTop: "rectangle.tophalf.inset.filled"
+    case .mainBottom: "rectangle.bottomhalf.inset.filled"
+    }
   }
 
   /// One "Switch to Worktree" item per live Worktree across every Project,
