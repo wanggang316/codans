@@ -82,6 +82,7 @@ enum CommandPaletteItems {
       items.append(contentsOf: windowItems(focusedPaneID: focusedPaneID))
       if paneFocusPrecise {
         items.append(contentsOf: paneFocusDependentItems())
+        items.append(contentsOf: focusPaneNumberItems(focusedPaneID: focusedPaneID, catalog: catalog))
       }
       items.append(contentsOf: paneTabScopedItems())
     }
@@ -768,6 +769,29 @@ enum CommandPaletteItems {
         kind: .paneAction(.closePane)
       ),
     ]
+  }
+
+  /// One "Focus Pane N" item per Pane of the focused Pane's Tab that has a
+  /// Pane number (the first nine in Pane order). Precise-focus only, like
+  /// the directional focus items: the Tab comes from the focused Pane.
+  private static func focusPaneNumberItems(
+    focusedPaneID: PaneID, catalog: Catalog
+  ) -> [CommandPaletteItem] {
+    let tab = catalog.projects.lazy
+      .flatMap(\.worktrees).flatMap(\.tabs)
+      .first { $0.splitTree.contains(focusedPaneID) }
+    guard let tab else { return [] }
+    let leaves = tab.splitTree.leaves()
+    return SplitTree<PaneID>.paneNumbers.prefix(leaves.count).map { number in
+      CommandPaletteItem(
+        id: "pane.focus.number.\(number)",
+        title: "Focus Pane \(number)",
+        searchText: "pane focus number \(number)",
+        icon: "\(number).square",
+        commandID: CommandID.focusPane(number: number),
+        kind: .paneAction(.focusPane(number: number))
+      )
+    }
   }
 
   /// Window-scoped commands. `New Window` and `Show Tab Overview` were

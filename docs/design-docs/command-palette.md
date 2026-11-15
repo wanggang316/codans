@@ -129,7 +129,7 @@ apps/mac/codans/App/Features/CommandPalette/
 2. **选中 Worktree 时：** Git viewer toggle（"Toggle Git Viewer"——现打开外部客户端，见上文 `Kind` 段标注）、editor-open（每个已装 `EditorDescriptor` 一条）、refresh、delete、reveal in Finder，以及该 Project 的 `ProjectSettings.scripts` 与 `GeneralSettings.globalScripts`（脚本经 `SettingsWriter` 读实时快照，切到别的 Project 即重建并暴露那个 Project 的脚本）。Tag 过滤命令未进面板——侧栏 Tag 过滤 UI 当前隐藏。
 3. **聚焦 Pane 时：** 需要源 pane 的 `PaneActionRequest` / `WindowActionRequest`。若无聚焦 pane，这些项被略去而非以合成 paneID 发出。
 
-**精确聚焦的区分是耐久不变量。** 依赖"哪个 split 聚焦"的 pane 动作（split / focus 导航 / zoom）**仅当 pane 经 Ghostty 键绑定管线带入（精确聚焦）时才发出**；菜单触发的打开会略去它们，使用户绝不会看到一个"Focus Pane Left"从错误的 pane 静默导航。Tab 域动作（New Tab / Close Tab / Equalize）与 Window 域动作只需当前 tab 里任一 leaf 即可解析（同 tab 每个 leaf 映射到同一 NSWindow），故 fallback 解析的 paneID 足矣，无论聚焦是否精确都安全。
+**精确聚焦的区分是耐久不变量。** 依赖"哪个 split 聚焦"的 pane 动作（split / focus 导航 / zoom）**仅当 pane 经 Ghostty 键绑定管线带入（精确聚焦）时才发出**；菜单触发的打开会略去它们，使用户绝不会看到一个"Focus Pane Left"从错误的 pane 静默导航。Focus Pane N（⌘⌥N）也只在精确聚焦时发出，且只列聚焦 Pane 所在 Tab 已有的前九个 Pane。Tab 域动作（New Tab / Close Tab / Equalize）与 Window 域动作只需当前 tab 里任一 leaf 即可解析（同 tab 每个 leaf 映射到同一 NSWindow），故 fallback 解析的 paneID 足矣，无论聚焦是否精确都安全。
 
 `hiddenWhenQueryEmpty` 把破坏性命令（Delete Worktree / Close Tab / Close Window / Quit）挡在静息列表外——只有当用户键入命中它们的非空 query 时才出现，绝不在"刚打开面板"的默认列表里露面。
 
