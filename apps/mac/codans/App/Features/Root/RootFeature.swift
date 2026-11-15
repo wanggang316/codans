@@ -2599,7 +2599,7 @@ struct RootFeature {
   private func toggleLayoutPicker(_ state: inout State, sourcePaneID: PaneID?) -> Effect<Action> {
     if let picker = state.layoutPicker {
       state.layoutPicker = nil
-      if isShown(picker.tabID, state: state) {
+      if isShown(picker.tabID) {
         return refocusSurface(picker.paneID)
       }
     }
@@ -2623,7 +2623,7 @@ struct RootFeature {
   ) -> Effect<Action> {
     guard let picker = state.layoutPicker else { return .none }
     state.layoutPicker = nil
-    guard isShown(picker.tabID, state: state) else { return .none }
+    guard isShown(picker.tabID) else { return .none }
     let paneID = picker.paneID
     switch delegate {
     case .apply(let preset):
@@ -2642,12 +2642,15 @@ struct RootFeature {
     }
   }
 
-  /// `true` when `tabID` is the selected Tab of the selected Worktree, read
-  /// from the live catalog.
-  private func isShown(_ tabID: TabID, state: State) -> Bool {
-    hierarchyClient.snapshot()
-      .projects.first(where: { $0.id == state.selection.projectID })?
-      .worktrees.first(where: { $0.id == state.selection.worktreeID })?
+  /// `true` when `tabID` is the selected Tab of the Worktree the detail area
+  /// shows. Reads Project, Worktree, and Tab from the live catalog only: a
+  /// sidebar click writes the catalog first and reaches `state.selection`
+  /// later through the selection stream, so `state.selection` can still name
+  /// the Worktree the user just left.
+  private func isShown(_ tabID: TabID) -> Bool {
+    let catalog = hierarchyClient.snapshot()
+    return catalog.projects.first(where: { $0.id == catalog.displayedSelectedProjectID })?
+      .worktrees.first(where: { $0.id == catalog.displayedSelectedWorktreeID })?
       .selectedTabID == tabID
   }
 
