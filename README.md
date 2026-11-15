@@ -5,7 +5,7 @@
 <h1 align="center">Codans</h1>
 
 <p align="center">
-  <strong>The terminal for parallel coding agents.</strong>
+  <strong>The development environment for working with coding agents.</strong>
 </p>
 
 <p align="center">
