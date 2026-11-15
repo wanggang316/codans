@@ -19,6 +19,13 @@ similar window manager.
 2. The third and two-thirds regions have no default chord. The user can bind
    them in Settings → Shortcuts, and they are in the Command Palette.
 
+## Implementation note
+
+`⌃⌘↑` and `⌃⌘↓` are already the default chords of Select Previous / Next
+Worktree (ADR 0002). Two commands cannot share a default chord, so the top and
+bottom halves ship with no default chord, like the thirds. Only the left and
+right halves have default chords: `⌃⌘←` and `⌃⌘→`.
+
 ## Reconsider when
 
 A chord group for thirds is found that has no conflict with the system, with
