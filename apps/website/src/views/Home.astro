@@ -7,6 +7,7 @@ import GitHubIcon from "../components/GitHubIcon.astro";
 import GitLabIcon from "../components/GitLabIcon.astro";
 import Shot from "../components/Shot.astro";
 import { dictionary, type Locale } from "../i18n";
+import { HERO_AGENTS } from "../lib/agents";
 import { LINKS } from "../lib/links";
 import { THEME_COLUMNS } from "../lib/themes";
 
@@ -16,6 +17,7 @@ interface Props {
 
 const { locale } = Astro.props;
 const t = dictionary(locale);
+const [ledeStart, ledeEnd] = t.hero.lede.split("{agent}");
 
 // The colors of the sidebar filter pills in the app.
 const FILTER_COLORS: Record<string, string> = {
@@ -30,7 +32,10 @@ const FILTER_COLORS: Record<string, string> = {
   <div class="wrap">
     <section class="pt-12 sm:pt-20">
       <h1 class="display hero-title max-w-[16em]" data-hero-title set:html={t.hero.title} />
-      <p class="copy mt-6 max-w-[46em] text-[16px]">{t.hero.lede}</p>
+      <p class="copy mt-6 max-w-[46em] text-[16px]">
+        <Fragment set:html={ledeStart} /><span class="rotator" data-rotator={JSON.stringify([t.hero.ledeAgent, ...HERO_AGENTS])}>{t.hero.ledeAgent}</span>{ledeEnd}
+        <span class="block">{t.hero.ledeMore}</span>
+      </p>
       <div class="mt-8">
         <Download locale={locale} />
       </div>
@@ -303,6 +308,22 @@ const FILTER_COLORS: Record<string, string> = {
 </Base>
 
 <script>
+  // Hero lede: the agent names take turns in the place of the generic term.
+  const rotator = document.querySelector<HTMLElement>("[data-rotator]");
+  if (rotator && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    const names: string[] = JSON.parse(rotator.dataset.rotator ?? "[]");
+    let index = 0;
+    window.setInterval(() => {
+      if (document.hidden) return;
+      rotator.dataset.state = "out";
+      window.setTimeout(() => {
+        index = (index + 1) % names.length;
+        rotator.textContent = names[index];
+        rotator.dataset.state = "in";
+      }, 260);
+    }, 2600);
+  }
+
   // During a scroll the tiles of the
   // mark flicker in rounds; a round that has started always plays to its end. A faster scroll
   // makes the flicker faster.

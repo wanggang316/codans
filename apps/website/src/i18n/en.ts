@@ -15,7 +15,10 @@ export const en = {
   },
   hero: {
     title: "Dance with coding agents.",
-    lede: "A native macOS development environment. Run Claude Code, Codex, and other agents in parallel, each task in its own worktree, from prompt to merged pull request.",
+    // `{agent}` is the place of `ledeAgent`; agent names take turns there.
+    lede: "A native macOS development environment for {agent}.",
+    ledeAgent: "coding agents",
+    ledeMore: "Run tasks in parallel worktrees, see what each agent is doing, and merge the pull request.",
     download: "Download for macOS",
     copy: "Copy",
     copied: "Copied",
