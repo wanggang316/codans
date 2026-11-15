@@ -1,0 +1,7 @@
+Copy Worktree Path	⇧⌘C	enabled=false
+Pin Worktree	⌥⌘P	enabled=false
+Select Previous Worktree	⌃⌘[	enabled=true
+Select Next Worktree	⌃⌘]	enabled=true
+Archive Worktree	⌃⌘glyph23	enabled=false
+Delete Worktree	⌃⇧⌘glyph23	enabled=false
+Show Archived Worktrees	⌃⌘A	enabled=false

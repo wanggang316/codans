@@ -1,0 +1,18 @@
+Left Half	⌃⌘glyph100	enabled=false
+Right Half	⌃⌘glyph101	enabled=false
+Top Half	⌃⌘glyph104	enabled=false
+Bottom Half	⌃⌘glyph106	enabled=false
+---
+Left Third		enabled=false
+Center Third		enabled=false
+Right Third		enabled=false
+---
+Top Third		enabled=false
+Middle Third		enabled=false
+Bottom Third		enabled=false
+---
+Left Two Thirds		enabled=false
+Right Two Thirds		enabled=false
+---
+Top Two Thirds		enabled=false
+Bottom Two Thirds		enabled=false
