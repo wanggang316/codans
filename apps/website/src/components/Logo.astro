@@ -1,6 +1,7 @@
 ---
-// The Codans mark: six tiles on a transparent background. The tiles flicker, each with its own
-// period, while the pointer is over the brand link or the link has the `data-spark` attribute.
+// The Codans mark: six tiles on a transparent background. While the pointer is over the brand
+// link, the tiles flicker, each with its own period. While the link has the `data-spark`
+// attribute, each tile flickers one time and comes back to full strength.
 interface Props {
   size?: number;
 }
@@ -8,12 +9,12 @@ interface Props {
 const { size = 24 } = Astro.props;
 
 const TILES = [
-  { x: 0, y: 0, fill: "#0065ff", delay: -0.3, duration: 3.1 },
-  { x: 0, y: 116, fill: "#073084", delay: -1.7, duration: 3.57 },
-  { x: 122, y: 116, fill: "#49bff0", delay: -0.8, duration: 4.04 },
-  { x: 0, y: 234, fill: "#064bd8", delay: -2.9, duration: 4.51 },
-  { x: 122, y: 234, fill: "#007cff", delay: -1.2, duration: 4.98 },
-  { x: 244, y: 234, fill: "#b3ddf9", delay: -3.8, duration: 5.45 },
+  { x: 0, y: 0, fill: "#0065ff", delay: -0.3, duration: 3.1, onceDelay: 0.1, onceDuration: 0.8 },
+  { x: 0, y: 116, fill: "#073084", delay: -1.7, duration: 3.57, onceDelay: 0.3, onceDuration: 0.9 },
+  { x: 122, y: 116, fill: "#49bff0", delay: -0.8, duration: 4.04, onceDelay: 0, onceDuration: 0.75 },
+  { x: 0, y: 234, fill: "#064bd8", delay: -2.9, duration: 4.51, onceDelay: 0.2, onceDuration: 1 },
+  { x: 122, y: 234, fill: "#007cff", delay: -1.2, duration: 4.98, onceDelay: 0.35, onceDuration: 0.85 },
+  { x: 244, y: 234, fill: "#b3ddf9", delay: -3.8, duration: 5.45, onceDelay: 0.05, onceDuration: 0.95 },
 ];
 ---
 
@@ -28,7 +29,7 @@ const TILES = [
         height="106"
         rx="18"
         fill={tile.fill}
-        style={`--delay:${tile.delay}s;--duration:${tile.duration}s`}
+        style={`--delay:${tile.delay}s;--duration:${tile.duration}s;--once-delay:${tile.onceDelay}s;--once-duration:${tile.onceDuration}s`}
       />
     ))
   }
