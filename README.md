@@ -5,7 +5,7 @@
 <h1 align="center">Codans</h1>
 
 <p align="center">
-  <strong>Run your coding agents in parallel, in one window.</strong>
+  <strong>The terminal for parallel coding agents.</strong>
 </p>
 
 <p align="center">
@@ -64,9 +64,9 @@ Codans reads pull requests through the `gh` and `glab` CLIs that you are already
 
 GitLab works on gitlab.com and on self-managed instances.
 
-### Many repositories, local or remote, in one place
+### Work across repositories and machines
 
-- **Workspaces**: put several projects in one space and work on them like a monorepo: one branch name, one checkout in each project, one place for your agents.
+- **Workspaces**: put several projects in one space and work on them like a monorepo: one branch name and one checkout in each project, so one agent can change all of them.
 - **Remote projects**: work on a project on another machine as if it were local. Its terminals run over a persistent SSH session.
 - **Filters**: cut the sidebar down to remote projects, workspaces, worktrees with a pull request, or worktrees with unread notifications.
 
