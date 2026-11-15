@@ -2,9 +2,9 @@ import type { Dictionary } from "./en";
 
 export const zh: Dictionary = {
   meta: {
-    title: "Codans：并行运行你的 Coding Agent",
+    title: "Codans：与 Coding Agent 协作的开发环境",
     description:
-      "并行运行 Coding Agent 的 macOS 原生终端：每个任务一个 worktree，每个 Agent 一个 pane，哪些 Agent 在等你一眼可见。",
+      "与 Coding Agent 协作的 macOS 原生开发环境：每个任务一个 worktree，每个 Agent 一个 pane，哪些 Agent 在等你一眼可见。",
     changelogTitle: "更新日志：Codans",
   },
   nav: {
@@ -12,7 +12,7 @@ export const zh: Dictionary = {
     github: "GitHub",
   },
   hero: {
-    title: "并行运行 Coding Agent 的终端。",
+    title: '与 Coding Agent <span class="whitespace-nowrap">协作的开发环境。</span>',
     lede: "Codans 是为使用 Coding Agent 工作的人做的 macOS 原生终端。每个任务一个 worktree，每个 Agent 一个 pane，哪些在工作、哪些在等你，一眼可见。",
     download: "下载 macOS 版",
     copy: "复制",
