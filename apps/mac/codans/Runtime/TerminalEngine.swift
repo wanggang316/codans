@@ -128,6 +128,10 @@ final class TerminalEngine {
   /// Whether sweeps may reclaim at all, read at every sweep so a settings
   /// change applies without a relaunch. The app injects the user setting.
   var isReclaimEnabled: @MainActor () -> Bool = { true }
+  /// Effective chord of an app command for the surfaces' menus. The app
+  /// injects a reader of its shortcut registry; read when a menu opens, so a
+  /// rebinding shows without a relaunch.
+  var menuKeyEquivalent: @MainActor (CommandID) -> MenuKeyEquivalent? = { _ in nil }
   /// App-level veto, consulted per candidate: the agent store and command
   /// queue live above the Runtime layer, so the app injects what it knows.
   var reclaimVeto: @MainActor (PaneID) -> Bool = { _ in false }
@@ -392,6 +396,9 @@ final class TerminalEngine {
     // split pane keeps input without siblings stealing it. Additive only.
     surface.view.shouldClaimFocus = { [weak self] in
       self?.hierarchy.lastFocusedPane(in: tabID) == pane.id
+    }
+    surface.view.menuKeyEquivalent = { [weak self] command in
+      self?.menuKeyEquivalent(command)
     }
     // Right-click menu items raise PaneActionRequest values directly on the
     // view; lift them onto the engine's event stream so they reach

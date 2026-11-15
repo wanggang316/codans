@@ -8,6 +8,34 @@ import CodansCore
 
 @MainActor
 struct ShortcutDisplayTests {
+  // MARK: - Menu key equivalents
+
+  /// The Place menus show the effective chord: the default, a user rebinding, or
+  /// nothing for a region without a chord or with a disabled one.
+  @Test
+  func menuKeyEquivalentFollowsTheResolvedChord() {
+    let defaults = ShortcutResolver.resolve(overrides: ShortcutOverrideStore())
+    let left = ShortcutDisplay.menuKeyEquivalent(for: .placeLeftHalf, in: defaults)
+    let leftArrow = String(KeyEquivalent.leftArrow.character)
+    #expect(left == MenuKeyEquivalent(key: leftArrow, modifiers: [.command, .control]))
+    #expect(ShortcutDisplay.menuKeyEquivalent(for: .placeCenterThird, in: defaults) == nil)
+
+    let rebound: ResolvedShortcutMap = [
+      .placeCenterThird: ResolvedShortcut(
+        id: .placeCenterThird,
+        binding: ShortcutBinding(keyCode: UInt16(kVK_ANSI_C), modifiers: [.command, .shift]),
+        isEnabled: true, source: .userOverride),
+      .placeLeftHalf: ResolvedShortcut(
+        id: .placeLeftHalf,
+        binding: ShortcutBinding(keyCode: UInt16(kVK_LeftArrow), modifiers: [.command, .control]),
+        isEnabled: false, source: .userOverride),
+    ]
+    #expect(
+      ShortcutDisplay.menuKeyEquivalent(for: .placeCenterThird, in: rebound)
+        == MenuKeyEquivalent(key: "c", modifiers: [.command, .shift]))
+    #expect(ShortcutDisplay.menuKeyEquivalent(for: .placeLeftHalf, in: rebound) == nil)
+  }
+
   // MARK: - Modifier glyphs
 
   @Test

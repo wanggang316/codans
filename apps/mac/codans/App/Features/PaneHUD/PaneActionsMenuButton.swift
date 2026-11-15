@@ -104,21 +104,9 @@ struct PaneActionsMenuButton: View {
   /// Display only: an item of a pop-up menu answers its key equivalent
   /// only while the menu is open. The main menu's item does the work.
   private func showShortcut(_ command: CommandID, on item: NSMenuItem) {
-    guard let shortcut = resolvedShortcuts[command], shortcut.isEnabled,
-      let binding = shortcut.binding,
-      let key = ShortcutDisplay.keyEquivalent(for: binding.keyCode)
-    else { return }
-    item.keyEquivalent = String(key.character)
-    item.keyEquivalentModifierMask = Self.modifierFlags(binding.modifiers)
-  }
-
-  private static func modifierFlags(_ mask: ModifierMask) -> NSEvent.ModifierFlags {
-    var flags: NSEvent.ModifierFlags = []
-    if mask.contains(.command) { flags.insert(.command) }
-    if mask.contains(.option) { flags.insert(.option) }
-    if mask.contains(.control) { flags.insert(.control) }
-    if mask.contains(.shift) { flags.insert(.shift) }
-    return flags
+    guard let chord = ShortcutDisplay.menuKeyEquivalent(for: command, in: resolvedShortcuts) else { return }
+    item.keyEquivalent = chord.key
+    item.keyEquivalentModifierMask = chord.modifiers
   }
 }
 

@@ -22,6 +22,8 @@ import SwiftUI
 ///   the user-defined Project + Global **commands** (merged in at the bottom).
 /// - **Tab**: tab lifecycle (New Tab / Close Tab) plus pane split / focus /
 ///   rename / switch.
+/// - **Window ▸ Layout**: Place the focused Pane in a half, a third, or two
+///   thirds of the current Tab.
 ///
 /// Every built-in chord is sourced from the shortcut registry
 /// (`ShortcutSchema.app` ⊕ `ShortcutsStore.overrides`) via the
@@ -258,6 +260,25 @@ struct MainWindowCommands: Commands {
       // User-defined Project + Global commands, merged in from the former
       // standalone "Commands" menu.
       commandsMenuContent()
+    }
+
+    // MARK: Window — Layout of the current Tab's Panes
+    // Place moves the focused Pane into a region (GLOSSARY: Place). The items
+    // live in the menu bar so their chords fire while a terminal Pane holds
+    // first responder (see the note on this type). A one-Pane Tab ignores them.
+    CommandGroup(after: .windowArrangement) {
+      Menu("Layout") {
+        ForEach(Array(PlaceRegion.groups.enumerated()), id: \.offset) { index, group in
+          if index > 0 { Divider() }
+          ForEach(group, id: \.self) { region in
+            Button(region.title) {
+              store()?.send(.placeFocusedPaneInCurrentTabRequested(region: region))
+            }
+            .appKeyboardShortcut(.place(region), in: shortcuts)
+          }
+        }
+      }
+      .disabled(!hasActiveWorktree)
     }
 
     // MARK: Tab — tab / pane management

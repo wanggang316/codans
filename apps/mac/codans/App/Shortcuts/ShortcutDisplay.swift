@@ -1,3 +1,4 @@
+import AppKit
 import Carbon.HIToolbox
 import SwiftUI
 import CodansCore
@@ -49,6 +50,23 @@ public enum ShortcutDisplay {
     guard let resolved = shortcuts[id], resolved.isEnabled, let binding = resolved.binding
     else { return nil }
     return chord(for: binding)
+  }
+
+  /// The chord bound to `id` in the form an `NSMenuItem` shows it, or `nil` when the
+  /// command has no binding, the user disabled it, or the key has no key equivalent.
+  /// Display only: an item of a pop-up menu answers its key equivalent only while the
+  /// menu is open.
+  static func menuKeyEquivalent(for id: CommandID, in shortcuts: ResolvedShortcutMap) -> MenuKeyEquivalent? {
+    guard let resolved = shortcuts[id], resolved.isEnabled,
+      let binding = resolved.binding,
+      let key = keyEquivalent(for: binding.keyCode)
+    else { return nil }
+    var flags: NSEvent.ModifierFlags = []
+    if binding.modifiers.contains(.command) { flags.insert(.command) }
+    if binding.modifiers.contains(.option) { flags.insert(.option) }
+    if binding.modifiers.contains(.control) { flags.insert(.control) }
+    if binding.modifiers.contains(.shift) { flags.insert(.shift) }
+    return MenuKeyEquivalent(key: String(key.character), modifiers: flags)
   }
 
   /// Tooltip text for a control that triggers `id`: `description` followed by the resolved
