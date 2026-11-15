@@ -2,7 +2,7 @@ import type { Dictionary } from "./en";
 
 export const zh: Dictionary = {
   meta: {
-    title: "Codans：Coding Agent 的开发环境",
+    title: "Codans：Coding Agent 的 macOS 开发环境",
     description:
       "Codans 是 macOS 原生开发环境，支持 Claude Code、Codex 和所有跑在终端里的 Agent。在独立的 worktree 里开始任务，看清每个 Agent 的状态，直到 PR 合并。",
     changelogTitle: "更新日志：Codans",
