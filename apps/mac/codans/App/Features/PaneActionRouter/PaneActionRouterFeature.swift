@@ -203,6 +203,9 @@ struct PaneActionRouterFeature {
     case .gotoSplit(let direction):
       return gotoSplit(from: paneID, direction: direction)
 
+    case .focusPane(let number):
+      return focusPane(number: number, inTabOf: paneID)
+
     case .resizeSplit(let direction, let amount):
       try? hierarchyClient.resizePane(paneID, direction, amount)
       return .none
@@ -357,15 +360,34 @@ struct PaneActionRouterFeature {
       neighborID = tab.splitTree.focusTarget(spatial: .right, from: paneID)
     }
     guard let neighborID else { return .none }
+    return focus(neighborID, at: address)
+  }
+
+  /// Focuses the Pane with Pane number `number` in the Tab of `paneID`. A number with no
+  /// Pane is a no-op.
+  private func focusPane(number: Int, inTabOf paneID: PaneID) -> Effect<Action> {
+    guard let address = hierarchyClient.addressOf(paneID) else { return .none }
+    guard
+      let tab = findTab(
+        tabID: address.tabID, worktreeID: address.worktreeID,
+        projectID: address.projectID, in: hierarchyClient.snapshot()
+      ),
+      let targetID = tab.splitTree.leaf(paneNumber: number)
+    else { return .none }
+    return focus(targetID, at: address)
+  }
+
+  /// Focuses `targetID` in the catalog, then makes its surface view first responder.
+  private func focus(_ targetID: PaneID, at address: PaneAddress) -> Effect<Action> {
     try? hierarchyClient.focusPane(
-      neighborID, address.tabID, address.worktreeID, address.projectID
+      targetID, address.tabID, address.worktreeID, address.projectID
     )
     // Mirror `newSplit`'s pattern: dispatch makeFirstResponder async so
     // the view tree has settled (zoom toggle / dim overlay diff) before
     // we steal first-responder status.
     return .run { [client = hierarchyClient] _ in
       await MainActor.run {
-        client.focusSurfaceView(neighborID)
+        client.focusSurfaceView(targetID)
       }
     }
   }
