@@ -262,17 +262,39 @@
       transform: scale(0.82);
     }
   }
-  .rotator {
-    display: inline-block;
-    white-space: nowrap;
+  /* The trait chip in the hero lede. */
+  .trait {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    box-sizing: border-box;
+    padding: 1px 9px 1px 7px;
+    overflow: hidden;
+    vertical-align: bottom;
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--trait) 13%, transparent);
     color: var(--ink);
+    white-space: nowrap;
     transition:
-      opacity 0.25s ease,
-      transform 0.25s ease;
+      width 0.35s cubic-bezier(0.3, 0.7, 0.2, 1),
+      background-color 0.35s ease;
   }
-  .rotator[data-state="out"] {
+  :lang(zh) .trait {
+    margin-inline: 5px;
+  }
+  .trait-icon {
+    flex: none;
+    width: 14px;
+    height: 14px;
+    color: var(--trait);
+  }
+  .trait-icon,
+  .trait-label {
+    transition: opacity 0.18s ease;
+  }
+  .trait[data-state="out"] .trait-icon,
+  .trait[data-state="out"] .trait-label {
     opacity: 0;
-    transform: translateY(0.3em);
   }
   .heading {
     font-size: clamp(25px, 2.6vw, 33px);
