@@ -4,7 +4,7 @@
 
 export const en = {
   meta: {
-    title: "Codans: the development environment for coding agents",
+    title: "Codans: macOS development environment for coding agents",
     description:
       "Codans is a native macOS development environment for Claude Code, Codex, and any agent that runs in a terminal. Start a task in its own worktree, see what each agent is doing, and merge the pull request.",
     changelogTitle: "Changelog: Codans",
