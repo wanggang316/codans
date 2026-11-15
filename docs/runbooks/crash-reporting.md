@@ -143,7 +143,7 @@ single-place edit.)
 | Release symbol upload | `apps/mac/scripts/release.sh` `upload-symbols` |
 | SDK pin | `apps/mac/Tuist/Package.swift` (`getsentry/sentry-cocoa`) |
 
-## 技术决策
+## Constraints
 
 - **Telemetry types are explicitly `nonisolated`.** The workspace sets
   `SWIFT_DEFAULT_ACTOR_ISOLATION=MainActor`, but Sentry invokes
