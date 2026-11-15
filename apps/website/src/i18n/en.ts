@@ -4,9 +4,9 @@
 
 export const en = {
   meta: {
-    title: "Codans: the development environment for working with coding agents",
+    title: "Codans: the development environment for coding agents",
     description:
-      "A native macOS development environment for working with coding agents: a worktree for every task, a pane for every agent, and a view of which agents need you.",
+      "Codans is a native macOS app for Claude Code, Codex, and any agent that runs in a terminal. Start a task in its own worktree, see what each agent is doing, and merge the pull request.",
     changelogTitle: "Changelog: Codans",
   },
   nav: {
@@ -14,8 +14,8 @@ export const en = {
     github: "GitHub",
   },
   hero: {
-    title: "The development environment for working with coding agents.",
-    lede: "Codans is a native macOS terminal for people who work through coding agents. It gives every task a worktree, every agent a pane, and shows you which ones are working and which ones need you.",
+    title: "The development environment for coding agents.",
+    lede: "Codans is a native macOS app for Claude Code, Codex, and any agent that runs in a terminal. Start a task in its own worktree, see what each agent is doing, and merge the pull request.",
     download: "Download for macOS",
     copy: "Copy",
     copied: "Copied",
