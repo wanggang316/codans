@@ -1041,11 +1041,15 @@ struct RootFeatureTests {
   /// One Tab with `paneIDs` side by side (`columns` preset when even),
   /// selected, plus a store whose focused Pane is `focused`.
   /// `selectedTab`, when set, receives the live selected-Tab id: assign a
-  /// new id to it to simulate selecting another Tab.
+  /// new id to it to simulate selecting another Tab. `otherWorktreeSelected`,
+  /// when set to `true`, makes the catalog select a second Worktree of the
+  /// Project while `state.selection` still names the first one, as after a
+  /// sidebar click whose selection-stream event has not reached Root yet.
   private static func layoutPickerStore(
     paneIDs: [PaneID], focused: PaneID,
     surfaceFocus: LockIsolated<[PaneID]>, arranged: LockIsolated<[LayoutPreset]>,
-    selectedTab: LockIsolated<TabID?>? = nil
+    selectedTab: LockIsolated<TabID?>? = nil,
+    otherWorktreeSelected: LockIsolated<Bool>? = nil
   ) throws -> TestStoreOf<RootFeature> {
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
@@ -1062,9 +1066,10 @@ struct RootFeatureTests {
       id: worktreeID, name: "main", path: "/tmp", branch: "main",
       tabs: [tab], selectedTabID: tabID
     )
+    let otherWorktree = Worktree(name: "other", path: "/tmp/other", tabs: [Tab()])
     let project = Project(
       id: projectID, name: "p", rootPath: "/tmp",
-      worktrees: [worktree], selectedWorktreeID: worktreeID
+      worktrees: [worktree, otherWorktree], selectedWorktreeID: worktreeID
     )
     let catalog = Catalog(projects: [project])
     selectedTab?.setValue(tabID)
@@ -1074,9 +1079,13 @@ struct RootFeatureTests {
       RootFeature()
     } withDependencies: {
       $0.hierarchyClient.snapshot = {
-        guard let selectedTab else { return catalog }
         var live = catalog
-        live.projects[0].worktrees[0].selectedTabID = selectedTab.value
+        if let selectedTab {
+          live.projects[0].worktrees[0].selectedTabID = selectedTab.value
+        }
+        if otherWorktreeSelected?.value == true {
+          live.projects[0].selectedWorktreeID = otherWorktree.id
+        }
         return live
       }
       $0.hierarchyClient.lastFocusedPane = { _ in focused }
@@ -1209,6 +1218,34 @@ struct RootFeatureTests {
     await store.send(.layoutPicker(.presented(.digitPressed(4))))
     await store.finish()
     await store.skipReceivedActions()
+    #expect(store.state.layoutPicker == nil)
+    #expect(arranged.value.isEmpty)
+    #expect(surfaceFocus.value.isEmpty)
+  }
+
+  /// A sidebar click selects another Worktree in the catalog before Root's
+  /// `state.selection` follows: applying the preset in that interval must not
+  /// arrange the Tab of the Worktree the user left.
+  @Test
+  func layoutPickerChangesNothingAfterAnotherWorktreeIsSelectedInTheCatalog() async throws {
+    let panes = [PaneID(), PaneID()]
+    let surfaceFocus = LockIsolated<[PaneID]>([])
+    let arranged = LockIsolated<[LayoutPreset]>([])
+    let otherWorktreeSelected = LockIsolated(false)
+    let store = try Self.layoutPickerStore(
+      paneIDs: panes, focused: panes[0], surfaceFocus: surfaceFocus, arranged: arranged,
+      otherWorktreeSelected: otherWorktreeSelected)
+    store.exhaustivity = .off
+
+    await store.send(.layoutPickerToggle(nil))
+    #expect(store.state.layoutPicker != nil)
+    let selectionBefore = store.state.selection
+    otherWorktreeSelected.setValue(true)
+
+    await store.send(.layoutPicker(.presented(.digitPressed(4))))
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(store.state.selection == selectionBefore)
     #expect(store.state.layoutPicker == nil)
     #expect(arranged.value.isEmpty)
     #expect(surfaceFocus.value.isEmpty)
