@@ -48,7 +48,7 @@ public nonisolated struct SplitTree<Leaf: Hashable & Codable & Sendable>: Equata
 
   public enum FocusDirection: Sendable { case previous, next }
 
-  public enum SplitError: Error, Equatable { case leafNotFound }
+  public enum SplitError: Error, Equatable { case leafNotFound, presetUnavailable }
 
   // MARK: - Inspection
 
@@ -235,7 +235,7 @@ extension SplitTree {
 }
 
 extension SplitTree.Node {
-  fileprivate func spatialLeafSlots(in bounds: CGRect) -> [SplitTree<Leaf>.SpatialSlot] {
+  func spatialLeafSlots(in bounds: CGRect) -> [SplitTree<Leaf>.SpatialSlot] {
     switch self {
     case .leaf(let leaf):
       return [SplitTree<Leaf>.SpatialSlot(leaf: leaf, bounds: bounds)]
