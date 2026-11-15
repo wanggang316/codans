@@ -13,7 +13,7 @@ export const zh: Dictionary = {
   },
   hero: {
     title: "与 Coding&nbsp;Agent 共舞。",
-    lede: "macOS 原生开发环境，支持 Claude Code、Codex 和所有终端 Agent。",
+    lede: "macOS 原生开发环境。并行运行 Claude Code、Codex 等 Agent，每个任务一个 worktree，从提示词到 PR 合并。",
     download: "下载 macOS 版",
     copy: "复制",
     copied: "已复制",

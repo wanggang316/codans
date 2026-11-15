@@ -15,7 +15,7 @@ export const en = {
   },
   hero: {
     title: "Dance with coding agents.",
-    lede: "A native macOS development environment for Claude Code, Codex, and any agent that runs in a terminal.",
+    lede: "A native macOS development environment. Run Claude Code, Codex, and other agents in parallel, each task in its own worktree, from prompt to merged pull request.",
     download: "Download for macOS",
     copy: "Copy",
     copied: "Copied",
