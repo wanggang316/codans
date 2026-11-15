@@ -16,9 +16,9 @@ export const en = {
   hero: {
     title: "Dance with coding agents.",
     // `{agent}` is the place of `ledeAgent`; agent names take turns there.
-    lede: "A native macOS development environment for {agent}.",
+    lede: 'Work in parallel worktrees, from prompt to merged pull request, <br class="min-[480px]:hidden" />with {agent}.',
     ledeAgent: "coding agents",
-    ledeMore: "Run tasks in parallel worktrees, see what each agent is doing, and merge the pull request.",
+    ledeMore: "A native macOS development environment, built on libghostty.",
     download: "Download for macOS",
     copy: "Copy",
     copied: "Copied",
