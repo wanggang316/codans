@@ -149,6 +149,13 @@ public nonisolated struct SplitTree<Leaf: Hashable & Codable & Sendable>: Equata
     return all[next]
   }
 
+  /// Each leaf with its rectangle in the unit square (origin top-left, y
+  /// down), in Pane order. Each split's `direction` and `ratio` carve the
+  /// square recursively. Empty for an empty tree.
+  public func spatialSlots() -> [SpatialSlot] {
+    root?.spatialLeafSlots(in: CGRect(x: 0, y: 0, width: 1, height: 1)) ?? []
+  }
+
   /// Spatial neighbor lookup. Walks the virtual layout (each split's
   /// `direction` + `ratio` carve a unit square recursively) and returns
   /// the nearest leaf strictly on the requested side of `leaf`. Returns
@@ -161,7 +168,7 @@ public nonisolated struct SplitTree<Leaf: Hashable & Codable & Sendable>: Equata
   /// required.
   public func focusTarget(spatial direction: SpatialDirection, from leaf: Leaf) -> Leaf? {
     guard let root, root.contains(leaf) else { return nil }
-    let slots = root.spatialLeafSlots(in: CGRect(x: 0, y: 0, width: 1, height: 1))
+    let slots = spatialSlots()
     guard let ref = slots.first(where: { $0.leaf == leaf }) else { return nil }
     let candidates: [SpatialSlot] = slots.filter { slot in
       slot.leaf != leaf && slot.matches(direction: direction, relativeTo: ref.bounds)
