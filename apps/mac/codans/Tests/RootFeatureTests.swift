@@ -983,6 +983,61 @@ struct RootFeatureTests {
     #expect(closedTab.value == nil)
   }
 
+  /// `⌘⌥N` menu chord: focuses Pane N of the active tab; a number with no
+  /// Pane leaves focus alone.
+  @Test
+  func focusPaneInCurrentTabFocusesExistingPaneNumberOnly() async throws {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let tabID = TabID()
+    let leftPane = PaneID()
+    let rightPane = PaneID()
+    let tab = Tab(
+      id: tabID, name: "t",
+      splitTree: try SplitTree(leaf: leftPane).inserting(
+        rightPane, at: leftPane, direction: .right
+      ),
+      panes: [
+        Pane(id: leftPane, workingDirectory: "/tmp", initialCommand: nil),
+        Pane(id: rightPane, workingDirectory: "/tmp", initialCommand: nil),
+      ]
+    )
+    let worktree = Worktree(
+      id: worktreeID, name: "main", path: "/tmp", branch: "main",
+      tabs: [tab], selectedTabID: tabID
+    )
+    let project = Project(
+      id: projectID, name: "p", rootPath: "/tmp",
+      worktrees: [worktree], selectedWorktreeID: worktreeID
+    )
+    let catalog = Catalog(projects: [project])
+
+    var initial = RootFeature.State()
+    initial.selection = HierarchySelection(projectID: projectID, worktreeID: worktreeID)
+
+    let focused = LockIsolated<[PaneID]>([])
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+      $0.hierarchyClient.lastFocusedPane = { _ in leftPane }
+      $0.hierarchyClient.addressOf = { paneID in
+        PaneAddress(projectID: projectID, worktreeID: worktreeID, tabID: tabID, paneID: paneID)
+      }
+      $0.hierarchyClient.focusPane = { id, _, _, _ in focused.withValue { $0.append(id) } }
+      $0.hierarchyClient.focusSurfaceView = { _ in }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.focusPaneInCurrentTabRequested(number: 2))
+    await store.finish()
+    #expect(focused.value == [rightPane])
+
+    await store.send(.focusPaneInCurrentTabRequested(number: 3))
+    await store.finish()
+    #expect(focused.value == [rightPane])
+  }
+
   @Test
   func paneLifecycleExitedClosesTabWhenLastPaneInTab() async {
     // ⌘W routed via Ghostty's `close_surface` lands here. With one pane in

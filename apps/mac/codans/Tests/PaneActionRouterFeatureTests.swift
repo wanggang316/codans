@@ -362,6 +362,77 @@ struct PaneActionRouterFeatureTests {
     #expect(recorded.value == bottomLeft)
   }
 
+  // MARK: - focusPane(number:)
+
+  /// Pane order is the leaf order: (source | right) over nothing, with
+  /// `below` split under the source, reads source, below, right.
+  @Test
+  func focusPaneNumberFocusesThePaneAtThatPositionInPaneOrder() async throws {
+    let f = Fixture()
+    let right = PaneID()
+    let below = PaneID()
+    let tab = Tab(
+      id: f.tabID,
+      splitTree: try SplitTree(leaf: f.paneID)
+        .inserting(right, at: f.paneID, direction: .right)
+        .inserting(below, at: f.paneID, direction: .down),
+      panes: [
+        Pane(id: f.paneID, workingDirectory: "/cwd"),
+        Pane(id: right, workingDirectory: "/cwd"),
+        Pane(id: below, workingDirectory: "/cwd"),
+      ]
+    )
+    let catalog = Catalog(projects: [
+      Project(
+        id: f.projectID, name: "p", rootPath: "/p", gitRoot: "/p",
+        worktrees: [Worktree(id: f.worktreeID, name: "w", path: "/w", tabs: [tab])])
+    ])
+    let focused = LockIsolated<[PaneID]>([])
+    let firstResponder = LockIsolated<[PaneID]>([])
+    let store = TestStore(initialState: PaneActionRouterFeature.State()) {
+      PaneActionRouterFeature()
+    } withDependencies: {
+      $0.hierarchyClient = HierarchyClient.testValue
+      $0.hierarchyClient.addressOf = { _ in f.address }
+      $0.hierarchyClient.snapshot = { catalog }
+      $0.hierarchyClient.focusPane = { pid, tid, _, _ in
+        #expect(tid == f.tabID)
+        focused.withValue { $0.append(pid) }
+      }
+      $0.hierarchyClient.focusSurfaceView = { pid in firstResponder.withValue { $0.append(pid) } }
+    }
+
+    await store.send(.requested(f.paneID, .focusPane(number: 3)))
+    await store.finish()
+    #expect(focused.value == [right])
+    #expect(firstResponder.value == [right])
+
+    await store.send(.requested(f.paneID, .focusPane(number: 2)))
+    await store.finish()
+    #expect(focused.value == [right, below])
+  }
+
+  /// A number with no Pane (past the last Pane, or outside 1–9) does nothing.
+  @Test
+  func focusPaneNumberWithNoPaneIsANoOp() async {
+    let f = Fixture()
+    let focused = LockIsolated<[PaneID]>([])
+    let store = TestStore(initialState: PaneActionRouterFeature.State()) {
+      PaneActionRouterFeature()
+    } withDependencies: {
+      $0.hierarchyClient = HierarchyClient.testValue
+      $0.hierarchyClient.addressOf = { _ in f.address }
+      $0.hierarchyClient.snapshot = { f.catalog() }
+      $0.hierarchyClient.focusPane = { pid, _, _, _ in focused.withValue { $0.append(pid) } }
+      $0.hierarchyClient.focusSurfaceView = { pid in focused.withValue { $0.append(pid) } }
+    }
+
+    await store.send(.requested(f.paneID, .focusPane(number: 2)))
+    await store.send(.requested(f.paneID, .focusPane(number: 0)))
+    await store.send(.requested(f.paneID, .focusPane(number: 10)))
+    #expect(focused.value.isEmpty)
+  }
+
   // MARK: - resizeSplit
 
   @Test

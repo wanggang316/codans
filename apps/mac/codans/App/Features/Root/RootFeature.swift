@@ -354,6 +354,10 @@ struct RootFeature {
     /// selected tab) and forwards `.gotoSplit(direction:)` through the same
     /// router that handles libghostty's built-in `goto_split` keybind.
     case focusAdjacentPaneInCurrentTabRequested(direction: FocusDirection)
+    /// `⌘⌥1…9` menu bindings — focuses the Pane with that Pane number in the
+    /// active tab through the router's `.focusPane(number:)`. A number with
+    /// no Pane is a no-op.
+    case focusPaneInCurrentTabRequested(number: Int)
     /// Tab-bar uplift: `⌘T` menu binding. Resolves the current Worktree
     /// and forwards `.detail(.tabBar(.newTabButtonTapped))`.
     case newTabForCurrentWorktree
@@ -2197,24 +2201,14 @@ struct RootFeature {
         // pane has been focused yet (freshly selected tab). Dispatching
         // through the router lets libghostty's built-in `goto_split` chord
         // and our menu chord share the exact same effect.
-        guard
-          let projectID = state.selection.projectID,
-          let worktreeID = state.selection.worktreeID
-        else { return .none }
-        let catalog = hierarchyClient.snapshot()
-        guard
-          let worktree = catalog
-            .projects.first(where: { $0.id == projectID })?
-            .worktrees.first(where: { $0.id == worktreeID }),
-          let tabID = worktree.selectedTabID,
-          let tab = worktree.tabs.first(where: { $0.id == tabID })
-        else { return .none }
-        let paneID =
-          hierarchyClient.lastFocusedPane(tabID)
-          ?? tab.splitTree.leaves().first
-        guard let paneID else { return .none }
+        guard let paneID = focusedPaneID(state: state) else { return .none }
         return .send(
           .paneActionRouter(.requested(paneID, .gotoSplit(direction: direction))))
+
+      case .focusPaneInCurrentTabRequested(let number):
+        // Any pane of the active tab identifies the tab for the router.
+        guard let paneID = focusedPaneID(state: state) else { return .none }
+        return .send(.paneActionRouter(.requested(paneID, .focusPane(number: number))))
 
       case .focusHierarchyPath(let source):
         // Walk the source path against the *live* catalog, re-reading the
