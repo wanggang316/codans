@@ -156,6 +156,22 @@ struct SplitTreeTests {
   }
 
   @Test
+  func spatialSlotsCarveTheUnitSquareInPaneOrder() throws {
+    // Layout: A | (B over C), A takes 2/3 of the width.
+    let a = PaneID(), b = PaneID(), c = PaneID()
+    let tree = try SplitTree(leaf: a).inserting(b, at: a, direction: .right)
+      .inserting(c, at: b, direction: .down)
+      .resizing(at: SplitTree<PaneID>.Path(), ratio: 2.0 / 3)
+    let slots = tree.spatialSlots()
+    #expect(slots.map(\.leaf) == [a, b, c])
+    #expect(slots[0].bounds == CGRect(x: 0, y: 0, width: 2.0 / 3, height: 1))
+    #expect(abs(slots[1].bounds.minX - 2.0 / 3) < 1e-9)
+    #expect(slots[1].bounds.minY == 0 && slots[1].bounds.height == 0.5)
+    #expect(slots[2].bounds.minY == 0.5 && slots[2].bounds.height == 0.5)
+    #expect(SplitTree<PaneID>().spatialSlots().isEmpty)
+  }
+
+  @Test
   func spatialFocusInTwoPaneRowGoesLeftRightAndNoOpsVertical() throws {
     // Layout: A | B (single horizontal split → A left, B right).
     let a = PaneID(), b = PaneID()
