@@ -36,6 +36,9 @@ struct WorktreeDetailView: View {
   /// toolbar `WorktreeHeaderInfoLabel` (popover anchor) and to the inline
   /// `BranchSwitcherErrorBannerView` rendered under the toolbar.
   let branchSwitcherStore: StoreOf<BranchSwitcherFeature>
+  /// Layout picker, scoped by `ContentView` from `RootFeature.layoutPicker`.
+  /// Non-nil while the picker is open; drawn over the split viewport.
+  var layoutPickerStore: StoreOf<LayoutPickerFeature>?
   /// Invoked from the empty-state Add Project button. Wired by `ContentView`
   /// so the detail view doesn't need to hold the sidebar's TCA scope just
   /// to fire `toolbarAddProjectTapped` — same pattern as the editor toast
@@ -275,6 +278,11 @@ struct WorktreeDetailView: View {
           worktreeID: address.worktree,
           tabID: tabID
         )
+        .overlay {
+          if let layoutPickerStore {
+            LayoutPickerView(store: layoutPickerStore)
+          }
+        }
       } else {
         emptyTab(address: address)
       }
