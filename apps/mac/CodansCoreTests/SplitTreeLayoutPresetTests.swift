@@ -257,15 +257,28 @@ struct SplitTreeLayoutPresetTests {
   }
 
   @Test
-  func matchingComparesPaneFramesSoAnyEqualPartitionMatches() {
+  func matchingComparesTreeShapeNotOnlyPaneFrames() {
     // ((a | b) | c) draws the same three even columns as the arranged
-    // (a | (b | c)), so it matches too.
+    // (a | (b | c)), but its split tree has another shape, so it matches no
+    // preset.
     let a = PaneID()
     let b = PaneID()
     let c = PaneID()
     let leftPair: Node = .split(.init(direction: .horizontal, ratio: 0.5, left: .leaf(a), right: .leaf(b)))
     let tree = Tree(root: .split(.init(direction: .horizontal, ratio: 2.0 / 3, left: leftPair, right: .leaf(c))))
-    #expect(tree.matchingPreset() == .columns)
+    #expect(tree.matchingPreset() == nil)
+  }
+
+  @Test
+  func matchingComparesSplitDirection() {
+    // Same shape and ratios as three even columns, but the inner split is
+    // vertical.
+    let a = PaneID()
+    let b = PaneID()
+    let c = PaneID()
+    let inner: Node = .split(.init(direction: .vertical, ratio: 0.5, left: .leaf(b), right: .leaf(c)))
+    let tree = Tree(root: .split(.init(direction: .horizontal, ratio: 1.0 / 3, left: .leaf(a), right: inner)))
+    #expect(tree.matchingPreset() == nil)
   }
 
   @Test

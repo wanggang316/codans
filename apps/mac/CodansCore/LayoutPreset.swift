@@ -1,4 +1,3 @@
-import CoreGraphics
 import Foundation
 
 /// A named shape for all Panes of a Tab (GLOSSARY: Layout preset). The
@@ -95,31 +94,19 @@ extension SplitTree {
     return Self(root: try Self.presetNode(preset, leaves: leaves, focus: focus), zoomed: nil)
   }
 
-  /// The preset whose layout equals this tree: the same frame for each leaf,
-  /// within `tolerance`. Frames, not node structure, are compared, so any
-  /// partition that draws the same layout matches. `nil` when no preset
-  /// matches or the tree has fewer than two leaves.
+  /// The preset that equals this tree: the same shape (split directions and
+  /// nesting) and leaf assignment, with each split ratio within `tolerance`.
+  /// A tree that draws the same layout with another nesting does not match.
+  /// `nil` when no preset matches or the tree has fewer than two leaves.
   public func matchingPreset(tolerance: Double = presetMatchTolerance) -> LayoutPreset? {
     guard let root else { return nil }
     let leaves = leaves()
-    let unit = CGRect(x: 0, y: 0, width: 1, height: 1)
-    let actual = Dictionary(
-      root.spatialLeafSlots(in: unit).map { ($0.leaf, $0.bounds) }, uniquingKeysWith: { lhs, _ in lhs })
-    func matches(_ candidate: Node) -> Bool {
-      candidate.spatialLeafSlots(in: unit).allSatisfy { slot in
-        guard let frame = actual[slot.leaf] else { return false }
-        return abs(frame.minX - slot.bounds.minX) <= tolerance
-          && abs(frame.minY - slot.bounds.minY) <= tolerance
-          && abs(frame.maxX - slot.bounds.maxX) <= tolerance
-          && abs(frame.maxY - slot.bounds.maxY) <= tolerance
-      }
-    }
     return LayoutPreset.presets(forPaneCount: leaves.count).first { preset in
       // A main preset matches with whichever leaf is in its main area.
       let mainCandidates: [Leaf?] = preset.isMain ? leaves.map { $0 } : [nil]
       return mainCandidates.contains { focus in
         guard let candidate = try? Self.presetNode(preset, leaves: leaves, focus: focus) else { return false }
-        return matches(candidate)
+        return root.matches(candidate, tolerance: tolerance)
       }
     }
   }
@@ -173,5 +160,23 @@ extension SplitTree {
         ratio: Double(leftCount) / Double(nodes.count),
         left: evenNode(nodes.prefix(leftCount), direction: direction),
         right: evenNode(nodes.dropFirst(leftCount), direction: direction)))
+  }
+}
+
+extension SplitTree.Node {
+  /// Equal leaves, and equal split directions with ratios within `tolerance`,
+  /// at every level.
+  fileprivate func matches(_ other: Self, tolerance: Double) -> Bool {
+    switch (self, other) {
+    case (.leaf(let lhs), .leaf(let rhs)):
+      return lhs == rhs
+    case (.split(let lhs), .split(let rhs)):
+      return lhs.direction == rhs.direction
+        && abs(lhs.ratio - rhs.ratio) <= tolerance
+        && lhs.left.matches(rhs.left, tolerance: tolerance)
+        && lhs.right.matches(rhs.right, tolerance: tolerance)
+    default:
+      return false
+    }
   }
 }
