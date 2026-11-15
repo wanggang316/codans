@@ -118,3 +118,32 @@ _Avoid_: registry, skill dir.
 
 **Invocation Style**: How a prompt calls one Agent Skill explicitly: `/name`,
 `/skill:name`, `$name`, `@id`, or none.
+
+## Pane layout
+
+These terms define how the Panes of one Tab are arranged and reached. A layout
+operation changes only the split tree of the current Tab.
+
+**Pane order**: The reading order of the Panes of a Tab, the order of the
+leaves of its split tree. Layout presets and Pane numbers use this order.
+
+**Layout preset**: A named shape for all Panes of a Tab, offered for the
+current Pane count (for example "Columns 2:1" for two Panes, "Main Left" for
+three). Even presets keep the Pane order; main presets put the focused Pane in
+the main area and the other Panes in Pane order.
+_Avoid_: template, arrangement (as a noun).
+
+**Arrange**: To apply a Layout preset to the current Tab, from the Layout
+picker or the Command Palette.
+
+**Layout picker**: The overlay that shows the Layout presets for the current
+Pane count as numbered thumbnails. A digit applies the preset with that number.
+
+**Place**: To move the focused Pane into one region of the Tab (a half, a
+third, or two thirds). The other Panes keep their relative structure in the
+remaining area. Maximize is the existing zoom, not a Place region.
+_Avoid_: snap, tile.
+
+**Pane number**: The position 1–9 of a Pane in the Pane order. `⌘⌥N` focuses
+Pane N; holding `⌘⌥` shows each number over its Pane. Panes after the ninth
+have no number.
