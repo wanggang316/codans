@@ -235,7 +235,7 @@ extension SplitTree {
 }
 
 extension SplitTree.Node {
-  func spatialLeafSlots(in bounds: CGRect) -> [SplitTree<Leaf>.SpatialSlot] {
+  fileprivate func spatialLeafSlots(in bounds: CGRect) -> [SplitTree<Leaf>.SpatialSlot] {
     switch self {
     case .leaf(let leaf):
       return [SplitTree<Leaf>.SpatialSlot(leaf: leaf, bounds: bounds)]
