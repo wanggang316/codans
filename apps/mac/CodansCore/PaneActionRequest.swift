@@ -20,6 +20,10 @@ public nonisolated enum PaneActionRequest: Sendable, Equatable {
   case gotoSplit(direction: FocusDirection)
   case resizeSplit(direction: ResizeDirection, amount: Double)
   case equalizeSplits
+  /// Applies a Layout preset to every Pane of the source pane's Tab. Main
+  /// presets put the source pane in the main area, so the sender must pass
+  /// the focused pane.
+  case arrange(preset: LayoutPreset)
   case toggleSplitZoom
   case presentTerminal
   case toggleCommandPalette

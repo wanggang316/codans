@@ -407,6 +407,53 @@ struct PaneActionRouterFeatureTests {
     #expect(recorded.value?.1 == f.worktreeID)
   }
 
+  // MARK: - arrange
+
+  @Test
+  func arrangeCallsArrangeTabWithTheSourcePaneAndKeepsItFocused() async {
+    let f = Fixture()
+    let recorded = LockIsolated<(TabID, WorktreeID, ProjectID, LayoutPreset, PaneID?)?>(nil)
+    let focused = LockIsolated<PaneID?>(nil)
+    let store = TestStore(initialState: PaneActionRouterFeature.State()) {
+      PaneActionRouterFeature()
+    } withDependencies: {
+      $0.hierarchyClient = HierarchyClient.testValue
+      $0.hierarchyClient.addressOf = { _ in f.address }
+      $0.hierarchyClient.arrangeTab = { tid, wid, pid, preset, focus in
+        recorded.setValue((tid, wid, pid, preset, focus))
+      }
+      $0.hierarchyClient.focusSurfaceView = { pid in focused.setValue(pid) }
+    }
+
+    await store.send(.requested(f.paneID, .arrange(preset: .mainLeft)))
+    await store.finish()
+    #expect(recorded.value?.0 == f.tabID)
+    #expect(recorded.value?.1 == f.worktreeID)
+    #expect(recorded.value?.2 == f.projectID)
+    #expect(recorded.value?.3 == .mainLeft)
+    #expect(recorded.value?.4 == f.paneID)
+    #expect(focused.value == f.paneID)
+  }
+
+  @Test
+  func arrangeThatFailsDoesNotMoveFocus() async {
+    let f = Fixture()
+    let focused = LockIsolated<PaneID?>(nil)
+    let store = TestStore(initialState: PaneActionRouterFeature.State()) {
+      PaneActionRouterFeature()
+    } withDependencies: {
+      $0.hierarchyClient = HierarchyClient.testValue
+      $0.hierarchyClient.addressOf = { _ in f.address }
+      $0.hierarchyClient.arrangeTab = { _, _, _, _, _ in
+        throw SplitTree<PaneID>.SplitError.presetUnavailable
+      }
+      $0.hierarchyClient.focusSurfaceView = { pid in focused.setValue(pid) }
+    }
+
+    await store.send(.requested(f.paneID, .arrange(preset: .grid)))
+    #expect(focused.value == nil)
+  }
+
   // MARK: - toggleSplitZoom (two branches)
 
   @Test
