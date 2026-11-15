@@ -25,7 +25,7 @@ struct LayoutPickerFeatureTests {
   @Test
   func openListsPresetsForPaneCountAndMarksCurrentPreset() throws {
     let (tree, _, b) = try Self.twoColumns()
-    let state = try #require(LayoutPickerFeature.State(splitTree: tree, focusedPaneID: b))
+    let state = try #require(LayoutPickerFeature.State(tabID: TabID(), splitTree: tree, focusedPaneID: b))
     #expect(state.paneID == b)
     #expect(state.paneCount == 2)
     #expect(state.focusedPaneNumber == 2)
@@ -38,7 +38,7 @@ struct LayoutPickerFeatureTests {
   func openSelectsFirstPresetWhenNoPresetMatches() throws {
     let (tree, _, b) = try Self.twoColumns()
     let skewed = try tree.resizing(at: SplitTree<PaneID>.Path(), ratio: 0.42)
-    let state = try #require(LayoutPickerFeature.State(splitTree: skewed, focusedPaneID: b))
+    let state = try #require(LayoutPickerFeature.State(tabID: TabID(), splitTree: skewed, focusedPaneID: b))
     #expect(state.currentPreset == nil)
     #expect(state.selectedIndex == 0)
   }
@@ -46,19 +46,19 @@ struct LayoutPickerFeatureTests {
   @Test
   func onePaneTabHasNoPicker() {
     let a = PaneID()
-    #expect(LayoutPickerFeature.State(splitTree: SplitTree(leaf: a), focusedPaneID: a) == nil)
+    #expect(LayoutPickerFeature.State(tabID: TabID(), splitTree: SplitTree(leaf: a), focusedPaneID: a) == nil)
   }
 
   @Test
   func paneOutsideTheTabHasNoPicker() throws {
     let (tree, _, _) = try Self.twoColumns()
-    #expect(LayoutPickerFeature.State(splitTree: tree, focusedPaneID: PaneID()) == nil)
+    #expect(LayoutPickerFeature.State(tabID: TabID(), splitTree: tree, focusedPaneID: PaneID()) == nil)
   }
 
   @Test
   func digitAppliesItsPreset() async throws {
     let (tree, ids) = try Self.fourPanes()
-    let state = try #require(LayoutPickerFeature.State(splitTree: tree, focusedPaneID: ids[0]))
+    let state = try #require(LayoutPickerFeature.State(tabID: TabID(), splitTree: tree, focusedPaneID: ids[0]))
     let store = TestStore(initialState: state) { LayoutPickerFeature() }
     let expected = state.presets[3]
     await store.send(.digitPressed(4)) { $0.selectedIndex = 3 }
@@ -68,7 +68,7 @@ struct LayoutPickerFeatureTests {
   @Test
   func digitWithNoPresetDoesNothing() async throws {
     let (tree, _, a) = try Self.twoColumns()
-    let state = try #require(LayoutPickerFeature.State(splitTree: tree, focusedPaneID: a))
+    let state = try #require(LayoutPickerFeature.State(tabID: TabID(), splitTree: tree, focusedPaneID: a))
     let store = TestStore(initialState: state) { LayoutPickerFeature() }
     await store.send(.digitPressed(7))
     await store.send(.digitPressed(0))
@@ -78,7 +78,7 @@ struct LayoutPickerFeatureTests {
   func arrowsMoveSelectionInTheGridAndReturnApplies() async throws {
     // Two Panes: six presets in two rows of three.
     let (tree, a, _) = try Self.twoColumns()
-    let state = try #require(LayoutPickerFeature.State(splitTree: tree, focusedPaneID: a))
+    let state = try #require(LayoutPickerFeature.State(tabID: TabID(), splitTree: tree, focusedPaneID: a))
     #expect(state.selectedIndex == 0)
     let store = TestStore(initialState: state) { LayoutPickerFeature() }
     await store.send(.selectionMoved(.left))  // edge: stays
@@ -92,10 +92,39 @@ struct LayoutPickerFeatureTests {
     await store.receive(\.delegate.apply, state.presets[5])
   }
 
+  /// Left and Right stay in the row: Right at the end of the first row does
+  /// not move to the first thumbnail of the next row, and Left at the start
+  /// of a row does not move to the end of the row above.
+  @Test
+  func horizontalArrowsStopAtRowEdges() async throws {
+    let (tree, a, _) = try Self.twoColumns()
+    var state = try #require(LayoutPickerFeature.State(tabID: TabID(), splitTree: tree, focusedPaneID: a))
+    state.selectedIndex = 2
+    let store = TestStore(initialState: state) { LayoutPickerFeature() }
+    await store.send(.selectionMoved(.right))  // row end: stays
+    await store.send(.selectionMoved(.down)) { $0.selectedIndex = 5 }
+    await store.send(.selectionMoved(.left)) { $0.selectedIndex = 4 }
+    await store.send(.selectionMoved(.left)) { $0.selectedIndex = 3 }
+    await store.send(.selectionMoved(.left))  // row start: stays
+  }
+
+  /// Five presets (four Panes): the second row is short, so Down from the
+  /// third column and Right from the last item stay put.
+  @Test
+  func arrowTargetsInAShortLastRow() {
+    #expect(LayoutPickerFeature.index(moving: .down, from: 1, count: 5) == 4)
+    #expect(LayoutPickerFeature.index(moving: .down, from: 2, count: 5) == nil)
+    #expect(LayoutPickerFeature.index(moving: .right, from: 4, count: 5) == nil)
+    #expect(LayoutPickerFeature.index(moving: .right, from: 2, count: 5) == nil)
+    #expect(LayoutPickerFeature.index(moving: .left, from: 3, count: 5) == nil)
+    #expect(LayoutPickerFeature.index(moving: .up, from: 4, count: 5) == 1)
+    #expect(LayoutPickerFeature.index(moving: .up, from: 0, count: 5) == nil)
+  }
+
   @Test
   func tapAppliesThePreset() async throws {
     let (tree, a, _) = try Self.twoColumns()
-    let state = try #require(LayoutPickerFeature.State(splitTree: tree, focusedPaneID: a))
+    let state = try #require(LayoutPickerFeature.State(tabID: TabID(), splitTree: tree, focusedPaneID: a))
     let store = TestStore(initialState: state) { LayoutPickerFeature() }
     await store.send(.presetTapped(.rowsTwoToOne)) {
       $0.selectedIndex = state.presets.firstIndex(of: .rowsTwoToOne)!
@@ -106,7 +135,7 @@ struct LayoutPickerFeatureTests {
   @Test
   func escapeCancels() async throws {
     let (tree, a, _) = try Self.twoColumns()
-    let state = try #require(LayoutPickerFeature.State(splitTree: tree, focusedPaneID: a))
+    let state = try #require(LayoutPickerFeature.State(tabID: TabID(), splitTree: tree, focusedPaneID: a))
     let store = TestStore(initialState: state) { LayoutPickerFeature() }
     await store.send(.cancelled)
     await store.receive(\.delegate.cancel)

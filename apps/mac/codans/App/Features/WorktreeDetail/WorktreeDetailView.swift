@@ -90,6 +90,13 @@ struct WorktreeDetailView: View {
 
   var body: some View {
     detailBody
+      // The Layout picker arranges one Tab. Selecting another Tab or
+      // Worktree while it is open (Tab bar click, CLI, closing the Tab)
+      // closes it; `RootFeature` then changes nothing.
+      .onChange(of: resolveAddress()?.activeTab) { _, shownTabID in
+        guard let layoutPickerStore, layoutPickerStore.tabID != shownTabID else { return }
+        layoutPickerStore.send(.cancelled)
+      }
       // Paint a low-alpha Ghostty-terminal-background band into the
       // detail's leading safe-area inset. The macOS 26 floating-sidebar
       // overlay renders its glass material over the detail content, so
@@ -279,7 +286,9 @@ struct WorktreeDetailView: View {
           tabID: tabID
         )
         .overlay {
-          if let layoutPickerStore {
+          // Only over the Tab it arranges; `body` closes it when that Tab
+          // is no longer shown.
+          if let layoutPickerStore, layoutPickerStore.tabID == tabID {
             LayoutPickerView(store: layoutPickerStore)
           }
         }

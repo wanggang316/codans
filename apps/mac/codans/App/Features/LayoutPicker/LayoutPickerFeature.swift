@@ -1,5 +1,5 @@
-import ComposableArchitecture
 import CodansCore
+import ComposableArchitecture
 import Foundation
 
 /// Reducer for the Layout picker (GLOSSARY: Arrange). Shows the Layout
@@ -11,6 +11,9 @@ import Foundation
 struct LayoutPickerFeature {
   @ObservableState
   struct State: Equatable {
+    /// The Tab the picker arranges. The picker belongs to this Tab only:
+    /// once another Tab is shown, it closes with no change.
+    let tabID: TabID
     /// The focused Pane. Main presets put it in the main area, and key
     /// focus goes back to it when the picker closes.
     let paneID: PaneID
@@ -27,12 +30,13 @@ struct LayoutPickerFeature {
 
     /// `nil` when the Tab has fewer than two Panes or does not hold
     /// `focusedPaneID`: a one-Pane Tab has nothing to arrange.
-    init?(splitTree: SplitTree<PaneID>, focusedPaneID: PaneID) {
+    init?(tabID: TabID, splitTree: SplitTree<PaneID>, focusedPaneID: PaneID) {
       let leaves = splitTree.leaves()
       let presets = LayoutPreset.presets(forPaneCount: leaves.count)
       guard !presets.isEmpty, let focusIndex = leaves.firstIndex(of: focusedPaneID) else {
         return nil
       }
+      self.tabID = tabID
       self.paneID = focusedPaneID
       self.paneCount = leaves.count
       self.focusedPaneNumber = focusIndex + 1
@@ -76,16 +80,7 @@ struct LayoutPickerFeature {
         return .send(.delegate(.apply(state.selectedPreset)))
 
       case .selectionMoved(let direction):
-        let step =
-          switch direction {
-          case .left: -1
-          case .right: 1
-          case .up: -Self.columnCount
-          case .down: Self.columnCount
-          }
-        let target = state.selectedIndex + step
-        // Stop at the edges: no wrap, so a held arrow key settles on a corner.
-        if state.presets.indices.contains(target) {
+        if let target = Self.index(moving: direction, from: state.selectedIndex, count: state.presets.count) {
           state.selectedIndex = target
         }
         return .none
@@ -105,6 +100,28 @@ struct LayoutPickerFeature {
         return .none
       }
     }
+  }
+
+  /// The thumbnail that an arrow key moves to in a grid of `count` items,
+  /// `columnCount` per row, or `nil` at an edge. There is no wrap: Left and
+  /// Right stay in the row, Up and Down stay in the column, so a held arrow
+  /// key settles on an edge.
+  static func index(moving direction: Action.Direction, from index: Int, count: Int) -> Int? {
+    let column = index % columnCount
+    let target: Int
+    switch direction {
+    case .left:
+      guard column > 0 else { return nil }
+      target = index - 1
+    case .right:
+      guard column < columnCount - 1 else { return nil }
+      target = index + 1
+    case .up:
+      target = index - columnCount
+    case .down:
+      target = index + columnCount
+    }
+    return (0..<count).contains(target) ? target : nil
   }
 
   /// The regions of `preset` in the unit square, each labelled with the
