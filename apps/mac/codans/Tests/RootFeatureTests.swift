@@ -1040,9 +1040,12 @@ struct RootFeatureTests {
 
   /// One Tab with `paneIDs` side by side (`columns` preset when even),
   /// selected, plus a store whose focused Pane is `focused`.
+  /// `selectedTab`, when set, receives the live selected-Tab id: assign a
+  /// new id to it to simulate selecting another Tab.
   private static func layoutPickerStore(
     paneIDs: [PaneID], focused: PaneID,
-    surfaceFocus: LockIsolated<[PaneID]>, arranged: LockIsolated<[LayoutPreset]>
+    surfaceFocus: LockIsolated<[PaneID]>, arranged: LockIsolated<[LayoutPreset]>,
+    selectedTab: LockIsolated<TabID?>? = nil
   ) throws -> TestStoreOf<RootFeature> {
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
@@ -1064,12 +1067,18 @@ struct RootFeatureTests {
       worktrees: [worktree], selectedWorktreeID: worktreeID
     )
     let catalog = Catalog(projects: [project])
+    selectedTab?.setValue(tabID)
     var initial = RootFeature.State()
     initial.selection = HierarchySelection(projectID: projectID, worktreeID: worktreeID)
     let store = TestStore(initialState: initial) {
       RootFeature()
     } withDependencies: {
-      $0.hierarchyClient.snapshot = { catalog }
+      $0.hierarchyClient.snapshot = {
+        guard let selectedTab else { return catalog }
+        var live = catalog
+        live.projects[0].worktrees[0].selectedTabID = selectedTab.value
+        return live
+      }
       $0.hierarchyClient.lastFocusedPane = { _ in focused }
       $0.hierarchyClient.addressOf = { paneID in
         PaneAddress(projectID: projectID, worktreeID: worktreeID, tabID: tabID, paneID: paneID)
@@ -1178,6 +1187,72 @@ struct RootFeatureTests {
     await store.send(.layoutPickerToggle(panes[2]))
     #expect(store.state.layoutPicker?.paneID == panes[2])
     #expect(store.state.layoutPicker?.focusedPaneNumber == 3)
+  }
+
+  /// The user selects another Tab while the picker is open: applying the
+  /// preset must not arrange the hidden Tab or move focus into it.
+  @Test
+  func layoutPickerChangesNothingAfterAnotherTabIsSelected() async throws {
+    let panes = [PaneID(), PaneID()]
+    let surfaceFocus = LockIsolated<[PaneID]>([])
+    let arranged = LockIsolated<[LayoutPreset]>([])
+    let selectedTab = LockIsolated<TabID?>(nil)
+    let store = try Self.layoutPickerStore(
+      paneIDs: panes, focused: panes[0], surfaceFocus: surfaceFocus, arranged: arranged,
+      selectedTab: selectedTab)
+    store.exhaustivity = .off
+
+    await store.send(.layoutPickerToggle(nil))
+    #expect(store.state.layoutPicker?.tabID == selectedTab.value)
+    selectedTab.setValue(TabID())
+
+    await store.send(.layoutPicker(.presented(.digitPressed(4))))
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(store.state.layoutPicker == nil)
+    #expect(arranged.value.isEmpty)
+    #expect(surfaceFocus.value.isEmpty)
+  }
+
+  /// The view cancels a picker whose Tab is no longer shown; focus stays in
+  /// the newly shown Tab.
+  @Test
+  func layoutPickerCancelAfterAnotherTabIsSelectedLeavesFocus() async throws {
+    let panes = [PaneID(), PaneID()]
+    let surfaceFocus = LockIsolated<[PaneID]>([])
+    let selectedTab = LockIsolated<TabID?>(nil)
+    let store = try Self.layoutPickerStore(
+      paneIDs: panes, focused: panes[0], surfaceFocus: surfaceFocus, arranged: .init([]),
+      selectedTab: selectedTab)
+    store.exhaustivity = .off
+
+    await store.send(.layoutPickerToggle(nil))
+    selectedTab.setValue(TabID())
+    await store.send(.layoutPicker(.presented(.cancelled)))
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(store.state.layoutPicker == nil)
+    #expect(surfaceFocus.value.isEmpty)
+  }
+
+  /// `⌘⌥L` with a picker left over from a Tab that is no longer shown drops
+  /// it without moving focus into the hidden Tab.
+  @Test
+  func layoutPickerToggleDropsAStalePickerWithoutRefocus() async throws {
+    let panes = [PaneID(), PaneID()]
+    let surfaceFocus = LockIsolated<[PaneID]>([])
+    let selectedTab = LockIsolated<TabID?>(nil)
+    let store = try Self.layoutPickerStore(
+      paneIDs: panes, focused: panes[0], surfaceFocus: surfaceFocus, arranged: .init([]),
+      selectedTab: selectedTab)
+    store.exhaustivity = .off
+
+    await store.send(.layoutPickerToggle(nil))
+    #expect(store.state.layoutPicker != nil)
+    selectedTab.setValue(TabID())
+    await store.send(.layoutPickerToggle(nil))
+    await store.finish()
+    #expect(surfaceFocus.value.isEmpty)
   }
 
   @Test

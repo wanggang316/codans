@@ -2592,43 +2592,39 @@ struct RootFeature {
     }
   }
 
-  /// Reveal the just-selected worktree in the sidebar: expand its parent
-  /// project so the row renders, force the sidebar visible, and bump
-  /// `revealSelectionTrigger` so the sidebar's `onChange` scrolls the row
-  /// into view. Shared by every "jump to a worktree" entry point (command
-  /// palette, Agents-panel row tap, notification deep-link) so a target
-  /// that's scrolled off-screen or hidden under a collapsed project always
-  /// comes into view. The sidebar reads the scroll target from the live
-  /// catalog, so callers must have already committed the worktree selection.
-  /// The pane a pane-scoped command with no explicit source should target:
-  /// the active tab's last-focused leaf, falling back to that tab's first
-  /// leaf. Reuses the Command Palette's resolver so ⌘L and a menu-triggered
-  /// ⌘P agree on what "the current pane" means.
   /// Opens the Layout picker for the Tab of `sourcePaneID` (the current
   /// Tab's focused Pane when nil), or closes an open one with no change. A
-  /// one-Pane Tab gets no picker.
+  /// one-Pane Tab gets no picker. A picker left over from a Tab that is no
+  /// longer shown is dropped, and the toggle opens one for the current Tab.
   private func toggleLayoutPicker(_ state: inout State, sourcePaneID: PaneID?) -> Effect<Action> {
     if let picker = state.layoutPicker {
       state.layoutPicker = nil
-      return refocusSurface(picker.paneID)
+      if isShown(picker.tabID, state: state) {
+        return refocusSurface(picker.paneID)
+      }
     }
     guard
       let paneID = sourcePaneID ?? focusedPaneID(state: state),
       let address = hierarchyClient.addressOf(paneID),
       let tab = findTab(address, in: hierarchyClient.snapshot())
     else { return .none }
-    state.layoutPicker = LayoutPickerFeature.State(splitTree: tab.splitTree, focusedPaneID: paneID)
+    state.layoutPicker = LayoutPickerFeature.State(
+      tabID: tab.id, splitTree: tab.splitTree, focusedPaneID: paneID)
     return .none
   }
 
   /// Closes the Layout picker. Apply goes through the router, which arranges
   /// the Tab and makes the Pane first responder again; cancel only gives
-  /// focus back.
+  /// focus back. When the picker's Tab is no longer the shown Tab (the user
+  /// selected another Tab or Worktree while it was open), it closes with no
+  /// change and leaves focus where it is: the old Pane is hidden.
   private func closeLayoutPicker(
     _ state: inout State, delegate: LayoutPickerFeature.Action.Delegate
   ) -> Effect<Action> {
-    guard let paneID = state.layoutPicker?.paneID else { return .none }
+    guard let picker = state.layoutPicker else { return .none }
     state.layoutPicker = nil
+    guard isShown(picker.tabID, state: state) else { return .none }
+    let paneID = picker.paneID
     switch delegate {
     case .apply(let preset):
       return .send(.paneActionRouter(.requested(paneID, .arrange(preset: preset))))
@@ -2646,6 +2642,15 @@ struct RootFeature {
     }
   }
 
+  /// `true` when `tabID` is the selected Tab of the selected Worktree, read
+  /// from the live catalog.
+  private func isShown(_ tabID: TabID, state: State) -> Bool {
+    hierarchyClient.snapshot()
+      .projects.first(where: { $0.id == state.selection.projectID })?
+      .worktrees.first(where: { $0.id == state.selection.worktreeID })?
+      .selectedTabID == tabID
+  }
+
   /// The Tab at `address` in `catalog`.
   private func findTab(_ address: PaneAddress, in catalog: Catalog) -> Tab? {
     catalog.projects.first(where: { $0.id == address.projectID })?
@@ -2653,6 +2658,18 @@ struct RootFeature {
       .tabs.first(where: { $0.id == address.tabID })
   }
 
+  /// Reveal the just-selected worktree in the sidebar: expand its parent
+  /// project so the row renders, force the sidebar visible, and bump
+  /// `revealSelectionTrigger` so the sidebar's `onChange` scrolls the row
+  /// into view. Shared by every "jump to a worktree" entry point (command
+  /// palette, Agents-panel row tap, notification deep-link) so a target
+  /// that's scrolled off-screen or hidden under a collapsed project always
+  /// comes into view. The sidebar reads the scroll target from the live
+  /// catalog, so callers must have already committed the worktree selection.
+  /// The pane a pane-scoped command with no explicit source should target:
+  /// the active tab's last-focused leaf, falling back to that tab's first
+  /// leaf. Reuses the Command Palette's resolver so ⌘L and a menu-triggered
+  /// ⌘P agree on what "the current pane" means.
   private func focusedPaneID(state: State) -> PaneID? {
     let catalog = hierarchyClient.snapshot()
     let activeTabID = catalog
