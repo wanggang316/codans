@@ -102,6 +102,11 @@ struct RootFeature {
     /// routes it to a feature action and nils this slot in the same tick).
     @Presents var commandPalette: CommandPaletteFeature.State?
 
+    /// Layout picker over the split viewport of the current Tab. `nil` =
+    /// hidden. Opened by `layoutPickerToggle`; cleared when the user
+    /// applies a preset or cancels.
+    @Presents var layoutPicker: LayoutPickerFeature.State?
+
     /// Tag CRUD sheet. `nil` = hidden; non-nil hosts `TagManagerSheet`.
     /// Opened from the sidebar via `.sidebar(.delegate(.openTagManager))`.
     @Presents var tagManagerSheet: TagManagerFeature.State?
@@ -462,6 +467,12 @@ struct RootFeature {
     /// split).
     case commandPaletteToggle(PaneID?)
     case commandPalette(PresentationAction<CommandPaletteFeature.Action>)
+    /// Toggle the Layout picker. Sources: the `⌘⌥L` / Window ▸ Layout ▸
+    /// Arrange… menu item (payload `nil`: the current Tab's focused Pane)
+    /// and the Pane context menu (payload: the clicked Pane). A one-Pane
+    /// Tab does not open it.
+    case layoutPickerToggle(PaneID?)
+    case layoutPicker(PresentationAction<LayoutPickerFeature.Action>)
     /// Open the Hand Off panel for `paneID`, or for the selected worktree's
     /// focused pane when nil. Refused with a status toast when no agent is
     /// detected in that pane — a handoff needs an agent to ask.
@@ -616,6 +627,7 @@ struct RootFeature {
     routerScopes
     diffBindings
     newAgentReducer
+    layoutPickerReducer
     coreReducer
   }
 
@@ -643,6 +655,24 @@ struct RootFeature {
     }
     .ifLet(\.$newAgent, action: \.newAgent) {
       NewAgentFeature()
+    }
+  }
+
+  /// The Layout picker's presentation and outcomes. A reducer of its own
+  /// because `coreReducer`'s expression is at the type-inference budget.
+  private var layoutPickerReducer: some Reducer<State, Action> {
+    Reduce { state, action in
+      switch action {
+      case .layoutPickerToggle(let sourcePaneID):
+        return toggleLayoutPicker(&state, sourcePaneID: sourcePaneID)
+      case .layoutPicker(.presented(.delegate(let delegate))):
+        return closeLayoutPicker(&state, delegate: delegate)
+      default:
+        return .none
+      }
+    }
+    .ifLet(\.$layoutPicker, action: \.layoutPicker) {
+      LayoutPickerFeature()
     }
   }
 
@@ -2095,6 +2125,10 @@ struct RootFeature {
       case .commandPalette:
         return .none
 
+      case .layoutPickerToggle, .layoutPicker:
+        // Handled by `layoutPickerReducer`.
+        return .none
+
       case .commandQueueToggle(let sourcePaneID):
         guard let paneID = sourcePaneID ?? focusedPaneID(state: state) else {
           // No pane to attach a queue to (empty worktree, no tab). Silently
@@ -2570,6 +2604,55 @@ struct RootFeature {
   /// the active tab's last-focused leaf, falling back to that tab's first
   /// leaf. Reuses the Command Palette's resolver so ⌘L and a menu-triggered
   /// ⌘P agree on what "the current pane" means.
+  /// Opens the Layout picker for the Tab of `sourcePaneID` (the current
+  /// Tab's focused Pane when nil), or closes an open one with no change. A
+  /// one-Pane Tab gets no picker.
+  private func toggleLayoutPicker(_ state: inout State, sourcePaneID: PaneID?) -> Effect<Action> {
+    if let picker = state.layoutPicker {
+      state.layoutPicker = nil
+      return refocusSurface(picker.paneID)
+    }
+    guard
+      let paneID = sourcePaneID ?? focusedPaneID(state: state),
+      let address = hierarchyClient.addressOf(paneID),
+      let tab = findTab(address, in: hierarchyClient.snapshot())
+    else { return .none }
+    state.layoutPicker = LayoutPickerFeature.State(splitTree: tab.splitTree, focusedPaneID: paneID)
+    return .none
+  }
+
+  /// Closes the Layout picker. Apply goes through the router, which arranges
+  /// the Tab and makes the Pane first responder again; cancel only gives
+  /// focus back.
+  private func closeLayoutPicker(
+    _ state: inout State, delegate: LayoutPickerFeature.Action.Delegate
+  ) -> Effect<Action> {
+    guard let paneID = state.layoutPicker?.paneID else { return .none }
+    state.layoutPicker = nil
+    switch delegate {
+    case .apply(let preset):
+      return .send(.paneActionRouter(.requested(paneID, .arrange(preset: preset))))
+    case .cancel:
+      return refocusSurface(paneID)
+    }
+  }
+
+  /// Gives key focus back to `paneID` after an overlay that held it closes.
+  /// Async, like the router's focus moves, so the overlay has left the view
+  /// tree before the surface becomes first responder.
+  private func refocusSurface(_ paneID: PaneID) -> Effect<Action> {
+    .run { [client = hierarchyClient] _ in
+      await MainActor.run { client.focusSurfaceView(paneID) }
+    }
+  }
+
+  /// The Tab at `address` in `catalog`.
+  private func findTab(_ address: PaneAddress, in catalog: Catalog) -> Tab? {
+    catalog.projects.first(where: { $0.id == address.projectID })?
+      .worktrees.first(where: { $0.id == address.worktreeID })?
+      .tabs.first(where: { $0.id == address.tabID })
+  }
+
   private func focusedPaneID(state: State) -> PaneID? {
     let catalog = hierarchyClient.snapshot()
     let activeTabID = catalog
