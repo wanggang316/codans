@@ -48,11 +48,11 @@ const other = otherLocale(locale);
     </script>
   </head>
   <body>
-    <Nav locale={locale} />
+    <Nav locale={locale} page={page} />
     <main>
       <slot />
     </main>
-    <Footer locale={locale} page={page} />
+    <Footer locale={locale} />
 
     <script is:inline define:vars={{ api: LINKS.latestReleaseApi }}>
       // Download links start at the stable-named asset URL. Point them at the
