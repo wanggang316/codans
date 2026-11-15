@@ -11,10 +11,9 @@ export const TRAIT_STYLES: Record<string, TraitStyle> = {
     color: "#ff375f",
     icon: '<path d="M10 4c.6 4.6 3.4 7.4 8 8-4.6.6-7.4 3.4-8 8-.6-4.6-3.4-7.4-8-8 4.6-.6 7.4-3.4 8-8zM19 2v4M17 4h4" />',
   },
-  // The worktree symbol of the app: three points with dotted lines between them.
   parallel: {
     color: "#5b7cfa",
-    icon: '<g fill="currentColor" stroke="none"><circle cx="12" cy="5" r="2.6" /><circle cx="4.5" cy="18.5" r="2.6" /><circle cx="19.5" cy="18.5" r="2.6" /></g><path d="M12 5 4.5 18.5M4.5 18.5h15M19.5 18.5 12 5" pathLength="12" stroke-dasharray="0 1" stroke-width="1.9" />',
+    icon: '<path d="M6 3v12" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M18 9a9 9 0 0 1-9 9" />',
   },
   native: {
     color: "#d946ef",
