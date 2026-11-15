@@ -193,3 +193,9 @@ bash .claude/skills/self-verify/tests/smoke_test.sh      # real Debug build, end
 ```
 
 Edit the relevant rule in place when a run teaches something durable; do not append a dated field note.
+
+## Workflow End-to-End Run
+
+`workflow/harness.sh <Debug Codans.app> all` runs the built-in workflows (review-loop, handoff, advisor) on an
+isolated instance with a stand-in `claude` participant. Run it when the workflow engine, its RPC, or the
+built-in workflow definitions change. Do not run it while another instance from this skill uses the same build.

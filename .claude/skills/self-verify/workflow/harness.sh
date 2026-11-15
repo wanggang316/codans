@@ -16,7 +16,7 @@
 set -uo pipefail
 APP="$1"
 PHASE="${2:-all}"
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
 SCRATCH="${CODANS_WORKFLOW_TEST_DIR:-$(mktemp -d -t codans-workflow-test)}"
 mkdir -p "$SCRATCH"
 CLI="$APP/Contents/Resources/bin/codans-dev"
@@ -64,7 +64,7 @@ export CODANS_WORKFLOWS_DIR="$WORKFLOWS"
 setup() {
   : >"$RESULTS"
   rm -rf "$CONF" "$RUN" "$WORKFLOWS"; mkdir -p "$CONF" "$RUN" "$WTS" "$FAKEBIN" "$FAKESTATE" "$LOGS" "$WORKFLOWS"
-  bash "$REPO_ROOT/docs/user-tests/_shared/fixtures/setup/restore-repo-multi-branch.sh" "$FIX" >/dev/null
+  bash "$REPO_ROOT/.claude/skills/self-verify/fixtures/restore-repo.sh" "$FIX" >/dev/null
   git -C "$FIX" checkout -q feat/header-redesign
   # A participant: idles at a prompt, looks like Claude working while it
   # "thinks", then runs the delivery command it was handed. Verdicts are
