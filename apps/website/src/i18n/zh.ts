@@ -16,6 +16,7 @@ export const zh: Dictionary = {
     lede: '{article}Coding Agent 的<br class="min-[480px]:hidden" />{trait}开发环境。',
     traits: [
       { id: "performance", article: "", label: "高性能" },
+      { id: "modern", article: "", label: "现代" },
       { id: "parallel", article: "", label: "并行" },
       { id: "native", article: "", label: "原生" },
       { id: "open", article: "", label: "开源" },

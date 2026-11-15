@@ -20,6 +20,7 @@ export const en = {
     lede: '{article} {trait} <br class="min-[480px]:hidden" />development environment for coding&nbsp;agents.',
     traits: [
       { id: "performance", article: "A", label: "high-performance" },
+      { id: "modern", article: "A", label: "modern" },
       { id: "parallel", article: "A", label: "parallel" },
       { id: "native", article: "A", label: "native" },
       { id: "open", article: "An", label: "open-source" },
