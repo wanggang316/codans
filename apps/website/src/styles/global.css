@@ -165,6 +165,17 @@
     letter-spacing: -0.032em;
     text-wrap: balance;
   }
+  .rotator {
+    display: inline-block;
+    white-space: nowrap;
+    transition:
+      opacity 0.25s ease,
+      transform 0.25s ease;
+  }
+  .rotator[data-state="out"] {
+    opacity: 0;
+    transform: translateY(0.16em);
+  }
   .heading {
     font-size: clamp(25px, 2.6vw, 33px);
     line-height: 1.16;
