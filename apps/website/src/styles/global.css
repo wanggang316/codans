@@ -138,12 +138,6 @@
   .site-header[data-scrolled] {
     border-bottom-color: var(--line);
   }
-  /* On the home page the name comes in while the hero title goes out; `--hero-out` is that
-     progress, from 0 to 1. The home page script sets it. */
-  .site-header[data-collapse] .brand-name {
-    opacity: var(--hero-out, 0);
-    transform: translateY(calc((1 - var(--hero-out, 0)) * 10px));
-  }
   .logo {
     flex: none;
     overflow: visible;
@@ -154,10 +148,29 @@
   }
   @media (prefers-reduced-motion: no-preference) {
     .brand:hover .logo-tile,
-    .brand:focus-visible .logo-tile,
-    .brand[data-spark] .logo-tile {
+    .brand:focus-visible .logo-tile {
       animation: logo-spark var(--duration, 4.1s) ease-in-out infinite;
       animation-delay: var(--delay);
+    }
+    /* One round: each tile flickers one time and ends at full strength. */
+    .brand[data-spark] .logo-tile {
+      animation: logo-spark-once var(--once-duration, 0.9s) ease-in-out both;
+      animation-delay: var(--once-delay, 0s);
+    }
+  }
+  @keyframes logo-spark-once {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    22% {
+      opacity: 0.3;
+    }
+    48% {
+      opacity: 0.9;
+    }
+    70% {
+      opacity: 0.45;
     }
   }
   @keyframes logo-spark {
