@@ -44,7 +44,7 @@ struct ShortcutSchemaAuditTests {
     #expect(ShortcutSchema.app.entry(for: .toggleSidebar)?.category == .general)
   }
 
-  /// ADR 0010: the window-wide Archive / Delete Worktree chords must not take the
+  /// ADR 0011: the window-wide Archive / Delete Worktree chords must not take the
   /// text-editing `⌘⌫` / `⌘⇧⌫` from a terminal Pane or a text field, and must not
   /// clash with another default.
   @Test

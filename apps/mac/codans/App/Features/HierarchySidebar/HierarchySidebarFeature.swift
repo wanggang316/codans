@@ -146,7 +146,7 @@ struct HierarchySidebarFeature {
     /// dialog. Non-nil → dialog visible. Destructive, so always gated.
     var pendingRemoveAllMerged: PendingMergedBatch?
     /// Pending archive awaiting its confirmation dialog. Non-nil → dialog
-    /// visible. Every interactive archive asks (ADR 0010): archive stops the
+    /// visible. Every interactive archive asks (ADR 0011): archive stops the
     /// Worktree's Pane sessions, and the window-wide chord is easy to press
     /// by accident.
     var pendingWorktreeArchive: PendingWorktreeArchive?

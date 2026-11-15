@@ -8,7 +8,7 @@ codans shows the Pull Request of each Worktree in the sidebar badge, the
 popover, the status bar, and the worktree header. It also runs write actions
 (merge, close, mark ready, rerun failed jobs) and opens the Pull Request or the
 Project on the Git Platform. Only GitHub supports this, through the `gh` CLI. See
-[Git Platform Integration](../design-docs/git-platform-integration.md) (formerly GitHub Integration).
+[Git Platform Integration](../domains/git-platform.md).
 
 `RemoteInfo` does not check the host, so the app sends a GitLab `origin` to
 `gh`, and the fetch fails. `RemoteInfo` also keeps only the first two path
@@ -51,7 +51,7 @@ GitLab users run a self-managed instance.
    the same rule as for `gh`.
 4. **Terms.** "Git Platform" names GitHub and GitLab. "Pull Request" is the
    provider-neutral concept; the UI label is "PR" for GitHub and "MR" for
-   GitLab (see [GLOSSARY](../../GLOSSARY.md)).
+   GitLab (see [GLOSSARY](../glossary.md)).
 5. **One Git Platform interface.** All Git Platform behavior is behind one interface
    with one implementation per Git Platform (GitHub, GitLab). Fetch scheduling,
    cache, invalidation, the reducer, and the views use only this interface and

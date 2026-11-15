@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Observable that tracks whether the main codans window is the key window. Used by
 /// `MainWindowCommands` to scope the Archive / Delete Worktree commands to the main window
-/// (ADR 0010): they act on the selected Worktree from any focus location in that window,
+/// (ADR 0011): they act on the selected Worktree from any focus location in that window,
 /// but stay disabled while Settings, the Diff window, a sheet, or a popover is key.
 ///
 /// Key-window changes post `NSWindow.didBecomeKeyNotification` /

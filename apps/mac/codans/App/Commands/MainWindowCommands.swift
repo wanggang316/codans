@@ -62,7 +62,7 @@ struct MainWindowCommands: Commands {
   /// observation, so an override rebinds the menu items without a manual refresh.
   let shortcuts: ResolvedShortcutMap
   /// Key-window tracker. Scopes Archive / Delete Worktree to the main window
-  /// (ADR 0010); see `worktreeRemovalCommandsEnabled`.
+  /// (ADR 0011); see `worktreeRemovalCommandsEnabled`.
   let mainWindowKey: MainWindowKeyObserver
   /// Source for the user-defined command rows merged into the **Worktree** menu.
   /// Read in the menu body so an add / edit / delete / reorder in Settings
@@ -233,7 +233,7 @@ struct MainWindowCommands: Commands {
       Divider()
 
       // Archive / Delete act on the selected Worktree from any focus location in
-      // the main window (ADR 0010). Their default chords (`⌃⌘⌫` / `⌃⌘⇧⌫`) leave
+      // the main window (ADR 0011). Their default chords (`⌃⌘⌫` / `⌃⌘⇧⌫`) leave
       // `⌘⌫` / `⌘⇧⌫` to the focused terminal Pane or text field.
       Button("Archive Worktree") {
         store()?.send(.archiveCurrentWorktreeRequested)
@@ -482,7 +482,7 @@ struct MainWindowCommands: Commands {
     )
   }
 
-  /// Enablement rule for Archive / Delete Worktree (ADR 0010): the main window is
+  /// Enablement rule for Archive / Delete Worktree (ADR 0011): the main window is
   /// key and a Worktree is selected. The focus location in the main window does
   /// not matter. The reducer still rejects the root Worktree and Workspace rows.
   static func worktreeRemovalCommandsEnabled(

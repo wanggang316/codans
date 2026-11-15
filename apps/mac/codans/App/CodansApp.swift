@@ -57,7 +57,7 @@ struct CodansApp: App {
   /// are needed here.
   @State private var commandKeyObserver = CommandKeyObserver()
   /// Tracks whether the main window is key. `MainWindowCommands` reads it to scope the
-  /// Archive / Delete Worktree commands to the main window (ADR 0010).
+  /// Archive / Delete Worktree commands to the main window (ADR 0011).
   @State private var mainWindowKeyObserver = MainWindowKeyObserver()
   /// `SwiftUI.App` gives us no `applicationWillTerminate` hook on its own;
   /// the adaptor bridges AppKit's termination callback so we can flush

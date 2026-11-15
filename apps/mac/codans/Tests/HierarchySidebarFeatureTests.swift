@@ -848,7 +848,7 @@ struct HierarchySidebarFeatureTests {
     #expect(scriptCalls.value == 0)
   }
 
-  /// ADR 0010: archive asks for confirmation every time, not once per session.
+  /// ADR 0011: archive asks for confirmation every time, not once per session.
   /// A confirmed archive must not suppress the dialog for the next one, and
   /// Cancel must leave the Worktree untouched.
   @Test

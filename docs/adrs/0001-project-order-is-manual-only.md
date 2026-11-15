@@ -50,7 +50,7 @@ is `joinOrder`, so a user who never reorders sees Projects sorted by `addedAt`.
 - With the footer button removed, no UI can select `joinOrder` or
   `activeFirst`. Keeping them keeps dead code and a second source of order.
 - The array order is already the source of order for worktrees inside a
-  Project segment (see [Worktree](../design-docs/worktree.md)). One rule for
+  Project segment (see [Worktree](../domains/worktree.md)). One rule for
   both levels is easier to keep correct.
 - Finder and Xcode navigators reorder sidebar items by direct drag, not by an
   edit mode.

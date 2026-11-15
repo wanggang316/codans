@@ -1,4 +1,4 @@
-# 0010. The Archive and Delete Worktree chords work in the whole main window
+# 0011. The Archive and Delete Worktree chords work in the whole main window
 
 Status: Accepted
 

@@ -30,7 +30,7 @@ Sections cannot nest, and `List(children:)` / `OutlineGroup` do not support
    content can stay SwiftUI, hosted in each cell.
 2. **Host level.** The top level is the **Host**: **This Mac** for local
    Projects, and one row per Host that has Projects. Hosts come from the Host
-   list in Settings (see the [glossary](../../GLOSSARY.md)).
+   list in Settings (see the [glossary](../glossary.md)).
 3. **Only This Mac → no Host level.** When every Project in the catalog is on
    This Mac, the sidebar shows no Host rows. Projects are then the top level.
    This check uses all Projects, not the filtered Projects, so a sidebar filter
