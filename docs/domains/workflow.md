@@ -168,3 +168,8 @@ Runs live in the Worktree, not in `~/.codans/`, so a participant reads a deliver
 ```
 
 `CodansCore/Workflow/` holds the pure parts: definitions, parser, validator, expressions, discovery, the run store layout, and `WorkflowMachine`. The machine takes events and returns effects; it has no I/O, no clock, and no randomness, so the whole execution semantics is tested as "events in, effects out". The app's `WorkflowEngine` owns the live runs, gives each run one serial effect queue, interprets effects against the app, and reports results back as events. Run state lives in the observable engine, not in a TCA reducer, because long-lived effect queues do not fit a reducer's effect lifetime; TCA holds only the start panel draft. `Runtime/` imports no workflow type.
+
+## Related decisions
+
+- [ADR 0015](../adrs/0015-workflow-completion-is-an-explicit-delivery.md): a step completes by an explicit delivery, not by idle detection.
+- [ADR 0016](../adrs/0016-repository-workflows-with-commands-need-trust-from-the-app.md): trust for repository workflows that run commands.

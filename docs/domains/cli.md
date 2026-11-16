@@ -164,3 +164,8 @@ The app bundle contains the Agent Skills of the repository's `skills/` directory
 ## Implementation shape
 
 `codans-cli` is one ArgumentParser command tree. It depends only on `CodansKit`, `CodansIPC`, and `CodansCore`. `CodansKit` holds the client side: socket discovery and dialing, `RPCClient`, `AliasResolver`, the renderer and envelope, the exit and error codes, and the skill installer. `CodansIPC` holds the wire types, the framing, and `IPC.Method`, shared by both sides. In the app, `App/Features/Socket/` holds the server, the per-connection loop, `MethodRouter`, and one handler group per namespace. The handlers convert wire types and errors, and call the MainActor owners of app state. The CLI installer is an app client behind the Settings card.
+
+## Related decisions
+
+- [ADR 0006](../adrs/0006-project-identity-is-host-and-path.md): Project identity for `--host` and path targets.
+- [ADR 0014](../adrs/0014-cli-exit-codes-classify-by-the-action-of-the-caller.md): exit codes classify a failure by the action of the caller.

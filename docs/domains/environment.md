@@ -116,3 +116,8 @@ A login-shell launch has this contract:
 ## Implementation shape
 
 `CodansCore/Environment/` holds the channel and the variable catalog. `AppDirectories` derives every root and applies the overrides. Socket resolution has one function on each side: `SocketDiscovery` in `CodansKit` for the CLI, and `SocketPaths` in the app. `PaneEnvironment` in `Runtime/` builds the Pane environment, with `HierarchyManager` adding the Project and hierarchy variables. `Process/` holds `CommandRunner` and the login-shell launch. The git layer selects the mode for each git command.
+
+## Related decisions
+
+- [ADR 0012](../adrs/0012-the-build-channel-separates-debug-and-release.md): one bundle id, the build channel, and the CLI name as the channel.
+- [ADR 0013](../adrs/0013-background-commands-use-the-login-shell-only-when-necessary.md): when a background command uses the login shell.

@@ -169,3 +169,8 @@ A Host row shows no connection state (ADR 0003). A failed Project row carries th
               TerminalEngine + RemoteSurfaceCommand (Pane command)
  App/         RemoteProjectFeature (sheet), sidebar guards, Hosts settings
 ```
+
+## Related decisions
+
+- [ADR 0002](../adrs/0002-sidebar-outline-with-host-level.md), [ADR 0003](../adrs/0003-hosts-are-managed-records.md), [ADR 0006](../adrs/0006-project-identity-is-host-and-path.md): Hosts and Project identity.
+- [ADR 0018](../adrs/0018-host-zmx-starts-in-the-gui-session-when-the-keychain-is-locked.md): the Host zmx daemon in the GUI login session.

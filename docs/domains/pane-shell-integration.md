@@ -125,3 +125,8 @@ Rule: anything that waits for "the script finished" keys on `paneInfoChanged(.ch
 ```
 
 `PaneDaemonBringup` locates the bundled zmx binary and the runtime directory. The build scripts in `apps/mac/scripts/` build the fork into `GhosttyKit.xcframework` and copy its integration scripts and terminfo into the app bundle.
+
+## Related decisions
+
+- [ADR 0017](../adrs/0017-local-panes-start-through-a-command-wrapper-in-the-ghostty-fork.md): the command wrapper and the feature defaults in the fork.
+- [ADR 0009](../adrs/0009-agent-title-and-pane-title-follow-separate-standards.md): why the `title` feature is off.
