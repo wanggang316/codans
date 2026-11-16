@@ -18,7 +18,7 @@ Availability: Available. Hidden: the Tag filter button of the sidebar footer, an
 | Pane layout, splits, terminal surfaces, Pane title | [Terminal Runtime](terminal-runtime.md) |
 | Run button and its menu | [Project Commands](project-commands.md) |
 | Open button and default editor | [Editor Integration](editor-integration.md) |
-| New Agent sheet | [Agent Profiles and Hand-off](agent-profiles-and-handoff.md) |
+| New Agent dialog | [Agent Profiles and Hand-off](agent-profiles-and-handoff.md) |
 | Default chords | [Keyboard Shortcuts](keyboard-shortcuts.md) |
 
 ## Window regions
@@ -93,7 +93,7 @@ The header is the window toolbar of the detail column (`WorktreeDetailView.workt
 
 1. **Back / Forward** over the Worktree visit history (in memory).
 2. **Identity**: the same icon as the sidebar row (unread replaces it with a bell), the branch line, and the Worktree and Project names. A click on the branch line opens the branch switcher ([Worktree](worktree.md)).
-3. **New Agent**, which opens the New Agent sheet.
+3. **New Agent**, which opens the New Agent dialog.
 4. **Status slot** (below).
 5. **Run** and **Open** split buttons.
 
@@ -101,7 +101,7 @@ Rules:
 
 - **One toolbar declaration for both modes.** While a creation is in progress, the same slots show skeleton stand-ins, and New Agent stays live. If the two modes declared different item sets, `NSToolbar` would rebuild every item and the items would slide in from the leading edge. Change the content of a slot, not the item set.
 - The toolbar shows no items for a failed creation, and for a selection whose rows were removed.
-- The header does not open an editor itself. It sends a delegate action to `RootFeature`, which forwards to `EditorFeature`. `EditorFeature.resolveDefault` (Project override, then global default, then Finder) is the single source for both the Open button label and its action.
+- The header does not open an editor itself. It sends a delegate action to `RootFeature`, which forwards to `EditorFeature`. The Open button label and the Open action must name the same tool; [Editor Integration](editor-integration.md) owns the resolution order.
 
 ### Status slot
 

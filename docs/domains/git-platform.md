@@ -13,7 +13,7 @@ Availability: Available. The post-merge Worktree action setting has no effect (s
 | Placement of the toolbar status slot and the sidebar row | [Main Window](main-window.md) |
 | Pull Request summary on a Workspace group row | [Workspace](workspace.md) |
 | "Archive All Merged" and the Worktree lifecycle | [Worktree](worktree.md) |
-| The target ref that the Diff Viewer compares against | [Git Diff Viewer](git-diff-viewer.md) |
+| The base of the Outgoing comparison in the Diff window | [Git Diff Viewer](git-diff-viewer.md) |
 
 ## No HTTP, no tokens
 
@@ -29,7 +29,7 @@ codans sends no HTTP request to a Git Platform and stores, reads, or forwards no
   - `checkRollup`: the CI checks, read in the same query as the rest. There is no separate checks call.
   - `mergeState`: clean, conflicted, behind, blocked, draft, or unknown, with an optional reason.
   - `mergeOptions` and `canRerunFailedChecks`: capability differences between Git Platforms are data on the snapshot, not optional protocol methods.
-  - `baseRefName` and `baseRepositoryURL`: the target of the Pull Request, for the Diff Viewer. When they are missing, do not guess the target from the branch name; a fork Pull Request targets another repository.
+  - `baseRefName` and `baseRepositoryURL`: the target of the Pull Request. The Diff window receives them, but its Outgoing base does not use them (see [Git Diff Viewer](git-diff-viewer.md)). When they are missing, do not guess the target from the branch name; a fork Pull Request targets another repository.
 - **Pairing**: a Worktree shows the snapshot whose source branch equals `Worktree.branch`. Several Worktrees of one unit can show the same snapshot. Two Workspace members with the same branch name in different repositories never mix, because cache, cancellation, queue, and write targets are per unit.
 
 The reducer keeps the batches per unit and projects them into a per-Worktree map that the views read. The batches are also written to a disk cache (`github-snapshots.json` in the app cache directory, for both Git Platforms) only to paint badges at launch. A cache entry that does not decode is dropped, entries for Projects that left the catalog are dropped, and the next fetch replaces the rest.
