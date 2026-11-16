@@ -33,8 +33,6 @@ A normal child exit gives no notification. A Pane that never produced output giv
 
 A command-finished event is dropped when the setting is off, when the exit code is 130 or 143 (the user cancelled), when the command ran shorter than the threshold (default 10 s, Settings → Notifications), or when the user typed in that Pane in the last 3 seconds. Keystrokes reach the interpreter through a side channel (`PaneKeyboardActivityTracker`), not through `TerminalEvent` and not through the catalog: a keystroke must not cause a catalog save or a SwiftUI render.
 
-> **Discrepancy:** the caption in Settings → Notifications says notifications are suppressed for 1 second after typing. The interpreter uses 3 seconds.
-
 **Mute.** "Mute notifications" in the Pane context menu toggles the label `notifications:muted` in `Pane.labels`, which the catalog saves. The detector drops all events of a muted Pane before the gate. The `mute` section of the settings file is not read by any path.
 
 ## The path
