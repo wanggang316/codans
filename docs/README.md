@@ -1,64 +1,76 @@
 # Documentation
 
-This directory is the **system of record** for all project knowledge. If it's not here, it doesn't exist to the agent.
+This directory holds the current knowledge of the project: what the system does
+today, the constraints a change must respect, and the reasons that are hard to
+find again. Designs and execution plans are not kept here. They live in tickets
+and pull requests as records of one delivery.
 
-## Structure
+## Where to look
 
-| Directory / File | Purpose |
+| Location | Read it when |
 |---|---|
-| [architecture.md](architecture.md) | System architecture, domains, layers, invariants |
-| [product-spec.md](product-spec.md) | What the product is, for whom, and its boundaries |
-| [GLOSSARY.md](../GLOSSARY.md) | Domain terms, including the planned Workspace group model |
-| [design-docs/](design-docs/) | Per-subsystem design: invariants and the *why* behind decisions |
-| [adr/](adr/) | Architecture decision records: one durable cross-cutting decision per file |
-| [references/](references/) | External references, API docs, integration notes |
-| [generated/](generated/) | Auto-generated artifacts — do not edit manually |
+| [product.md](product.md) | You need to know what Codans is, for whom, and where its boundaries are |
+| [architecture.md](architecture.md) | You need module responsibilities, dependency direction, or a cross-module invariant |
+| [glossary.md](glossary.md) | You name a domain concept. Use its terms and avoid the synonyms it rejects |
+| [domains/](domains/) | You change or debug one area. Each page owns the behavior contract of its topic |
+| [adrs/](adrs/) | You want the reason for a decision, or your change contradicts one |
+| [runbooks/](runbooks/) | You do an operation: setup, release, recovery |
+| [lessons-learned/](lessons-learned/) | You see a failure that looks familiar. Each page is the root cause of one incident |
+| [agents/domain.md](agents/domain.md) | You are an agent skill that reads the glossary and the decision records |
+
+## Domains
+
+| Page | Topic |
+|---|---|
+| [agent-profiles-and-handoff.md](domains/agent-profiles-and-handoff.md) | Named agent launch presets and the handoff of a task between agents |
+| [agent-skill-completion.md](domains/agent-skill-completion.md) | Agent Skill completion in prompts |
+| [agent-state.md](domains/agent-state.md) | Agent detection, agent runtime state, and the Agents View |
+| [appearance.md](domains/appearance.md) | App appearance and the terminal theme |
+| [cli.md](domains/cli.md) | The `codans` CLI and its RPC contract |
+| [command-palette.md](domains/command-palette.md) | The command palette |
+| [command-queue.md](domains/command-queue.md) | Queued and scheduled commands for a pane |
+| [editor-integration.md](domains/editor-integration.md) | Opening a Worktree in an external tool |
+| [environment.md](domains/environment.md) | Build channels, paths, environment variables, and command launch |
+| [git-diff-viewer.md](domains/git-diff-viewer.md) | The read-only diff window |
+| [git-platform.md](domains/git-platform.md) | GitHub and GitLab pull request data and actions |
+| [keyboard-shortcuts.md](domains/keyboard-shortcuts.md) | The shortcut registry, conflicts, and persistence |
+| [main-window.md](domains/main-window.md) | The single main window: sidebar, header, and tab bar |
+| [notifications.md](domains/notifications.md) | The notification inbox, badges, and system banners |
+| [pane-shell-integration.md](domains/pane-shell-integration.md) | How a pane starts its shell and its session daemon |
+| [project-commands.md](domains/project-commands.md) | Run commands, command suggestions, and command icons |
+| [project-tags.md](domains/project-tags.md) | Project tags |
+| [remote-projects.md](domains/remote-projects.md) | Projects on a Host over SSH |
+| [settings.md](domains/settings.md) | The Settings window and `settings.json` |
+| [terminal-runtime.md](domains/terminal-runtime.md) | Terminal action routing and surface reclaim |
+| [updates-and-release.md](domains/updates-and-release.md) | Update channels and the release pipeline |
+| [workflow.md](domains/workflow.md) | Multi-agent workflows |
+| [workspace.md](domains/workspace.md) | Workspaces and workspace groups |
+| [worktree.md](domains/worktree.md) | The Worktree lifecycle, ordering, status, and processes |
 
 ## Conventions
 
-This directory is a curated **Library**, not a logbook: durable invariants,
-boundaries, and the *why* behind non-obvious decisions. Implementation progress
-and "what we built" belong to the code, git history, and the CHANGELOG.
+Maintain these documents with the `document` skill. The rules below are the
+ones a reader also needs.
 
-- Every document should be self-contained enough for an agent to act on it
-- Use relative links between documents
-- Keep documents focused: one subsystem / concept per file
-- Delete superseded or obsolete docs rather than letting them rot — git history
-  preserves them. Prefer one accurate doc per subsystem over many stale ones.
-
-### Write the present, not the path to it
-
-Describe the system **as it is now**, in the present tense. Do **not** narrate
-how it got here — no "从前 / 曾经 / 取代了 / 降到 N 级 / v1→v2 / superseded /
-used to". A reader wants today's truth, not the changelog. If a transition's
-*rationale* is load-bearing (a constraint a future maintainer must not undo),
-record it in a dedicated `## 技术决策 / Decisions` section as a decision entry —
-never woven into the descriptive prose.
-
-### Feature availability and implementation references
-
-A symbol existing in code does **not** mean the feature is live: it may be
-hidden, unwired, or a stub. Feature documents describe availability by user entry point. Use the document's language:
-
-| Availability / 状态 | Meaning |
-|---|---|
-| Available / 已上线（可见） | Implemented with a reachable user entry point |
-| Hidden / 已实现但隐藏 | Implemented, but its entry point is hidden or unwired |
-| Planned / 已设计未实现 | No working implementation |
-
-For a mixed subsystem, state which operations are available, hidden, or planned.
-An existing `Status: Implemented` field must describe that scope explicitly.
-
-Link feature contracts to their implementation entry points. Keep index summaries
-focused on responsibilities and link to the owning document for capability
-limits. Describe implemented behavior in the present tense and separate
-unimplemented capabilities explicitly.
-
-Review dates, inspection notes, implementation milestones, and change narratives
-belong in review reports or change history, not feature explanations. Runtime
-sequences and schema-conversion rules belong in the knowledge base when they
-explain actual system behavior.
-
-Removed behavior must not remain in current feature descriptions or acceptance
-cases. Git history retains superseded designs. Dated test results and incident
-reports describe their recorded run or incident, not current feature availability.
+- **One owner for each fact.** A parent page explains a relationship and links
+  the page that owns the detail. Do not copy.
+- **Current state, present tense.** Describe the code on the branch. Do not
+  narrate how it got there: no history, dates, ticket ids, or progress. Git
+  history and the CHANGELOG hold that.
+- **Availability by user entry point.** A symbol in the code does not make a
+  feature live. A domain page describes a capability as `Available`
+  (implemented, with a reachable entry point) or `Hidden` (implemented, but the
+  entry point is hidden or unwired). A capability without a working
+  implementation is not in a domain page. It stays in its ticket.
+- **Decisions go to `adrs/`.** A domain page states rules and links the record
+  that gives the reason. Record a decision when a reader without the reason
+  could make a harmful change. A record has a status: `Proposed`, `Accepted`,
+  or `Superseded`. A new record replaces an old one; link both directions.
+- **Mark a known difference.** When the code does not follow an approved rule,
+  the page states what the code does and marks the difference. It does not
+  change the rule to fit the code.
+- **Historical records stay as written.** In `adrs/` and `lessons-learned/`,
+  update only status and links.
+- **English.** Use the terms of the glossary. Keep UI labels and identifiers
+  as they are in the code.
+- **Reachable.** Link each new page from this file.
