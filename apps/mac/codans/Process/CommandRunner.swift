@@ -71,7 +71,7 @@ extension CommandRunner {
   }
 }
 
-/// How the runner starts a command. See `docs/design-docs/environment.md`.
+/// How the runner starts a command. See `docs/domains/environment.md`.
 nonisolated enum CommandLaunch: Equatable, Sendable {
   /// Start the executable with exactly `env`. For `ssh` (the remote login
   /// shell sets the environment), bundled internal binaries, and commands

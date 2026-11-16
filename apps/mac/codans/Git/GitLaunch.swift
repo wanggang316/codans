@@ -1,7 +1,7 @@
 import Foundation
 
 /// Chooses how a local `git` invocation starts (see
-/// `docs/design-docs/environment.md`). A command that reaches a remote may
+/// `docs/domains/environment.md`). A command that reaches a remote may
 /// start credential, LFS, or ssh helpers from the user's `PATH`, so it runs
 /// through the login shell. Every other git command runs often (status and
 /// diff refreshes) and starts directly, with one login-shell retry when it
