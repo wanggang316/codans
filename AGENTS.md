@@ -29,7 +29,7 @@ On Xcode 26.4+ (27 included), zig 0.15.2 cannot link against the stock macOS SDK
 
 ## Architecture Overview
 
-codans is a native macOS app that orchestrates terminals into a four-level hierarchy (Project → Worktree → Tab → Pane) for CLI-agent power users. It ships three co-versioned artifacts — the Mac app, the `codans` CLI, and a published Agent Skill — out of a Tuist-managed monorepo. The runtime is Swift 6 with hybrid TCA + `@Observable`, libghostty embedded via submodule, and JSON-RPC over a Unix socket between app and CLI. Architecture is adapted from the user's reference projects **supacode** and **supaterm**.
+codans is a native macOS app that orchestrates terminals into a four-level hierarchy (Project → Worktree → Tab → Pane) for CLI-agent power users. It ships three co-versioned artifacts — the Mac app, the `codans` CLI, and a published Agent Skill — out of a Tuist-managed monorepo. The runtime is Swift 6 with hybrid TCA + `@Observable`, libghostty embedded via submodule, and JSON-RPC over a Unix socket between app and CLI.
 
 See [Architecture](docs/architecture.md) for domains, layers, and dependency rules.
 
@@ -38,7 +38,7 @@ See [Architecture](docs/architecture.md) for domains, layers, and dependency rul
 ```
 codans/
 ├── apps/mac/                   # Mac platform: Tuist project, sources, ghostty submodule
-│   ├── codans/                 # The Mac app (App / Runtime / Hooks / Process / Git / GitHub)
+│   ├── codans/                 # The Mac app (App / Runtime / Process / Git / GitPlatform)
 │   ├── codans-cli/             # `codans` CLI binary (RPC client to the running app)
 │   ├── CodansKit/              # CLI-side library shared by codans-cli + tests
 │   ├── CodansCore/          # Pure domain models (Project / Worktree / Tab / Pane / Tag)
@@ -46,7 +46,8 @@ codans/
 │   ├── ThirdParty/ghostty/     # libghostty submodule (built into GhosttyKit.xcframework)
 │   ├── Project.swift           # Tuist project definition
 │   └── Makefile                # Mac-platform build targets
-├── docs/                       # Project documentation (architecture, specs, design, plans)
+├── apps/website/               # Product website (Astro)
+├── docs/                       # Current knowledge (product, architecture, domains, ADRs, runbooks)
 ├── skills/                     # Published Agent Skill content (text-only, no engineering coupling)
 ├── scripts/                    # Repo-wide scripts
 ├── mise.toml                   # Pinned tool versions (tuist / zig / swiftlint / xcbeautify)
@@ -60,7 +61,7 @@ codans/
 1. **AGENTS.md is a map, not a manual** — keep this file under 150 lines
 2. **Validate boundaries** — parse and validate data at system edges, never probe
 3. **Prefer shared utilities** — centralize invariants, avoid hand-rolled duplicates
-4. **Every complex change gets an execution plan** — plan before building
+4. **Every complex change gets a plan** — write it in the ticket before building, not in `docs/`
 5. **Fix the environment, not the prompt** — when agents struggle, add missing tools/docs/guardrails
 
 ## Documentation
@@ -68,18 +69,22 @@ codans/
 
 | Directory | Purpose |
 |---|---|
-| [docs/architecture.md](docs/architecture.md) | System architecture, domains, layers |
-| [docs/product-spec.md](docs/product-spec.md) | What the product is, for whom, and its boundaries |
-| [docs/design-docs/](docs/design-docs/) | Design documents |
+| [docs/README.md](docs/README.md) | Navigation: which page owns which topic, and the writing conventions |
+| [docs/product.md](docs/product.md) | What the product is, for whom, and its boundaries |
+| [docs/architecture.md](docs/architecture.md) | Module responsibilities, dependency direction, cross-module invariants |
+| [docs/glossary.md](docs/glossary.md) | Domain terms. Use them in code, tickets, and docs |
+| [docs/domains/](docs/domains/) | One page per area: model, rules, boundaries. Read the page before you change the area |
+| [docs/adrs/](docs/adrs/) | Decision records: the reason behind a rule |
+| [docs/runbooks/](docs/runbooks/) | Operations: crash reporting, the Homebrew release |
 | [docs/lessons-learned/](docs/lessons-learned/) | Root-cause write-ups of hard bugs — pitfalls, fixes, recurrence checks |
-| [docs/references/](docs/references/) | External docs, API references |
-| [docs/generated/](docs/generated/) | Auto-generated artifacts |
+
+Designs and execution plans live in tickets and pull requests, not in `docs/`. When a change alters behavior, update the domain page in the same pull request.
 
 ## Working with This Repository
 
 
 - Before making changes, read the relevant docs for the area you're touching
-- For complex work, create an execution plan before starting
+- For complex work, write a plan in the ticket before starting
 - Run lint and tests before submitting PRs
 - Follow the dependency rules in architecture docs
 - When something fails, ask: "What capability is missing?" — then add it
@@ -93,10 +98,10 @@ See [Quick Start](#quick-start). Top-level Makefile delegates every `mac-*` targ
 - **Language:** Swift 6 with strict concurrency. Targets are wired via Tuist; do not edit the generated `.xcodeproj`/`.xcworkspace` directly.
 - **Lint / format:** `swiftlint` (config `apps/mac/.swiftlint.yml`, `strict: true`) and `swift-format` (config `apps/mac/.swift-format.json`). Run `make mac-check` before committing.
 - **Architecture:** hybrid TCA + `@Observable`. Domain types live in `CodansCore`; wire protocol in `CodansIPC`; app features under `apps/mac/codans/App/Features/<Feature>/`.
-- **Module boundaries** (`Runtime`, `Hooks`, `Git`, `GitHub`, `App`) are enforced by folder convention + code review, not Tuist target edges. Do not add cross-module imports that bypass the documented boundary.
+- **Module boundaries** (`Runtime`, `Process`, `Git`, `GitPlatform`, `App`) are enforced by folder convention + code review, not Tuist target edges. Do not add cross-module imports that bypass the documented boundary.
 - **Subprocess:** always go through the shared `CommandRunner` in `apps/mac/codans/Process/`. Do not spawn `Process` directly inside feature modules.
 - **Naming:** Swift API Design Guidelines. Filenames match the primary type. TCA reducers end with `Feature`, views with `View`.
-- **Comments:** explain *why*, not *what*. Cite design-doc IDs when a non-obvious decision is encoded in code.
+- **Comments:** explain *why*, not *what*. Cite the ADR number or the domain page when a non-obvious decision is encoded in code.
 
 ## Agent skills
 

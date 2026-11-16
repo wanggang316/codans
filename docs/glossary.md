@@ -1,0 +1,120 @@
+# Codans
+
+## Workspace model
+
+These terms define the Workspace group model. See the
+[Workspace](domains/workspace.md) for its behavior.
+
+**Workspace**: A collection of source projects with a default workspace group
+and named workspace groups.
+
+**Workspace group**: One set of member checkouts within a Workspace. Membership
+refers to worktrees and does not change when a member switches branches.
+_Avoid_: Git worktree when referring to the whole group.
+
+**Default workspace group**: The group named `default` that references the
+existing main checkout of each source project. Its members can use different
+branches.
+
+**Member checkout**: The working directory of one source project within a
+workspace group.
+
+## Agents View
+
+These terms define what an Agents View row shows. See the
+[Agent State](domains/agent-state.md).
+
+**Agent runtime state**: The derived state of an agent in a pane: `idle`,
+`working`, `blocked`, `done`, or `error`. It comes from the OSC 7501 program
+status, or from the screen when the agent does not report.
+
+**Agent title**: The first line of an Agents View row. It is the OSC 7501
+`title` of the agent's root record, else the OSC 0/2 title that the agent set
+after it started, else the agent display name. A title from before the agent
+started, or one that says only the agent's name, is not an agent title. It is
+for display only and does not change the runtime state. See
+[ADR 0009](adrs/0009-agent-title-and-pane-title-follow-separate-standards.md).
+_Avoid_: agent activity text (the earlier name, which also showed the OSC 7501
+`message`); OSC status, because OSC 7501 also carries the runtime state.
+
+**Pane title**: The title of a pane card header, also shown by the tab chip of
+the pane's tab. At the shell prompt it is the working directory with `~` for
+the home directory; while a program runs it is the pane's OSC 0/2 title. It
+never comes from OSC 7501, so it can differ from the agent title of the same
+pane.
+
+## Sidebar
+
+**Project order**: The user-curated sequence of Projects in the sidebar. It is
+the order of `catalog.projects`; the user changes it by dragging a Project
+block. See [ADR 0001](adrs/0001-project-order-is-manual-only.md).
+_Avoid_: sort mode, join order, manual order.
+
+**Host**: A machine on which Projects live: This Mac, or a record in the Host
+list in Settings (Host address, Username, optional Port, optional Name,
+optional Icon). Every
+Project refers to exactly one Host. A Workspace and its member projects are on
+one Host. See [ADR 0002](adrs/0002-sidebar-outline-with-host-level.md) and
+[ADR 0003](adrs/0003-hosts-are-managed-records.md).
+_Avoid_: server, SSH alias.
+
+**Remote Project**: A Project whose root is on a Host other than This Mac.
+codans reaches it over SSH. The Add Project menu opens one with "Open Remote
+Project…", and the Project's menu changes its Host and path with "Edit Remote
+Project…". Its `ProjectKind` is `.remote`; the CLI JSON writes the kind as
+`server`. See [Remote Projects over SSH](domains/remote-projects.md).
+_Avoid_: Server project, remote connection, Connect to Server.
+
+**This Mac**: The Host of all local Projects. The sidebar shows Host rows only
+when at least one Project is on another Host. The CLI writes it as Host ID `0`.
+
+**Project identity**: A Project is identified by its Host and its root path.
+Two Projects on different Hosts can have the same root path; two Projects on
+the same Host cannot. A path from this Mac matches only Projects on This Mac.
+See [ADR 0006](adrs/0006-project-identity-is-host-and-path.md).
+_Avoid_: identifying a Project by its name or by its path alone.
+
+## Git platforms
+
+These terms define how codans relates a Worktree to a hosted review. See
+[ADR 0004](adrs/0004-gitlab-support-through-glab.md).
+
+**Git Platform**: The service that hosts the `origin` remote of a source
+repository and its reviews. codans supports GitHub and GitLab, on their
+public sites and on self-managed instances. codans calls the CLI of each Git
+Platform (`gh`, `glab`).
+A Git Platform is not a Host: a Host is a machine on which Projects live. Do not
+shorten Git Platform to "host" or "platform".
+_Avoid_: Code Host, Forge, Provider, host.
+
+**Git Platform alias**: A Settings entry that maps a remote host, as it appears
+in an `origin` URL, to a Git Platform kind and the API host that its CLI uses.
+See [ADR 0005](adrs/0005-git-platform-aliases.md).
+_Avoid_: Host alias, because a Host is a machine.
+
+**Pull Request**: A hosted review that asks to merge a source branch into a
+target branch. It is the provider-neutral concept: a GitHub pull request and a
+GitLab merge request are both Pull Requests. The UI shows the Git Platform's own
+label: "PR" for GitHub and "MR" for GitLab.
+_Avoid_: Merge Request, MR, and Change Request as domain terms. Use Merge
+Request and MR only in GitLab UI text and GitLab API code.
+
+## Agent Skills
+
+These terms define how codans finds the skills an agent can use. See the
+[Agent Skill Completion](domains/agent-skill-completion.md).
+
+**Agent Skill**: A folder with a `SKILL.md` file that an agent loads by
+itself. It is not a **Bundled Skill**: a skill that the codans app ships
+(`codans-cli`, `codans-workflow`) and `SkillInstaller` links into agent
+folders.
+_Avoid_: plugin, command.
+
+**Skill Location**: The rule by which one `AgentKind` finds Agent Skills: its
+user-level directories, project-level directories and how far it searches
+them, the environment variable that moves its config root, its Invocation
+Style, and its invocation position.
+_Avoid_: registry, skill dir.
+
+**Invocation Style**: How a prompt calls one Agent Skill explicitly: `/name`,
+`/skill:name`, `$name`, `@id`, or none.

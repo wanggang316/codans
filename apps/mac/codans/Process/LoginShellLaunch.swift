@@ -89,7 +89,7 @@ nonisolated enum LoginShell: Equatable, Sendable {
 /// `GIT_TERMINAL_PROMPT=0`, the `gh` / `glab` token stripping) true even when the
 /// rc exports a key the caller removed. `exec` keeps one process, so the
 /// runner's timeout and cancel kill the real command. See
-/// `docs/design-docs/environment.md`.
+/// `docs/domains/environment.md`.
 nonisolated enum LoginShellLaunch {
   /// Exit status when the working directory cannot be entered: the command
   /// never started. Git itself does not use it.

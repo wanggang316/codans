@@ -7,7 +7,7 @@ import SwiftUI
 /// List selection, so selecting it re-focuses the creation (loading view +
 /// highlight) after the user navigated away, and the system paints the
 /// same selection chrome as for worktree rows.
-/// See `docs/design-docs/worktree-sidebar-ordering.md` §pending 段.
+/// See `docs/domains/worktree.md` (Row order).
 struct PendingWorktreeRow: View {
   let pending: PendingWorktree
   /// `.increased` only while the row holds the emphasized (accent) native

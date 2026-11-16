@@ -70,7 +70,7 @@ struct MainWindowCommandsTests {
     )
   }
 
-  // MARK: - Archive / Delete Worktree scope (ADR 0010)
+  // MARK: - Archive / Delete Worktree scope (ADR 0011)
 
   /// Enabled exactly when the main window is key and a Worktree is selected —
   /// no input about the focused view exists, so the focus location cannot

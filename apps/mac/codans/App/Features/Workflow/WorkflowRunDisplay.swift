@@ -7,7 +7,7 @@ import Foundation
 /// `WorkflowRunSession` (a `@MainActor` class) so this logic is testable
 /// without actor isolation, and deliberately dumb — every status here is
 /// read straight off the run record and cursor, never re-derived policy
-/// (the machine already decided it; see `docs/design-docs/workflow.md`).
+/// (the machine already decided it; see `docs/domains/workflow.md`).
 nonisolated enum WorkflowRunDisplay {
   enum StepStatus: Equatable {
     case done
@@ -90,7 +90,7 @@ nonisolated enum WorkflowRunDisplay {
 }
 
 nonisolated extension WorkflowUserAction {
-  /// Button label from the design doc's attention action table
+  /// Button label from the attention action table of `docs/domains/workflow.md`
   /// ("`expect`：显式交付"). The popover renders `attention.actions` in
   /// the order the machine gives them; this only supplies text.
   var displayLabel: String {

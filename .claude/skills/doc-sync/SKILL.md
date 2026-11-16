@@ -5,14 +5,14 @@ description: 每晚审阅当天提交的代码 diff，检测 docs/ 知识库的�
 
 # doc-sync
 
-夜间文档同步引擎：把 `docs/README.md` 的两条约定（**现状优先** + **liveness 状态字段**）机械化为可执行的每日检测，杜绝知识库随代码漂移。
+夜间文档同步引擎：把 `docs/README.md` 的两条约定（**现状优先** + **按用户入口声明可用性**）机械化为可执行的每日检测，杜绝知识库随代码漂移。
 
 ## 1. 目的与边界
 
 - `docs/` 是**精选的 Library，不是 logbook**——只承载持久的 invariants、边界、以及代码无法表达的*为什么*。实现进度与「我们建了什么」属于代码、git history 与 CHANGELOG。
 - 本 skill 是「杜绝文档漂移」的**执行引擎**：当代码改动让某篇 Library 文档失真时，把它纠正回今日真相。
 - **只看当天的 commit/diff**——用 `git log --since=...` 取出当日提交、用 `git diff` 取出改动内容。**不做全仓扫描**，不审阅未被当天改动触及的文档。
-- 范围只限 `docs/` 知识库；不碰 `docs/generated/`（自动产物）与任何运行时状态。
+- 范围只限 `docs/` 知识库（`domains/`、`architecture.md`、`product.md`、`glossary.md`、`runbooks/`）；`adrs/` 与 `lessons-learned/` 是历史记录，只更新状态与链接；不碰任何运行时状态。
 
 ## 2. 检测三类漂移
 
@@ -25,16 +25,16 @@ description: 每晚审阅当天提交的代码 diff，检测 docs/ 知识库的�
 | 当天 diff 的事实 | 文档现状 | 建议动作 |
 |---|---|---|
 | feature/符号被移除 | 文档仍把它当现状描述 | **建议删档**（git history 保留；已移除的 feature 不该有文档） |
-| feature 仍存在但被刻意隐藏/未接线 | 文档标为 `已上线（可见）` | 建议改标 **`已实现但隐藏`**，并在正文点明 |
-| 仅有设计/command-id/stub，无可用实现 | 文档当作已上线 | 建议改标 **`已设计未实现`**，并在正文点明 |
+| feature 仍存在但被刻意隐藏/未接线 | 文档标为 `Available` | 建议改标 **`Hidden`**，并在正文点明 |
+| 仅有设计/command-id/stub，无可用实现 | 文档当作已上线 | **建议删去该段**（领域页只写现状；未实现的设计留在 ticket） |
 
-状态字段取值（与 `docs/README.md` 一致）：`已上线（可见）` / `已实现但隐藏` / `已设计未实现`。
+可用性取值（与 `docs/README.md` 一致）：`Available` / `Hidden`。
 
 ### b. 过程词
 
 扫描描述性正文里的过程叙事词：`从前` / `曾经` / `取代了` / `降到 N 级` / `v1→v2` / `superseded` / `used to`。文档要写**现状**而非到达现状的路径。
 
-- 若该转变的*理由*是 load-bearing（一条未来维护者不得撤销的约束）→ 建议把理由**下沉到 `## 技术决策 / Decisions`** 段落作为一条决策记录。
+- 若该转变的*理由*是 load-bearing（一条未来维护者不得撤销的约束）→ 建议在 `docs/adrs/` **新建一条 ADR**，领域页只留链接。
 - 否则 → 建议**改写为现状陈述**，删去叙事。
 
 ### c. 与代码矛盾
@@ -44,15 +44,15 @@ description: 每晚审阅当天提交的代码 diff，检测 docs/ 知识库的�
 ## 3. 自治度（apply-safe vs propose）
 
 - **低风险的事实性更新**——重命名的符号、改了的默认值、删掉的字段、明显的死链——**直接在分支上落盘**。
-- **其余一切实质改动**（删整篇文档、改 liveness 状态、重写行为描述、下沉过程词到技术决策）→ 产出 **drift 报告**并**开 PR** 交人审，不自行落盘。
+- **其余一切实质改动**（删整篇文档、改可用性、重写行为描述、新建 ADR）→ 产出 **drift 报告**并**开 PR** 交人审，不自行落盘。
 - **绝不静默重写知识库**：每一处自动落盘都必须落在分支/PR 的可见 diff 里。
 - **无 drift 当天零提交**——不为了「跑过了」而制造空提交。
 
 ## 4. 护栏
 
 - 只在**分支 / PR** 上动手，**绝不推 main**，绝不直接改已发布的主分支内容。
-- 绝不**重建过程文档**（exec-plans 之类）或写入**运行时状态**（`.harness-runtime/`、`docs/generated/`）。
-- 严格尊重 `docs/README.md` 的两条约定：**现状优先**（present-tense、无叙事）+ **每篇文档声明 liveness 状态字段**。
+- 绝不**重建过程文档**（设计文档、执行计划之类，它们属于 ticket）或写入**运行时状态**（`.harness-runtime/`）。
+- 严格尊重 `docs/README.md` 的两条约定：**现状优先**（present-tense、无叙事）+ **按用户入口声明可用性**。
 - 不扩大范围：只处理当天 diff 波及的文档，不顺手重构无关文档。
 
 ## 5. 触发 / 调度
@@ -102,7 +102,7 @@ launchd（`~/Library/LaunchAgents/dev.codans.doc-sync.plist`，加载后每晚 0
 执行时严格按序：
 
 1. **取当天 diff**：`git log --since=midnight --oneline` 列出当日提交；`git diff --stat <first-commit>^..HEAD` 取文件清单与摘要，必要时 `git diff <first-commit>^..HEAD -- <path>` 看具体改动。无当日提交则直接跳到第 6 步。
-2. **映射受影响的 docs**：按改动的子系统 / 路径，找出 `docs/` 下对应被描述的文档（一个改动的 feature 对应它的 design-doc / product-spec）。只纳入被波及的文档。
+2. **映射受影响的 docs**：按改动的子系统 / 路径，找出 `docs/` 下对应被描述的文档（一个改动的 feature 对应它的 领域页 / product.md）。只纳入被波及的文档。
 3. **逐 doc 跑三类检测**：对每篇映射到的文档跑 §2 的 a/b/c；对每条引用核 liveness（必要时用 Grep/Read 回查代码确认符号是否可达）。
 4. **分类**：把每条发现归入 **apply-safe**（§3 低风险事实性）或 **propose**（实质改动）。
 5. **落盘 + 开 PR**：

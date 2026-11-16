@@ -3,7 +3,7 @@ import Testing
 
 @testable import Codans
 
-/// The launch-mode table of `docs/design-docs/environment.md`, per git route.
+/// The launch-mode table of `docs/domains/environment.md`, per git route.
 struct GitLaunchTests {
   @Test(arguments: [
     ["clone", "--progress", "--", "http://h/r.git", "/tmp/r"],

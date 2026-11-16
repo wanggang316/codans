@@ -304,7 +304,7 @@ final class TerminalEngine {
       surfaceWorkingDirectory = NSHomeDirectory()
     } else {
       // libghostty resolves and integrates the user's shell and runs it
-      // under this wrapper (docs/design-docs/pane-shell-integration.md).
+      // under this wrapper (docs/domains/pane-shell-integration.md).
       launch = .interactive(
         wrapper: ZmxAttachCommand.wrapperArgv(
           zmxPath: try PaneDaemonBringup.zmxBinaryURL().path,
@@ -1097,7 +1097,7 @@ final class TerminalEngine {
   /// so it cannot overwrite what the surface reports. Output written before
   /// the surface's `zmx attach` connects reaches neither; the agent's next
   /// report corrects any state missed there (an accepted trade-off, see
-  /// `active-agents-view.md`). If the surface cannot be created, the
+  /// `docs/domains/agent-state.md`). If the surface cannot be created, the
   /// watcher comes back.
   private func replacingDetachedWatcher(
     of paneID: PaneID, _ makeSurface: () throws -> PaneSurface

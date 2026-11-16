@@ -8,7 +8,7 @@ import Foundation
 /// `<agent dir>/trust.json`, then `defaultProjectTrust` (default `ask`).
 /// codans offers project skills only when that order gives "trusted"
 /// without a question at startup; anything it cannot be sure of gives no
-/// project skills (ADR 0010; design doc: Agent Skill Completion → Probe).
+/// project skills (ADR 0010; `docs/domains/agent-skill-completion.md`: Probe).
 nonisolated enum PiProjectTrust {
   /// `true` when Pi, launched with `arguments` (the words after its
   /// executable, `nil` when they cannot be read) in `start`, trusts the

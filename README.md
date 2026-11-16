@@ -134,9 +134,10 @@ The top-level `Makefile` delegates every `mac-*` target to `apps/mac/Makefile`.
 
 All project knowledge lives in [`docs/`](docs/):
 
-- [Architecture](docs/architecture.md) — domains, layers, dependency rules
-- [Product spec](docs/product-spec.md) — what the product is
-- [Design docs](docs/design-docs/) — feature and system designs
+- [Product](docs/product.md) — what the product is, for whom, and its boundaries
+- [Architecture](docs/architecture.md) — module responsibilities and dependency rules
+- [Domains](docs/domains/) — one page per area: model, rules, boundaries
+- [Documentation guide](docs/README.md) — where each topic lives
 
 Agent-facing entry point: [`AGENTS.md`](AGENTS.md) (also exposed as `CLAUDE.md`).
 

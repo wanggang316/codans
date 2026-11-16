@@ -27,7 +27,7 @@ name: release
 #                                   (everything after `https://`). When
 #                                   absent the bundle ships with an empty
 #                                   DSN and crash reporting no-ops at
-#                                   launch — see docs/references/crash-reporting.md.
+#                                   launch — see docs/runbooks/crash-reporting.md.
 #   SENTRY_AUTH_TOKEN             - scopes project:read, project:write,
 #                                   project:releases. Needed to register
 #                                   the Sentry release and upload dSYMs;

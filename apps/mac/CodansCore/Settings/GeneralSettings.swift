@@ -124,7 +124,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   public var crashReportsEnabled: Bool
 
   /// Whether the app detaches the terminal surfaces of panes that stay
-  /// hidden, on a timer and on memory pressure (see `surface-reclaim.md`).
+  /// hidden, on a timer and on memory pressure (see `docs/domains/terminal-runtime.md`).
   /// Default `true`. Off keeps every surface attached; panes already
   /// detached stay detached until shown.
   public var reclaimHiddenSurfaces: Bool

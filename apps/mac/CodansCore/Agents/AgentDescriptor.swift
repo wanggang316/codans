@@ -193,8 +193,8 @@ public nonisolated enum AgentCatalog {
     case .claudeCode: return .claudeCode
     case .codex: return .codex
     case .pi: return .pi
-    // Gemini and OpenCode: the probe could not run or failed, see the
-    // design doc.
+    // Gemini and OpenCode: the probe could not run or failed, see
+    // `docs/domains/agent-skill-completion.md`.
     case .gemini, .opencode, .cursorAgent, .copilot, .droid, .amp, .grok, .omp, .cline, .kimi:
       return .none
     }

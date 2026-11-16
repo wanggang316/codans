@@ -8,7 +8,7 @@ import Foundation
 /// or `--disable plugins` turns every plugin off. Whatever codans cannot be
 /// sure of (a config override, a project config about plugins, a config in a
 /// form it does not read) gives no plugin skills and leaves other skill
-/// sources alone (ADR 0010; design doc: Agent Skill Completion → Plugin
+/// sources alone (ADR 0010; `docs/domains/agent-skill-completion.md`: Plugin
 /// Skill).
 nonisolated enum CodexPluginRegistry {
   /// What the profile's extra arguments do to the plugins Codex loads.

@@ -89,7 +89,7 @@ struct NotificationsSettingsView: View {
             title: "Notify when a command finishes",
             caption: "Commands shorter than the minimum duration are silent. Cancelled "
               + "commands (Ctrl-C) are always silent. Notifications are also suppressed for "
-              + "1 second after you type in the pane."
+              + "3 seconds after you type in the pane."
           )
         }
 

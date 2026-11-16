@@ -393,7 +393,7 @@ struct HierarchySidebarView: View {
     } message: {
       Text(projectRemovalMessage)
     }
-    // Archive confirmation, shown for every interactive archive (ADR 0010).
+    // Archive confirmation, shown for every interactive archive (ADR 0011).
     .confirmationDialog(
       "Archive this Worktree?",
       isPresented: Binding(

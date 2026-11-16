@@ -169,7 +169,7 @@ let project = Project(
       )
     ),
 
-    // codans CLI binary. Thin wrapper around CodansKit — Runtime / Hooks / Git
+    // codans CLI binary. Thin wrapper around CodansKit — Runtime / Git
     // are intentionally off-limits per architecture dep rules. Isolation
     // default is `nonisolated` to match the ArgumentParser command
     // conventions (commands run off the main actor). Target is named
@@ -206,7 +206,7 @@ let project = Project(
       )
     ),
 
-    // Mac app. Runtime / Hooks / Git are in-app modules (subfolders, not separate targets).
+    // Mac app. Runtime / Process / Git / GitPlatform are in-app modules (subfolders, not separate targets).
     // codans-cli is a dependency so app builds produce the CLI binary alongside the .app bundle.
     .target(
       name: "Codans",

@@ -3,7 +3,7 @@ import Foundation
 
 /// TCA seam between the Command Palette (a value-type reducer) and the
 /// app-owned `WorkflowEngine` — an `@Observable` class kept outside TCA
-/// by design (see `docs/design-docs/workflow.md` D7). Only what the
+/// by design (see `docs/domains/workflow.md`). Only what the
 /// palette needs: which runs are cancellable, and cancelling one.
 struct WorkflowClient: Sendable {
   struct RunSummary: Equatable, Sendable, Identifiable {

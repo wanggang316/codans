@@ -18,8 +18,7 @@ the end-to-end loop for turning one of those reports into a verified fix:
 Crash reporting is **opt-in** and PII-minimised, so volume is low and
 every real crash is signal — there is no noise budget to hide behind.
 Background on the pipeline lives in
-[`docs/references/crash-reporting.md`](../../../docs/references/crash-reporting.md)
-and [ExecPlan 0017](../../../docs/exec-plans/0017-crash-reporting.md).
+[`docs/runbooks/crash-reporting.md`](../../../docs/runbooks/crash-reporting.md).
 
 ## When to use
 
@@ -30,7 +29,7 @@ and [ExecPlan 0017](../../../docs/exec-plans/0017-crash-reporting.md).
 
 **Don't use** for:
 - Wiring up the SDK, DSN, or dSYM upload — that's the setup checklist in
-  `docs/references/crash-reporting.md`, not this skill.
+  `docs/runbooks/crash-reporting.md`, not this skill.
 - Non-crash product bugs with no Sentry report.
 
 ## Project facts (load before acting)
