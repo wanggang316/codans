@@ -3,7 +3,7 @@
 ## Workspace model
 
 These terms define the Workspace group model. See the
-[Workspace design](domains/workspace.md) for its behavior.
+[Workspace](domains/workspace.md) for its behavior.
 
 **Workspace**: A collection of source projects with a default workspace group
 and named workspace groups.
@@ -22,7 +22,7 @@ workspace group.
 ## Agents View
 
 These terms define what an Agents View row shows. See the
-[AgentState design](domains/agent-state.md).
+[Agent State](domains/agent-state.md).
 
 **Agent runtime state**: The derived state of an agent in a pane: `idle`,
 `working`, `blocked`, `done`, or `error`. It comes from the OSC 7501 program
@@ -102,7 +102,7 @@ Request and MR only in GitLab UI text and GitLab API code.
 ## Agent Skills
 
 These terms define how codans finds the skills an agent can use. See the
-[Agent Skill Completion design](domains/agent-skill-completion.md).
+[Agent Skill Completion](domains/agent-skill-completion.md).
 
 **Agent Skill**: A folder with a `SKILL.md` file that an agent loads by
 itself. It is not a **Bundled Skill**: a skill that the codans app ships
