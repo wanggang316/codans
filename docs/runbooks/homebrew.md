@@ -1,61 +1,66 @@
-# Homebrew release pipeline
+# Homebrew cask
 
-`codans` ships to Homebrew through a self-hosted cask in **`wanggang316/homebrew-tap`**. Stable installs run as:
+codans ships to Homebrew through a self-hosted cask in **`wanggang316/homebrew-tap`**. Users install it with:
 
 ```bash
 brew install --cask wanggang316/tap/codans
 ```
 
-## Pipeline
+Each published stable release updates the cask with no manual step: `release-merge.yml` calls `update-cask.yml`, which checks the DMG against its `.sha256`, renders `Casks/codans.rb` with `scripts/render-cask.sh`, and pushes it to the tap. `tip` and other prereleases never reach the cask. How this step fits in the pipeline: [Updates and release](../domains/updates-and-release.md#stable-release).
 
-1. `release.yml` cuts a notarized `Codans-<version>.dmg` + `.sha256` and attaches them to a **draft** GitHub Release.
-2. After a release PR merges, `release-merge.yml` publishes the draft and calls `update-cask.yml` (`workflow_call`); a publish by `GITHUB_TOKEN` fires no `release: published` event. A release published by hand fires `update-cask.yml` through that event. The release PR is the safety gate.
-3. The workflow downloads the DMG asset, cross-checks the published `.sha256` against a fresh `shasum -a 256` of the downloaded bytes, then runs `scripts/render-cask.sh` against the in-repo template at `Casks/codans.rb`.
-4. The rendered cask is pushed as a single commit to `wanggang316/homebrew-tap` at `Casks/codans.rb` over HTTPS using `HOMEBREW_TAP_TOKEN`. The push never moves the cask to an older version, and a rejected push (another release pushed first) is retried on a fresh clone.
+## Prerequisites (one time)
 
-`tip`-channel releases (`release-tip.yml`) are tagged `tip` and marked prerelease — `update-cask.yml` filters both out so Homebrew users stay on the stable channel. Sparkle still handles in-app tip-channel updates for opted-in clients.
-
-## One-time bootstrap
-
-These steps are required exactly once per environment; future stable releases are fully hands-off.
-
-1. **Create the tap repo.** Empty repo, default branch `main`:
+1. **Create the tap repository.** Empty, default branch `main`:
 
    ```bash
    gh repo create wanggang316/homebrew-tap --public --description "Homebrew tap for wanggang316 projects"
    ```
 
-2. **Mint a Personal Access Token.** Fine-grained PAT scoped to the tap repo with `Contents: Read and write` is sufficient; a classic PAT with `repo` works too. Store the value somewhere durable — GitHub does not let you re-read it.
+2. **Create a Personal Access Token.** A fine-grained PAT for the tap repository with `Contents: Read and write` is sufficient; a classic PAT with `repo` also works. Store the value: GitHub does not show it again.
 
-3. **Register the token on this repo:**
+3. **Register the token on this repository:**
 
    ```bash
    gh secret set HOMEBREW_TAP_TOKEN --repo wanggang316/codans --body "$PAT_VALUE"
    ```
 
-   The workflow refuses to run without it (see the `: "${TAP_TOKEN:?…}"` guard).
+   The workflow stops without it.
 
-4. **First-time cask seed.** The very first stable release after enabling this pipeline writes the initial `Casks/codans.rb` into the empty tap repo. No manual seeding required.
+The first stable release after this writes `Casks/codans.rb` into the empty tap. No manual seed is necessary.
 
-## Local dry-run
+## Update the cask by hand
 
-Render the cask against an existing DMG without touching CI or the tap:
+Use this when the `cask` job of a release run failed, or a release was published without it:
+
+```bash
+gh workflow run update-cask.yml -f tag=vX.Y.Z
+```
+
+The tag must be a published `vX.Y.Z` release. To repeat only the failed job of a release run, use `gh run rerun <RUN> --failed`.
+
+## Check the result
+
+1. The `update-cask` job ends green, with a `codans X.Y.Z` commit in the tap, or with the notice that the tap already has this or a newer version.
+2. `Casks/codans.rb` in the tap shows `version "X.Y.Z"` and the hash of the published DMG.
+3. `brew update && brew info --cask wanggang316/tap/codans` shows the new version.
+
+## Local dry run
+
+Render the cask against an existing DMG without CI or the tap:
 
 ```bash
 DMG=apps/mac/.build/release/Codans-0.3.0.dmg
 SHA=$(shasum -a 256 "$DMG" | awk '{print $1}')
 ./scripts/render-cask.sh 0.3.0 "$SHA" /tmp/codans.rb
 brew style /tmp/codans.rb            # optional: run Homebrew's rubocop
-brew install --cask /tmp/codans.rb   # optional: smoke-test the install
+brew install --cask /tmp/codans.rb   # optional: test the install
 ```
 
-## Troubleshooting
+## Recovery
 
-- **`brew install` fails with `Cask 'codans' is unavailable`** — the user forgot to tap. Both `brew install --cask wanggang316/tap/codans` and `brew tap wanggang316/tap && brew install --cask codans` work; the former is the recommended one-liner.
-- **Workflow exits "cask already at v… in tap — nothing to push"** — the rendered cask matched the tap copy byte-for-byte. Usually means the workflow was re-run after a successful push; harmless.
-- **`sha256 mismatch`** — the DMG attached to the Release does not match its `.sha256` sidecar. Indicates a corrupted or swapped asset. Delete the release, then re-run the `release-merge.yml` run (all jobs).
-- **Tap push 403** — `HOMEBREW_TAP_TOKEN` expired or lacks `contents:write` on the tap repo. Rotate the PAT and `gh secret set` it again.
-
-## Future: official `homebrew-cask`
-
-If codans grows enough adoption to meet Homebrew's [acceptable casks criteria](https://docs.brew.sh/Acceptable-Casks), we can mirror the same `Casks/codans.rb` into a PR against `Homebrew/homebrew-cask`. The cask is already structured to pass `brew style` and `brew audit --new`. Until then, the self-hosted tap is the canonical channel.
+- **`brew install` fails with `Cask 'codans' is unavailable`.** The tap is missing. Use `brew install --cask wanggang316/tap/codans`, or `brew tap wanggang316/tap` and then `brew install --cask codans`.
+- **Workflow says "cask already at v… in tap — nothing to push".** The rendered cask is the same as the tap copy, usually because the job ran again after a successful push. No action.
+- **Workflow says the tap already has a newer version.** The job does not move the cask to an older version. No action, unless the newer version is wrong.
+- **`sha256 mismatch`.** The DMG on the release does not match its `.sha256` file: the asset is corrupt or was replaced. Delete the release, then re-run all jobs of the `release-merge.yml` run.
+- **Tap push fails with 403.** `HOMEBREW_TAP_TOKEN` expired or has no write access to the tap contents. Create a new PAT and set the secret again (step 3).
+- **Push rejected three times.** Other runs pushed to the tap at the same time. Run the job again.

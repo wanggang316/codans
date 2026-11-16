@@ -1,94 +1,27 @@
 # Crash reporting
 
-**状态：** 已上线（可见）
+Release builds of codans report uncaught crashes (Mach exceptions, POSIX signals, `NSException`) and Swift errors to Sentry. The stacks are symbolicated with the dSYMs of the same archive. This runbook sets up the Sentry project, the build, and CI, and checks that a release reports symbolicated crashes. Where symbol upload sits in the release pipeline: [Updates and release](../domains/updates-and-release.md#crash-reporting-symbols).
 
-Codans uses Sentry to capture uncaught crashes (Mach exceptions, POSIX
-signals, `NSException`) and Swift errors on release builds, with the
-stack trace symbolicated against the dSYMs produced by the same archive.
-The SDK never runs in DEBUG builds and can be turned off per-install.
+## Context
 
-## Privacy stance
+- Debug builds never start the SDK. A release build starts it once, at app launch, only when **Settings › General › Send crash reports** is on (the default) and the Info.plist `SentryDSN` is a real DSN. A change of the toggle takes effect at the next launch.
+- Turning the toggle off also deletes the per-install random identifier (`UserDefaults` key `com.gumpw.codans.install-id`), so a later report cannot be joined to earlier ones. `sendDefaultPii` is off.
+- The runtime release name is `codans@<MARKETING_VERSION>`. `release.sh upload-symbols` registers the same name, so the dSYMs attach to the right release.
+- `SystemHangFilter` drops events whose frames are all in a list of known macOS noise (`systemNoiseSignatures`). To silence a new false positive, add its signature there and ship a release.
+- Sentry calls `beforeSend` off the main actor, but the app target defaults to `MainActor` isolation. Mark every off-main SDK callback and the types it captures `nonisolated`.
 
-- DEBUG builds never report.
-- Release builds default to opt-in (`general.crashReportsEnabled = true`).
-  Users can disable in **Settings → General → Send crash reports**;
-  disabling also clears the per-install random identifier so a future
-  re-enable cannot be joined to past sessions.
-- `sendDefaultPii = false` — Sentry's auto-collected IP and device-name
-  fields are off.
-- The per-install identifier is a random UUID stored in `UserDefaults`
-  under `com.gumpw.codans.install-id`. It is not derived from device
-  hardware, account, or filesystem state.
-- `SystemHangFilter` drops events whose every stack frame is in a known
-  macOS / AppKit noise list (`mach_msg`, `__CFRunLoopRun`, Mission
-  Control / WindowServer round-trips). New false positives are added
-  to `systemNoiseSignatures` and re-shipped.
+## Prerequisites
 
-## How a release report flows
+- Access to the Sentry organization, and permission to set repository secrets (`gh secret set`).
+- `sentry-cli` (pinned in `mise.toml`; `release.sh` also accepts one on `PATH`).
 
-```
-release.sh release
- │
- ├── archive               xcodebuild archive (.xcarchive + dSYMs)
- ├── upload-symbols        sentry-cli registers codans@<version> + uploads dSYMs
- ├── notarize app          Apple notary + staple
- ├── dmg                   sign DMG
- └── notarize DMG          Apple notary + staple
-```
+## Set up
 
-`upload-symbols` is idempotent — `releases new` is a no-op on an existing
-release, `debug-files upload` deduplicates by debug-id, and `releases
-finalize` is safe to repeat. The step also runs as a stand-alone
-subcommand:
+1. **Create the Sentry project** and copy its DSN. The DSN is not a secret, but keep it out of logs.
 
-```bash
-SENTRY_AUTH_TOKEN=... apps/mac/scripts/release.sh upload-symbols
-```
-
-Without `SENTRY_AUTH_TOKEN` the step is a friendly no-op and the rest
-of the pipeline still produces a notarized DMG.
-
-### In CI
-
-`.github/workflows/release.yml` (tag-triggered) and
-`release-tip.yml` (every push to `main`) both run the same archive →
-notarize → dmg pipeline. They wrap two Sentry-specific steps around the
-Archive call:
-
-1. **Inject Sentry DSN** — writes `apps/mac/Configurations/Secrets.xcconfig`
-   from the `SENTRY_DSN_REST` repository secret *before* Archive so the
-   built `Info.plist` carries a real DSN rather than the bare `https://`
-   fallback. An empty/missing secret only emits a warning; the workflow
-   still produces a usable DMG, but it will not phone home.
-2. **Upload dSYMs** — runs `release.sh upload-symbols` *after* Archive
-   and *before* notarize, using the `SENTRY_AUTH_TOKEN` secret. Same
-   tolerance: missing token degrades to a no-op.
-
-Add both secrets via `gh secret set` (or the GitHub UI):
-
-```bash
-gh secret set SENTRY_DSN_REST \
-  --body '7a35f7894920ef885837030b57b18702@o4511454478467072.ingest.us.sentry.io/4511455005310976'
-gh secret set SENTRY_AUTH_TOKEN --body 'sntryu_xxxxxxxx'
-```
-
-(Both values here are illustrative — substitute your real values. The
-DSN host+path is not technically secret, but routing it through Actions
-secrets keeps it out of workflow logs and makes future rotation a
-single-place edit.)
-
-## Setup checklist (first time)
-
-1. **Create the Sentry project.** The default organisation and project
-   slugs become part of the dashboard URL. Capture the DSN —
-   it is not secret per se, but treat it as one.
-
-2. **Generate an auth token** with scopes `project:read`,
-   `project:write`, `project:releases`. Store it in
-   `~/.sentryclirc` and as `SENTRY_AUTH_TOKEN` in CI secrets:
+2. **Create an auth token** with the scopes `project:read`, `project:write`, `project:releases`. For local use, put it in `~/.sentryclirc`:
 
    ```ini
-   # ~/.sentryclirc
    [auth]
    token=sntryu_xxxxxxxx
 
@@ -98,58 +31,47 @@ single-place edit.)
    url=https://sentry.io/
    ```
 
-3. **Add the DSN to the build.** Copy the template, fill in the host +
-   path portion (everything after `https://`), and confirm the file
-   stays gitignored:
+3. **Add the DSN to local release builds.** `mac-Info.plist` composes `SentryDSN` as `https://$(SENTRY_DSN_REST)`, because xcconfig reads `//` as a comment. Put only the part after `https://` in the gitignored `Secrets.xcconfig`:
 
    ```bash
    cp apps/mac/Configurations/Secrets.xcconfig.template \
       apps/mac/Configurations/Secrets.xcconfig
    $EDITOR apps/mac/Configurations/Secrets.xcconfig    # set SENTRY_DSN_REST
-   git status -- apps/mac/Configurations/Secrets.xcconfig  # should be ignored
+   git status -- apps/mac/Configurations/Secrets.xcconfig  # must show nothing
    ```
 
-   Note: `mac-Info.plist` carries the literal `https://` prefix because
-   xcconfig strips `//` as a comment delimiter — only the host + path
-   portion of the DSN travels through `SENTRY_DSN_REST`.
+   Without this file the DSN is the bare `https://`, and the app does not start the SDK.
 
-4. **Cut a release.** `release.sh release` performs `upload-symbols`
-   between archive and notarize; verify the dashboard shows the
-   release `codans@<MARKETING_VERSION>` with the dSYMs attached.
+4. **Add the CI secrets.** `release.yml` and `release-tip.yml` write `Secrets.xcconfig` from `SENTRY_DSN_REST` before the archive, and run `release.sh upload-symbols` with the other three after it:
 
-5. **Smoke test from a release build** by invoking `SentrySDK.crash()`
-   from a DEBUG-only menu item or `lldb`. The first event for that
-   release should appear in the dashboard with symbolicated frames.
+   ```bash
+   gh secret set SENTRY_DSN_REST --body '<key>@<org-host>/<project-id>'   # DSN without https://
+   gh secret set SENTRY_AUTH_TOKEN --body 'sntryu_xxxxxxxx'
+   gh secret set SENTRY_ORG --body '<org-slug>'
+   gh secret set SENTRY_PROJECT --body '<project-slug>'
+   ```
 
-## Disabling crash reporting
+   Each secret is optional for the pipeline: without `SENTRY_DSN_REST` the build ships with crash reporting off (CI logs a warning); without any of the other three the symbol upload is skipped.
 
-- **As a user:** Settings → General → Send crash reports (off).
-  Takes effect on next launch (the SDK is bootstrapped once in
-  `CodansApp.init()`).
-- **As a contributor without a DSN:** the bootstrap detects an
-  empty `SentryDSN` Info.plist value and short-circuits. No additional
-  configuration is needed; your release-mode build simply does not
-  upload anything.
+## Upload symbols by hand
 
-## Where things live
+`release.sh release` runs `upload-symbols` between archive and notarization. To run it alone on an existing archive (`apps/mac/.build/release/Codans.xcarchive`):
 
-| Concern | Path |
-|---|---|
-| Bootstrap | `apps/mac/codans/App/Telemetry/CrashReporting.swift` |
-| Install id | `apps/mac/codans/App/Telemetry/InstallIdentifier.swift` |
-| Noise filter | `apps/mac/codans/App/Telemetry/SystemHangFilter.swift` |
-| Settings toggle | `general.crashReportsEnabled` in `Settings/GeneralSettings.swift` |
-| DSN plumbing | `Configurations/Secrets.xcconfig` → `mac-Info.plist` `SentryDSN` |
-| Release symbol upload | `apps/mac/scripts/release.sh` `upload-symbols` |
-| SDK pin | `apps/mac/Tuist/Package.swift` (`getsentry/sentry-cocoa`) |
+```bash
+SENTRY_AUTH_TOKEN=... SENTRY_ORG=<org-slug> SENTRY_PROJECT=<project-slug> \
+  apps/mac/scripts/release.sh upload-symbols
+```
 
-## Constraints
+The step is idempotent: it is safe to run again for the same release. If the token, the org, the project, or `sentry-cli` is missing, it logs the reason and exits 0.
 
-- **Telemetry types are explicitly `nonisolated`.** The workspace sets
-  `SWIFT_DEFAULT_ACTOR_ISOLATION=MainActor`, but Sentry invokes
-  `beforeSend` off the main actor, so the event filter (`SystemHangFilter`)
-  must be `@Sendable` / `nonisolated`; the telemetry unit tests likewise
-  run nonisolated. This constraint applies to **every** off-main-actor SDK
-  callback in the app target — annotate the closure and its captured types
-  `nonisolated` rather than letting the workspace default pin them to
-  `MainActor`.
+## Check the result
+
+1. In the release run log, the `Upload dSYMs to Sentry` step ends with `Sentry release codans@<version> ready`, not with a `skipping` line.
+2. The Sentry dashboard shows the release `codans@<MARKETING_VERSION>` with the dSYMs attached.
+3. Make a test crash in a release build. The event appears for that release with symbolicated frames.
+
+## Recovery
+
+- **Release shows no dSYMs.** Check that `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, and `SENTRY_PROJECT` are set, then run the manual upload above against the archive of that version, or re-run the release.
+- **No events at all from a release build.** Check that the CI log has no `SENTRY_DSN_REST secret is empty` warning, and that the user did not turn off **Send crash reports**. A build without a DSN cannot be fixed later; ship the next version with the secret set.
+- **Frequent system-hang noise.** Add the signature to `systemNoiseSignatures` in `SystemHangFilter` and ship a release.

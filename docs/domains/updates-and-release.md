@@ -93,7 +93,7 @@ CI selects Xcode 26.0 and builds only `arm64`. A newer default Xcode on the runn
 
 ## Crash reporting symbols
 
-Between archive and notarization, `release.sh upload-symbols` registers the Sentry release `codans@<MARKETING_VERSION>` and uploads the dSYMs from the archive. The app uses the same release name at runtime, so the two must agree. The step is idempotent, and it does nothing when the Sentry secrets are missing; the release still ships, but crash stacks are not symbolicated. CI also writes the Sentry DSN into the build before the archive; without it the build ships with crash reporting off. Setup and checks: [Crash reporting runbook](../runbooks/crash-reporting.md).
+Between archive and notarization, `release.sh upload-symbols` registers the Sentry release `codans@<MARKETING_VERSION>` and uploads the dSYMs from the archive. The app uses the same release name at runtime, so the two must agree; tip builds of the same version upload to the same release. The step is idempotent, and it does nothing when the Sentry secrets are missing; the release still ships, but crash stacks are not symbolicated. CI also writes the Sentry DSN into the build before the archive; without it the build ships with crash reporting off. Setup and checks: [Crash reporting runbook](../runbooks/crash-reporting.md).
 
 ## Traps
 

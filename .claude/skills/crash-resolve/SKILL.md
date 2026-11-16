@@ -29,7 +29,7 @@ Background on the pipeline lives in
 
 **Don't use** for:
 - Wiring up the SDK, DSN, or dSYM upload — that's the setup checklist in
-  `docs/references/crash-reporting.md`, not this skill.
+  `docs/runbooks/crash-reporting.md`, not this skill.
 - Non-crash product bugs with no Sentry report.
 
 ## Project facts (load before acting)
