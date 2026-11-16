@@ -3,7 +3,7 @@ import Foundation
 /// Claude Code's plugin registry: which plugins are installed where, and
 /// which of them the settings enable. Both formats are not public, so a
 /// file that does not match gives no plugins and leaves other skill sources
-/// alone (design doc: Agent Skill Completion → Plugin Skill).
+/// alone (`docs/domains/agent-skill-completion.md`: Plugin Skill).
 nonisolated enum ClaudePluginRegistry {
   /// Managed (enterprise) settings on macOS. They override every other
   /// settings file.

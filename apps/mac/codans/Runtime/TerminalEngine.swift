@@ -1097,7 +1097,7 @@ final class TerminalEngine {
   /// so it cannot overwrite what the surface reports. Output written before
   /// the surface's `zmx attach` connects reaches neither; the agent's next
   /// report corrects any state missed there (an accepted trade-off, see
-  /// `active-agents-view.md`). If the surface cannot be created, the
+  /// `docs/domains/agent-state.md`). If the surface cannot be created, the
   /// watcher comes back.
   private func replacingDetachedWatcher(
     of paneID: PaneID, _ makeSurface: () throws -> PaneSurface

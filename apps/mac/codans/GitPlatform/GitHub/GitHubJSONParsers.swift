@@ -206,7 +206,7 @@ nonisolated enum GitHubJSONParsers {
     }
   }
 
-  /// Fork-PR filter. Per design doc's three-rule algorithm:
+  /// Fork-PR filter. The three rules (see `docs/domains/git-platform.md`, Fork filter):
   /// 1. Prefer entries where `headRepository.owner.login == remoteOwner` (upstream PRs).
   /// 2. If none, keep entries where `baseRefName != headRefName` (local branch is source).
   /// 3. Pick the first survivor (server-side sort is UPDATED_AT DESC).

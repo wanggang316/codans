@@ -40,7 +40,7 @@ public nonisolated struct RollupIndex: Equatable, Sendable {
   public static let empty = RollupIndex()
 
   /// Walk every unread entry, decide which level emits its indicator
-  /// per the visibility rules in the design doc, and accumulate.
+  /// per the visibility rules in `docs/domains/notifications.md`, and accumulate.
   public static func compute(
     unread: [InboxEntry],
     focus: RollupFocusState

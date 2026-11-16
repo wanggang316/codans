@@ -398,7 +398,7 @@ struct WorkflowsSettingsView: View {
 /// Confirmation sheet shown before granting trust to a repository-scoped
 /// file with `run:` steps — lists every shell command the file can execute
 /// so the user reviews them before agreeing to run them with their own OS
-/// permissions (design doc D8).
+/// permissions (see `docs/domains/workflow.md`, Trust).
 private struct WorkflowTrustConfirmationSheet: View {
   let entry: WorkflowCatalogEntry
   let onConfirm: () -> Void

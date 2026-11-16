@@ -90,7 +90,7 @@ nonisolated enum WorkflowRunDisplay {
 }
 
 nonisolated extension WorkflowUserAction {
-  /// Button label from the design doc's attention action table
+  /// Button label from the attention action table of `docs/domains/workflow.md`
   /// ("`expect`：显式交付"). The popover renders `attention.actions` in
   /// the order the machine gives them; this only supplies text.
   var displayLabel: String {

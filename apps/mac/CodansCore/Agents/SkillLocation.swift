@@ -95,7 +95,7 @@ public nonisolated struct SkillProjectDirectory: Equatable, Sendable, Hashable {
 }
 
 /// The rule by which one `AgentKind` finds its Agent Skills and calls them.
-/// See GLOSSARY → Agent Skills and the Agent Skill Completion design doc.
+/// See `docs/glossary.md` (Agent Skills) and `docs/domains/agent-skill-completion.md`.
 public nonisolated struct SkillLocation: Equatable, Sendable, Hashable {
   /// User-level skill directories, relative to the effective home
   /// (`.claude/skills`). A directory under `configRoot.defaultDirectory`
