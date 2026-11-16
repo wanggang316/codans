@@ -14,7 +14,7 @@ and pull requests as records of one delivery.
 | [glossary.md](glossary.md) | You name a domain concept. Use its terms and avoid the synonyms it rejects |
 | [domains/](domains/) | You change or debug one area. Each page owns the behavior contract of its topic |
 | [adrs/](adrs/) | You want the reason for a decision, or your change contradicts one |
-| [runbooks/](runbooks/) | You do an operation: setup, release, recovery |
+| [runbooks/](runbooks/) | You do an operation: crash reporting setup, the Homebrew cask, adding a tool mark |
 | [lessons-learned/](lessons-learned/) | You see a failure that looks familiar. Each page is the root cause of one incident |
 | [agents/domain.md](agents/domain.md) | You are an agent skill that reads the glossary and the decision records |
 

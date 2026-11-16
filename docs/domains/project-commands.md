@@ -115,9 +115,7 @@ A tool mark is a `ToolMark` case with a `tool-<raw>` image set in the app asset 
 1. Add a `ToolMark` case. Its raw value is saved as `mark:<raw>`, so never rename a shipped case. Map its executable names in `CommandIconCatalog`.
 2. Add `tool-<raw>.imageset` with the upstream SVG and the same image set properties (template rendering, preserved vector). Prefer Simple Icons; draw a mark only when no Simple Icons or SF Symbol glyph fits, as one filled path on the 24-by-24 grid.
 3. Check it at menu size in light and dark. Illustrations and thin wordmarks read as noise at that size; leave them out.
-4. Record the source of the artwork.
-
-Tests check that each `ToolMark` is reachable from the table and has a bundled template asset.
+4. Record the source of the artwork in the table of [Tool marks](../runbooks/tool-marks.md), which also holds the license of the artwork. Tests require each `ToolMark` to be reachable from the table and to have a bundled template asset.
 
 ## Traps
 
@@ -125,7 +123,6 @@ Tests check that each `ToolMark` is reachable from the table and has a bundled t
 - The chord check compares a command only with its own list. A Project command and a Global command can share a chord.
 - With the virtual built-in Run only, the Project has no saved command: the header button opens Manage Project Commands, and ⌘R is not bound until the Run row is saved.
 - `focused` commands have no Stop, and ⌘. does not see them.
-- A run Pane whose command was deleted shows the terminal icon and is no longer reused.
 - A suggestion counts as added by its exact command text. A saved command that differs only in arguments or quoting shows the suggestion as not added.
 
 ## Shape of the implementation

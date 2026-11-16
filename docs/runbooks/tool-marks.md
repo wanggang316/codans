@@ -1,4 +1,6 @@
-# Tool marks
+# Tool marks: sources and how to add one
+
+This page records where the artwork of each tool mark comes from and its license, and gives the procedure to add a mark. How a command gets its icon: [Project commands](../domains/project-commands.md#command-icons).
 
 The `tool-*.imageset` assets in `apps/mac/codans/App/Assets.xcassets` are the
 monochrome marks behind `ToolMark` (`apps/mac/CodansCore/Settings/CommandIcon/`).
