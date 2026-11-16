@@ -1,7 +1,7 @@
 import Foundation
 
 /// How a pane's surface starts its child process — the two shapes in
-/// docs/design-docs/pane-shell-integration.md.
+/// docs/domains/pane-shell-integration.md.
 nonisolated enum SurfaceLaunch: Equatable, Sendable {
   /// No `command`: libghostty resolves the user's shell (honouring their
   /// Ghostty `command` / `shell-integration` config), injects shell

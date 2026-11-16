@@ -304,7 +304,7 @@ final class TerminalEngine {
       surfaceWorkingDirectory = NSHomeDirectory()
     } else {
       // libghostty resolves and integrates the user's shell and runs it
-      // under this wrapper (docs/design-docs/pane-shell-integration.md).
+      // under this wrapper (docs/domains/pane-shell-integration.md).
       launch = .interactive(
         wrapper: ZmxAttachCommand.wrapperArgv(
           zmxPath: try PaneDaemonBringup.zmxBinaryURL().path,

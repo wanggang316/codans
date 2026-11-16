@@ -9,7 +9,7 @@ import CodansCore
 /// live daemon (zmx `attach` upserts: it reuses a running session or creates
 /// a fresh one).
 ///
-/// Two shapes, see docs/design-docs/pane-shell-integration.md:
+/// Two shapes, see docs/domains/pane-shell-integration.md:
 ///
 /// - `wrapperArgv` for an interactive pane: libghostty resolves the user's
 ///   shell, injects its shell integration and applies the macOS login(1)
