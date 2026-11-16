@@ -164,7 +164,7 @@ extension SkillLocation {
   /// `~/.claude`. In a project it reads `.claude/skills` from the working
   /// directory up to the repository root. A personal skill wins over a
   /// project skill with the same name. Enabled plugins add
-  /// `/<plugin>:<skill>`. The probe in the design doc showed that `/name` runs at
+  /// `/<plugin>:<skill>`. A probe of the real CLI showed that `/name` runs at
   /// the prompt start and in the middle of the first prompt.
   public static let claudeCode = SkillLocation(
     userDirectories: [".claude/skills"],
