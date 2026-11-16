@@ -7,7 +7,7 @@ import Foundation
 /// `WorkflowRunSession` (a `@MainActor` class) so this logic is testable
 /// without actor isolation, and deliberately dumb — every status here is
 /// read straight off the run record and cursor, never re-derived policy
-/// (the machine already decided it; see `docs/design-docs/workflow.md`).
+/// (the machine already decided it; see `docs/domains/workflow.md`).
 nonisolated enum WorkflowRunDisplay {
   enum StepStatus: Equatable {
     case done

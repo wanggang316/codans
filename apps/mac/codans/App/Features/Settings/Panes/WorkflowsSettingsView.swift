@@ -7,7 +7,7 @@ import SwiftUI
 /// `<id>.workflow.yaml` across the three scopes (bundle, user, one section
 /// per repository), with an enable switch, live diagnostics, remembered
 /// `launch` role bindings, and repository-file trust — the Settings surface
-/// `docs/design-docs/workflow.md` describes under "可观测性与 UI".
+/// `docs/domains/workflow.md` describes.
 ///
 /// The lists come from `WorkflowCatalogStore`, which watches the files, so
 /// an edit saved in an editor or a file an agent writes shows up (and

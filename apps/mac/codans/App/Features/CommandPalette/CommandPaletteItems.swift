@@ -231,9 +231,9 @@ enum CommandPaletteItems {
   }
 
   /// One "Cancel Workflow: <name>" item per active run, across every
-  /// worktree the engine is tracking — the Command Palette bullet in the
-  /// workflow design doc. Hidden entirely when the feature is off so a
-  /// user who never turned on Workflows never sees it.
+  /// worktree the engine is tracking (see `docs/domains/workflow.md`).
+  /// Hidden entirely when the feature is off so a user who never turned on
+  /// Workflows never sees it.
   private static func cancelWorkflowItems() -> [CommandPaletteItem] {
     // Runs first, settings second: most palette openings have no run, and
     // then there is nothing to gate and no settings read at all.
