@@ -741,6 +741,10 @@ final class AppState {
     engine.isReclaimEnabled = { [weak settings] in
       settings?.settings.general.reclaimHiddenSurfaces ?? true
     }
+    let shortcuts = shortcutsStore
+    engine.menuKeyEquivalent = { [weak shortcuts] command in
+      shortcuts.flatMap { ShortcutDisplay.menuKeyEquivalent(for: command, in: $0.resolved) }
+    }
 
     // Build the editor + hierarchy clients once so the reducer stack AND the IPC
     // handlers share the exact same live instances — avoids two parallel

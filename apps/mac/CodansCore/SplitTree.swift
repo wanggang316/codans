@@ -135,6 +135,47 @@ public nonisolated struct SplitTree<Leaf: Hashable & Codable & Sendable>: Equata
     return Self(root: newRoot, zoomed: zoomed)
   }
 
+  /// Moves `leaf` into `region` of the whole tree (GLOSSARY: Place). The
+  /// result is one root split in the region's direction: `leaf` on the
+  /// region's side with the region's ratio, and the old tree without `leaf`
+  /// on the other side, so the other leaves keep their relative structure.
+  ///
+  /// A center region needs the other leaves on both sides: the tree without
+  /// `leaf` is divided at its root split, and `leaf` goes into a nested split
+  /// between the two parts. Each part keeps its subtree; only the seam
+  /// between the parts takes the region's direction. When the other leaves
+  /// are one leaf, they cannot be divided: the shape stays and only zoom ends.
+  /// A one-leaf tree is returned unchanged.
+  ///
+  /// When the tree already has the target shape, the same construction gives
+  /// back that shape with only the ratios changed. The leaf set is preserved
+  /// and zoom is cleared.
+  public func placing(_ leaf: Leaf, in region: PlaceRegion) throws -> Self {
+    guard let root, root.contains(leaf) else { throw SplitError.leafNotFound }
+    guard let rest = root.removing(.leaf(leaf)) else { return self }
+
+    let direction: Direction = region.isHorizontal ? .horizontal : .vertical
+    let placed: Node = .leaf(leaf)
+    let newRoot: Node
+    switch region.position {
+    case .first:
+      newRoot = .split(
+        Split(direction: direction, ratio: region.span.fraction, left: placed, right: rest))
+    case .last:
+      newRoot = .split(
+        Split(direction: direction, ratio: 1 - region.span.fraction, left: rest, right: placed))
+    case .center:
+      guard case .split(let parts) = rest else { return Self(root: root, zoomed: nil) }
+      // The outer split gives the first part one third; the inner split
+      // halves the remaining two thirds between `leaf` and the last part.
+      let inner: Node = .split(
+        Split(direction: direction, ratio: 0.5, left: placed, right: parts.right))
+      newRoot = .split(
+        Split(direction: direction, ratio: region.span.fraction, left: parts.left, right: inner))
+    }
+    return Self(root: newRoot, zoomed: nil)
+  }
+
   // MARK: - Focus
 
   public func focusTarget(for direction: FocusDirection, from leaf: Leaf) -> Leaf? {

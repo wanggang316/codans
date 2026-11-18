@@ -2861,6 +2861,33 @@ final class HierarchyManager {
     store.scheduleSave(catalog)
   }
 
+  /// Moves a pane into `region` of its Tab (`SplitTree.placing`). Like
+  /// `movePane`, a pure split-tree reshape: no surface is created or torn
+  /// down, and the result persists as an ordinary split tree. A Place that
+  /// leaves the tree unchanged (a one-pane Tab) schedules no save.
+  func placePane(_ paneID: PaneID, in region: PlaceRegion) throws {
+    guard let (projectID, worktreeID, tabID) = addressOf(paneID: paneID) else {
+      throw HierarchyError.notFound("Pane \(paneID)")
+    }
+    guard
+      let (projectIndex, worktreeIndex) = findWorktreeIndices(worktreeID: worktreeID, projectID: projectID),
+      let tabIndex = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.firstIndex(where: {
+        $0.id == tabID
+      })
+    else {
+      throw HierarchyError.notFound("Tab \(tabID)")
+    }
+
+    var tab = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex]
+    let placed = try tab.splitTree.placing(paneID, in: region)
+    guard placed != tab.splitTree else { return }
+    tab.splitTree = placed
+    try tab.validateInvariants()
+    catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex] = tab
+
+    store.scheduleSave(catalog)
+  }
+
   // MARK: - Pane address resolution
 
   /// Resolves a `PaneID` to the full hierarchy address that owns it. Used by

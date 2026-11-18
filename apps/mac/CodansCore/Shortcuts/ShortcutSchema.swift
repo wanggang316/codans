@@ -66,8 +66,8 @@ extension ShortcutSchema {
   /// A single literal of ~40 entries trips Swift's type-inference timeout on the array-of-
   /// `.init(...)` shorthand; partitioning keeps each sub-expression small enough to resolve.
   public static let app: ShortcutSchema = .init(
-    entries: generalEntries + projectAndWorktreeEntries + terminalEntries + actionEntries
-      + agentEntries
+    entries: generalEntries + projectAndWorktreeEntries + terminalEntries + placeEntries
+      + actionEntries + agentEntries
   )
 
   private static let generalEntries: [Entry] = [
@@ -559,6 +559,18 @@ extension ShortcutSchema {
       defaultBinding: .init(keyCode: UInt16(kVK_ANSI_Y), modifiers: .command)
     ),
   ]
+
+  /// One entry per Place region, none with a default chord: Place opens from the Place
+  /// picker, and the user can bind any region in Settings → Shortcuts (ADR 0013).
+  private static let placeEntries: [Entry] = PlaceRegion.allCases.map { region in
+    Entry(
+      id: .place(region),
+      title: "Place in \(region.title)",
+      category: .terminal,
+      scope: .configurable,
+      defaultBinding: nil
+    )
+  }
 
   private static let actionEntries: [Entry] = [
     // Actions — verbs on the current worktree.

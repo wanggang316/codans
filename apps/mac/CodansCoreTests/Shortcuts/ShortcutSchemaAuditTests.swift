@@ -121,6 +121,37 @@ struct ShortcutSchemaAuditTests {
     #expect(CommandID.focusAgentAt(index: 10) == nil)
   }
 
+  /// ADR 0012: no default chord uses `⌃⌥`, which window managers such as
+  /// Magnet take as global hotkeys.
+  @Test
+  func noDefaultUsesTheMagnetModifiers() {
+    for entry in ShortcutSchema.app.entries {
+      guard let modifiers = entry.defaultBinding?.modifiers else { continue }
+      #expect(
+        !(modifiers.contains(.control) && modifiers.contains(.option)),
+        "\(entry.id) default uses ⌃⌥.")
+    }
+  }
+
+  /// Every Place region is its own command with no default chord, and Select Previous /
+  /// Next Worktree keep ⌃⌘↑ / ⌃⌘↓ (ADR 0013).
+  @Test
+  func placeRegionsHaveNoDefaultChordAndTheWorktreeStepsKeepTheirs() throws {
+    let ids = PlaceRegion.allCases.map(CommandID.place)
+    #expect(Set(ids).count == PlaceRegion.allCases.count)
+    for region in PlaceRegion.allCases {
+      let entry = try #require(ShortcutSchema.app.entry(for: .place(region)))
+      #expect(entry.title == "Place in \(region.title)")
+      #expect(entry.category == .terminal)
+      #expect(entry.scope == .configurable)
+      #expect(entry.defaultBinding == nil, "\(region) must have no default chord.")
+    }
+    let previous = try #require(ShortcutSchema.app.entry(for: .selectPreviousWorktree)?.defaultBinding)
+    let next = try #require(ShortcutSchema.app.entry(for: .selectNextWorktree)?.defaultBinding)
+    #expect(previous.keyCode == 0x7E && previous.modifiers == [.command, .control])  // ⌃⌘↑
+    #expect(next.keyCode == 0x7D && next.modifiers == [.command, .control])  // ⌃⌘↓
+  }
+
   @Test
   func focusPaneCoversPaneNumbersOneThroughNine() {
     let expected: [CommandID] = [
@@ -213,6 +244,21 @@ struct ShortcutSchemaAuditTests {
     (.selectWorktreeAt8, (0x1C, [.control])),
     (.selectWorktreeAt9, (0x19, [.control])),
     (.selectWorktreeAt10, (0x1D, [.control])),  // 0
+    // ADR 0013: no Place region has a default chord; Place opens from the Place picker.
+    (.placeLeftHalf, nil),
+    (.placeRightHalf, nil),
+    (.placeTopHalf, nil),
+    (.placeBottomHalf, nil),
+    (.placeLeftThird, nil),
+    (.placeCenterThird, nil),
+    (.placeRightThird, nil),
+    (.placeTopThird, nil),
+    (.placeMiddleThird, nil),
+    (.placeBottomThird, nil),
+    (.placeLeftTwoThirds, nil),
+    (.placeRightTwoThirds, nil),
+    (.placeTopTwoThirds, nil),
+    (.placeBottomTwoThirds, nil),
     (.toggleCommandQueue, (0x25, [.command])),  // ⌘L
     (.showSessionHistory, (0x10, [.command])),  // ⌘Y
     (.selectSidebarFilterAll, (0x12, [.command, .control])),

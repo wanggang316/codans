@@ -28,6 +28,10 @@ public nonisolated enum PaneActionRequest: Sendable, Equatable {
   /// the focused pane.
   case arrange(preset: LayoutPreset)
   case toggleSplitZoom
+  /// Move the source pane into a region of its Tab (GLOSSARY: Place).
+  /// Raised by the menus and the Command Palette; libghostty has no
+  /// matching action.
+  case place(PlaceRegion)
   case presentTerminal
   case toggleCommandPalette
   /// ⌘-click on a link in terminal output. `raw` is the matched text as

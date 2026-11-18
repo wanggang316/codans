@@ -359,6 +359,11 @@ struct RootFeature {
     /// selected tab) and forwards `.gotoSplit(direction:)` through the same
     /// router that handles libghostty's built-in `goto_split` keybind.
     case focusAdjacentPaneInCurrentTabRequested(direction: FocusDirection)
+    /// Window ▸ Layout and user-bound Place chords — moves the active tab's focused
+    /// pane into `region` (GLOSSARY: Place). Resolves the pane the same way
+    /// as `focusAdjacentPaneInCurrentTabRequested` and forwards
+    /// `.place(region)` through the pane action router.
+    case placeFocusedPaneInCurrentTabRequested(region: PlaceRegion)
     /// `⌘⌥1…9` menu bindings — focuses the Pane with that Pane number in the
     /// active tab through the router's `.focusPane(number:)`. A number with
     /// no Pane is a no-op.
@@ -2238,6 +2243,10 @@ struct RootFeature {
         guard let paneID = focusedPaneID(state: state) else { return .none }
         return .send(
           .paneActionRouter(.requested(paneID, .gotoSplit(direction: direction))))
+
+      case .placeFocusedPaneInCurrentTabRequested(let region):
+        guard let paneID = focusedPaneID(state: state) else { return .none }
+        return .send(.paneActionRouter(.requested(paneID, .place(region))))
 
       case .focusPaneInCurrentTabRequested(let number):
         // Any pane of the active tab identifies the tab for the router.

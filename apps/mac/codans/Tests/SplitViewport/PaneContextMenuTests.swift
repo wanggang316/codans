@@ -239,4 +239,39 @@ struct PaneContextMenuTests {
     model.arrangeLayout()
     #expect(opened == 1)
   }
+
+  // MARK: - Layout ▸ Place
+
+  /// Place acts on the clicked pane, and a one-pane Tab offers it disabled
+  /// and ignores it.
+  @Test
+  func placeMovesTheClickedPaneOnlyInATabWithTwoOrMorePanes() throws {
+    let first = PaneID()
+    let second = PaneID()
+    let split = Tab(
+      splitTree: try SplitTree(leaf: first).inserting(second, at: first, direction: .right),
+      panes: [Pane(id: first, workingDirectory: "/tmp"), Pane(id: second, workingDirectory: "/tmp")])
+    let lone = PaneID()
+    let single = Tab(splitTree: SplitTree(leaf: lone), panes: [Pane(id: lone, workingDirectory: "/tmp")])
+    let catalog = Catalog(projects: [
+      Project(
+        name: "fixture", rootPath: "/tmp",
+        worktrees: [Worktree(name: "fixture", path: "/tmp", tabs: [split, single])])
+    ])
+    var placed: [(PaneID, PlaceRegion)] = []
+    let model = PaneContextMenuModel(
+      paneID: second, snapshot: { catalog }, setLabel: { _, _, _ in },
+      placePane: { placed.append(($0, $1)) })
+    let loneModel = PaneContextMenuModel(
+      paneID: lone, snapshot: { catalog }, setLabel: { _, _, _ in },
+      placePane: { placed.append(($0, $1)) })
+
+    #expect(model.canPlace)
+    #expect(!loneModel.canPlace)
+    model.place(in: .leftTwoThirds)
+    loneModel.place(in: .leftHalf)
+    #expect(placed.count == 1)
+    #expect(placed.first?.0 == second)
+    #expect(placed.first?.1 == .leftTwoThirds)
+  }
 }

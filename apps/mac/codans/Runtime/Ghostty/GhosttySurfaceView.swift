@@ -97,6 +97,10 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
   /// without AppKit restoring focus. Additive — only ever grabs focus back
   /// for the should-be-focused pane; never clears it.
   var shouldClaimFocus: (() -> Bool)?
+  /// The effective chord of an app command, for display in this surface's
+  /// menus. Wired by TerminalEngine from the app's shortcut registry; the
+  /// Runtime layer does not read the registry itself.
+  var menuKeyEquivalent: ((CommandID) -> MenuKeyEquivalent?)?
   /// Distinguishes the initial mount (focus owned by `focusSurfaceView`)
   /// from a re-attach.
   private var hasBeenInWindow = false
@@ -878,7 +882,45 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
       guard !offered.isEmpty else { continue }
       if menu.numberOfItems > 0 { menu.addItem(.separator()) }
       for action in offered { menu.addItem(menuItem(action)) }
+      // Layout follows the split group: both reshape the Tab's split tree.
+      if group.contains(.splitRight) { menu.addItem(layoutMenuItem()) }
     }
+  }
+
+  /// "Layout" submenu: every Place region, grouped as in Window ▸ Layout and
+  /// showing the effective chord of each. A pop-up menu item answers its key
+  /// equivalent only while the menu is open; the main menu's item does the
+  /// work otherwise. A one-pane Tab ignores Place, so the items need no gate.
+  private func layoutMenuItem() -> NSMenuItem {
+    let submenu = NSMenu(title: "Layout")
+    for group in PlaceRegion.groups {
+      if submenu.numberOfItems > 0 { submenu.addItem(.separator()) }
+      for region in group {
+        let item = NSMenuItem(
+          title: region.title,
+          action: #selector(placeMenuItemSelected(_:)),
+          keyEquivalent: ""
+        )
+        item.target = self
+        item.representedObject = region
+        if let chord = menuKeyEquivalent?(.place(region)) {
+          item.keyEquivalent = chord.key
+          item.keyEquivalentModifierMask = chord.modifiers
+        }
+        item.setAccessibilityIdentifier("pane_hud.place_\(region.rawValue)")
+        submenu.addItem(item)
+      }
+    }
+    let item = NSMenuItem(title: "Layout", action: nil, keyEquivalent: "")
+    item.image = NSImage(systemSymbolName: "square.split.2x2", accessibilityDescription: nil)
+    item.setAccessibilityIdentifier("pane_hud.layout")
+    item.submenu = submenu
+    return item
+  }
+
+  @objc private func placeMenuItemSelected(_ sender: NSMenuItem) {
+    guard let region = sender.representedObject as? PlaceRegion else { return }
+    onPaneAction?(.place(region))
   }
 
   private func menuItem(_ action: PaneSurfaceAction) -> NSMenuItem {

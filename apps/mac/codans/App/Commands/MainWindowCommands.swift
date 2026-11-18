@@ -20,8 +20,8 @@ import SwiftUI
 ///   `ExcludeFromWindowsMenu` wired in `CodansApp.body`).
 /// - **Worktree**: worktree navigation + actions, the Git Viewer toggle, and
 ///   the user-defined Project + Global **commands** (merged in at the bottom).
-/// - **Window ▸ Layout**: Pane layout of the current Tab (Arrange…, Focus
-///   Pane 1…9).
+/// - **Window ▸ Layout**: Pane layout of the current Tab (Arrange…, Place
+///   in a half / third / two thirds, Focus Pane 1…9).
 /// - **Tab**: tab lifecycle (New Tab / Close Tab) plus pane split / focus /
 ///   rename / switch.
 ///
@@ -263,8 +263,10 @@ struct MainWindowCommands: Commands {
     }
 
     // MARK: Window — Layout submenu
-    // Pane layout commands for the current Tab. Later layout commands
-    // (presets, Place) join this submenu.
+    // Pane layout commands for the current Tab: Arrange…, Place (GLOSSARY:
+    // Place) and Focus Pane 1…9. The items live in the menu bar so their
+    // chords fire while a terminal Pane holds first responder (see the note
+    // on this type). A one-Pane Tab ignores Place.
     CommandGroup(before: .windowArrangement) {
       Menu("Layout") {
         Button("Arrange…") {
@@ -272,6 +274,16 @@ struct MainWindowCommands: Commands {
         }
         .appKeyboardShortcut(.arrangeLayout, in: shortcuts)
         .disabled(!hasActiveWorktree)
+        ForEach(PlaceRegion.groups, id: \.self) { group in
+          Divider()
+          ForEach(group, id: \.self) { region in
+            Button(region.title) {
+              store()?.send(.placeFocusedPaneInCurrentTabRequested(region: region))
+            }
+            .appKeyboardShortcut(.place(region), in: shortcuts)
+            .disabled(!hasActiveWorktree)
+          }
+        }
         Divider()
         ForEach(Array(SplitTree<PaneID>.paneNumbers), id: \.self) { number in
           if let id = CommandID.focusPane(number: number) {

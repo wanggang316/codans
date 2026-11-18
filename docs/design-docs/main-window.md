@@ -131,6 +131,8 @@ prompt 经 profile 的 `promptStyle` 拼进启动命令；空 prompt 只启动 a
 
 - **SwiftUI `@Observable` 不穿透 TCA client 闭包 → chip dirty 须经 `@Environment` 直读 `HierarchyManager`；休眠读用安全默认。** `@Observable` 的追踪不会穿过一个 TCA client 闭包，因此 chip 的 dirty 态必须直接经 `@Environment(HierarchyManager.self)` 读，而非经 client 返回值。配套地，`HierarchyClient.liveValue` 对休眠态的 `tabIsDirty` / `lastFocusedPane` 读取返回**安全默认 false/nil**（而非 `fatalError`），使关停期间渲染的 chip 保持惰性、不崩。
 
+- **Pane layout 入口。** Window ▸ Layout 子菜单与 Pane 右键菜单的 Layout 子菜单列出全部 Place 区域及其生效和弦（默认无和弦）；Place 是对当前 Tab split tree 的纯变换，见 [Pane Layout](pane-layout.md)。
+
 - **默认编号快捷键按选择层级区分。** ⌘1…⌘0 选择第 1…10 个 Tab，⌃1…⌃0 选择侧栏第 1…10 个可选行；具体绑定由 `ShortcutSchema` 与用户覆盖决定。⌘T 新建、⌘W 关闭、⌘⇧[ / ⌘⇧] 前后切换 Tab 经主菜单声明。`selectAdjacentTab` 经 `selectTab` 路由，保留每个 Tab 的 Pane 焦点恢复。
 
 - **重排用 snapshot-on-drop，不逐 tick 调 `moveTab`。** 拖拽重排在**落下**时一次性提交绝对顺序 `reorderTabs(orderedIDs:)`，而非每个指针 tick 调 `moveTab(offset:)`。后者每次触发一次持久化保存，且两个连续 tick 跨过同一中点时引入重排闪烁。snapshot-on-drop 更省、更易单测、且贴合 catalog 真正想要的变更形态。

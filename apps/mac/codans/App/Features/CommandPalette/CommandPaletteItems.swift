@@ -82,6 +82,11 @@ enum CommandPaletteItems {
       items.append(contentsOf: windowItems(focusedPaneID: focusedPaneID))
       if paneFocusPrecise {
         items.append(contentsOf: paneFocusDependentItems())
+        // Place moves the focused pane, so it needs exact focus, and a
+        // one-pane Tab has nothing to place it against.
+        if paneCount(of: focusedPaneID, in: catalog) > 1 {
+          items.append(contentsOf: placeItems())
+        }
         items.append(contentsOf: focusPaneNumberItems(focusedPaneID: focusedPaneID, catalog: catalog))
       }
       items.append(contentsOf: paneTabScopedItems())
@@ -817,6 +822,21 @@ enum CommandPaletteItems {
     ]
   }
 
+  /// One Place item per region (GLOSSARY: Place), keyed on the region's
+  /// stable identifier. `commandID` lets the row show the effective chord.
+  private static func placeItems() -> [CommandPaletteItem] {
+    PlaceRegion.allCases.map { region in
+      CommandPaletteItem(
+        id: "pane.place.\(region.rawValue)",
+        title: "Place in \(region.title)",
+        searchText: "pane place layout \(region.title.lowercased())",
+        icon: placeIcon(region),
+        commandID: .place(region),
+        kind: .paneAction(.place(region))
+      )
+    }
+  }
+
   /// One "Focus Pane N" item per Pane of the focused Pane's Tab that has a
   /// Pane number (the first nine in Pane order). Precise-focus only, like
   /// the directional focus items: the Tab comes from the focused Pane.
@@ -837,6 +857,16 @@ enum CommandPaletteItems {
         commandID: CommandID.focusPane(number: number),
         kind: .paneAction(.focusPane(number: number))
       )
+    }
+  }
+
+  private static func placeIcon(_ region: PlaceRegion) -> String {
+    switch region {
+    case .leftHalf: "rectangle.lefthalf.inset.filled"
+    case .rightHalf: "rectangle.righthalf.inset.filled"
+    case .topHalf: "rectangle.tophalf.inset.filled"
+    case .bottomHalf: "rectangle.bottomhalf.inset.filled"
+    default: region.isHorizontal ? "rectangle.split.3x1" : "rectangle.split.1x2"
     }
   }
 

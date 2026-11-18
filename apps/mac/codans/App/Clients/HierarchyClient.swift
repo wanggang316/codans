@@ -487,6 +487,11 @@ nonisolated struct HierarchyClient: Sendable {
       _ tabID: TabID, _ inWorktree: WorktreeID, _ inProject: ProjectID
     ) throws -> Void
 
+  /// Moves a Pane into a region of its Tab (Place). Pure split-tree reshape
+  /// like `movePane`: no surface is created or torn down, and zoom ends. A
+  /// one-Pane Tab is a silent no-op.
+  var placePane: @MainActor @Sendable (_ paneID: PaneID, _ region: PlaceRegion) throws -> Void
+
   /// Clears the Tab's zoomed-pane flag. Paired with `focusPane` (which
   /// sets the zoom) to service `PaneActionRequest.toggleSplitZoom`.
   var unzoomTab:
@@ -1113,6 +1118,9 @@ extension HierarchyClient {
           paneID, relativeTo: anchorID, direction: direction,
           in: tabID, in: worktreeID, in: projectID
         )
+      },
+      placePane: { paneID, region in
+        try manager.placePane(paneID, in: region)
       },
       unzoomTab: { tabID, worktreeID, projectID in
         try manager.unfocusPane(in: tabID, in: worktreeID, in: projectID)
@@ -2487,6 +2495,7 @@ extension HierarchyClient: DependencyKey {
     arrangeTab: { _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     resizePane: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     movePane: { _, _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    placePane: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     unzoomTab: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     runScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     runGlobalScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -2623,6 +2632,7 @@ extension HierarchyClient: DependencyKey {
     arrangeTab: unimplemented("HierarchyClient.arrangeTab"),
     resizePane: unimplemented("HierarchyClient.resizePane"),
     movePane: unimplemented("HierarchyClient.movePane"),
+    placePane: unimplemented("HierarchyClient.placePane"),
     unzoomTab: unimplemented("HierarchyClient.unzoomTab"),
     runScript: unimplemented("HierarchyClient.runScript"),
     runGlobalScript: unimplemented("HierarchyClient.runGlobalScript"),
