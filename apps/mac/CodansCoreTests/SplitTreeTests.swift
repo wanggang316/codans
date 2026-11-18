@@ -5,6 +5,40 @@ import Testing
 
 struct SplitTreeTests {
   @Test
+  func paneNumbersFollowPaneOrder() throws {
+    let a = PaneID(), b = PaneID(), c = PaneID()
+    let tree = try SplitTree(leaf: a)
+      .inserting(b, at: a, direction: .right)
+      .inserting(c, at: a, direction: .down)
+    #expect(tree.leaves() == [a, c, b])
+    #expect(tree.leaf(paneNumber: 1) == a)
+    #expect(tree.leaf(paneNumber: 2) == c)
+    #expect(tree.leaf(paneNumber: 3) == b)
+    #expect(tree.paneNumber(of: c) == 2)
+  }
+
+  @Test
+  func missingPaneNumberHasNoLeaf() {
+    let a = PaneID()
+    let tree = SplitTree(leaf: a)
+    #expect(tree.leaf(paneNumber: 0) == nil)
+    #expect(tree.leaf(paneNumber: 2) == nil)
+    #expect(tree.paneNumber(of: PaneID()) == nil)
+  }
+
+  @Test
+  func leavesAfterTheNinthHaveNoPaneNumber() throws {
+    let ids = (0..<10).map { _ in PaneID() }
+    var tree = SplitTree(leaf: ids[0])
+    for index in 1..<ids.count {
+      tree = try tree.inserting(ids[index], at: ids[index - 1], direction: .right)
+    }
+    #expect(tree.paneNumber(of: ids[8]) == 9)
+    #expect(tree.paneNumber(of: ids[9]) == nil)
+    #expect(tree.leaf(paneNumber: 10) == nil)
+  }
+
+  @Test
   func emptyTreeHasNoLeaves() {
     let tree = SplitTree<PaneID>()
     #expect(tree.isEmpty)
@@ -119,6 +153,22 @@ struct SplitTreeTests {
     let a = PaneID()
     let tree = SplitTree(leaf: a)
     #expect(tree.focusTargetAfterClosing(a) == nil)
+  }
+
+  @Test
+  func spatialSlotsCarveTheUnitSquareInPaneOrder() throws {
+    // Layout: A | (B over C), A takes 2/3 of the width.
+    let a = PaneID(), b = PaneID(), c = PaneID()
+    let tree = try SplitTree(leaf: a).inserting(b, at: a, direction: .right)
+      .inserting(c, at: b, direction: .down)
+      .resizing(at: SplitTree<PaneID>.Path(), ratio: 2.0 / 3)
+    let slots = tree.spatialSlots()
+    #expect(slots.map(\.leaf) == [a, b, c])
+    #expect(slots[0].bounds == CGRect(x: 0, y: 0, width: 2.0 / 3, height: 1))
+    #expect(abs(slots[1].bounds.minX - 2.0 / 3) < 1e-9)
+    #expect(slots[1].bounds.minY == 0 && slots[1].bounds.height == 0.5)
+    #expect(slots[2].bounds.minY == 0.5 && slots[2].bounds.height == 0.5)
+    #expect(SplitTree<PaneID>().spatialSlots().isEmpty)
   }
 
   @Test

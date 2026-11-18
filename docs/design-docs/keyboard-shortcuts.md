@@ -7,6 +7,12 @@
 
 codans 的应用内快捷键由 `ShortcutSchema` 注册表统一管理，`ShortcutsStore` 将默认值与用户覆盖解析为有效绑定。主菜单和侧栏消费绑定，Command Palette 与状态栏显示同一份和弦提示。默认 ⌘1…⌘0 选择第 1…10 个 Tab，⌃1…⌃0 选择侧栏第 1…10 个可选行；侧栏选择序列包含普通文件夹、远程文件夹和 workspace 的根行，并遵循过滤、排序及折叠状态。⌃⌘1…⌃⌘5 依次切换侧栏顶部筛选栏的 All / Remote / Workspace / PR / Unread（`CommandID.selectSidebarFilter(_:)`，绑定在筛选按钮上，tooltip 显示和弦；按住 ⌘ 时和弦替换按钮的图标与标题，过窄时等比缩小）。Agents View 打开时，⌥1…⌥9 聚焦面板中按显示顺序排列的第 1…9 个 Agent 的 Pane；面板关闭时这些绑定不挂载，⌥N 照常进入终端。AppKit 只把带 ⌘ 或 ⌃ 的按键先作为 key equivalent 分发，仅带 ⌥ 的按键直接作为 `keyDown` 交给第一响应者（终端 Pane 把它当文本输入），所以这组绑定不走 SwiftUI `.keyboardShortcut`，而由 `localHotkeys(_:)` 的本地 `keyDown` 监听按物理键匹配；文本框或文本视图持有焦点时放行。
 
+⌘⌥1…⌘⌥9 聚焦当前 Tab 中 Pane 编号为 1…9 的 Pane（`CommandID.focusPane1`…`focusPane9`，见 [GLOSSARY](../../GLOSSARY.md#pane-layout) 的 Pane order 与 Pane number）：编号是 Pane 在 Pane order（split tree 叶子顺序）中的位置，第九个之后的 Pane 没有编号；没有对应 Pane 的编号什么也不做。⌘⌥←→↑↓ 仍是按方向聚焦。路由：主菜单项派发 `RootFeature.focusPaneInCurrentTabRequested(number:)`，它取当前 Tab 的聚焦 Pane（缺省为第一个叶子）作为来源，交给 `PaneActionRouterFeature` 的 `.focusPane(number:)`，与 Command Palette 走同一个 router。入口：主菜单 Window ▸ Layout 和 Pane 右键菜单的 Layout 子菜单都列出 Focus Pane 1…9 并显示有效和弦（右键菜单作用于所点 Pane 的 Tab，无对应 Pane 的项禁用）；这两个子菜单也承载 Arrange…（见下）和后续的布局命令。Command Palette 只在聚焦 Pane 精确已知（`paneFocusPrecise`）时列出 Focus Pane N，且只列当前 Tab 已有的 Pane。
+
+⌘⌥L 打开 Layout picker（`CommandID.arrangeLayout`，标题 "Arrange Layout…"，可在 Settings → Shortcuts 改键）：当前 Tab 的 split viewport 上的浮动卡片，按当前 Pane 数列出 Layout preset 的编号缩略图（1–N，每行三个）。缩略图按 preset 的形状画出各区域，标出落在该区域的 Pane 编号，聚焦 Pane 的区域着色；与当前布局相同的 preset（`SplitTree.matchingPreset()`）带勾选标记，打开时默认选中它，没有匹配时选中第一个。数字键直接应用对应 preset；方向键在网格中移动选中项，Return 应用选中项：←→ 只在本行内移动、↑↓ 只在本列内移动，到边不动也不回绕。Esc、点击卡片外或再按一次 ⌘⌥L 关闭且不改变布局。picker 绑定打开它的 Tab（`LayoutPickerFeature.State.tabID`）：打开期间切到其他 Tab 或 Worktree（点 Tab 栏、CLI、关闭该 Tab）时，`WorktreeDetailView` 关闭它；`RootFeature` 在应用或取消时从 live catalog 读取当前显示的 Project、Worktree 与 Tab 并核对（不读 `state.selection`：侧栏点击先写 catalog，selection stream 稍后才到达），否则不改变布局、也不把焦点移回隐藏的 Pane。卡片打开时持有键盘焦点；关闭后焦点回到聚焦 Pane 的 surface。只有一个 Pane 的 Tab 不打开。路由：`RootFeature.layoutPickerToggle(PaneID?)` 打开 `LayoutPickerFeature`，来源为 `nil`（主菜单）时取当前 Tab 的聚焦 Pane；应用时经 `PaneActionRouterFeature` 的 `.arrange(preset:)`，与 Command Palette 的 "Layout: …" 同一条路径。入口：Window ▸ Layout 与 Pane 右键菜单的 Layout 子菜单顶部的 "Arrange…"，显示有效和弦；右键菜单作用于所点 Pane 的 Tab，单 Pane 的 Tab 中禁用。
+
+在主窗口中按住恰好 ⌘⌥ 约 0.5 秒后，有两个及以上 Pane 的 Tab 在每个 Pane 中央显示它的 Pane 编号（`PaneNumberOverlay`，读 `CommandKeyObserver.isCommandOptionHeld` 与 `MainWindowKeyObserver`）；只有一个 Pane 的 Tab 和第九个之后的 Pane 不显示编号。松开 ⌘ 或 ⌥ 即隐藏；与 ⌘ 提示相同，按住期间按下其他键或修饰键视为组合键，编号隐藏直到松开（`CommandHoldGesture(modifiers:)`）。按住 ⌘⌥ 对 ⌘ 提示是组合键，所以两种提示不会同时出现。编号绘制在 Pane 卡片的透明度之上，未聚焦的 Pane 编号不变暗；不拦截点击。Settings 或 Diff 窗口为 key window 时不显示。
+
 单独按住 ⌘ 约 0.5 秒后，各控件显示自己的快捷键提示。按住期间按下任何其他键或修饰键都视为组合键：提示立即隐藏，直到松开 ⌘ 前不再显示（`CommandHoldGesture`）。提示用 `ShortcutHintLabel` 绘制：系统字体、`.secondary` 纯文本、无键帽边框。提示从解析后的绑定读取，改键或禁用会同步反映。有两种放置方式：
 
 - **原位替换**（侧栏筛选栏按钮、Tab）：筛选栏按钮的完整和弦（如 `⌃⌘1`）替换整组图标与标题，过窄时等比缩小；Tab 的完整和弦在 chip 尾部槽位，替换颜色点。被替换的内容用 `shortcutHintOutgoing(to:)` 缩小到 0.7、模糊并淡出，和弦用 `shortcutHintIncoming()` 只淡入；两者始终都在布局中，控件不动。
@@ -95,7 +101,7 @@ case toggleDiffInspector = "toggleGitViewer"
 case openInEditor = "openInDefaultEditor"
 ```
 
-编号 case（`switchToTab1`…、`selectWorktreeAt1`…、`focusAgentAt1`…）逐个拼出而非参数化，使它们成为一等 JSON 键、参与 `CaseIterable`、并在路由 switch 里保持编译期穷尽。
+编号 case（`switchToTab1`…、`selectWorktreeAt1`…、`focusAgentAt1`…、`focusPane1`…）逐个拼出而非参数化，使它们成为一等 JSON 键、参与 `CaseIterable`、并在路由 switch 里保持编译期穷尽。
 
 「Toggle Git Viewer」的默认和弦为 **⌘G**，使用 `CommandID.toggleDiffInspector` / `"toggleGitViewer"`。它通过 `RootFeature.diffInspectorToggledForCurrentWorktree` 读取 Settings → General 的 Default Git Viewer：默认首项 Built-in 派发 `.openDiffRequested`，打开当前 Worktree 的独立 Changes / Outgoing 窗口；已安装的外部选择打开对应 git 客户端。下拉不提供 None；设置缺省或 `null` 归一为 Built-in，未知 ID 归一为 Built-in。既有注册表内的外部选择保留；已知但未安装的外部目标不执行打开。
 

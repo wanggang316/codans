@@ -2986,6 +2986,39 @@ final class HierarchyManager {
     store.scheduleSave(catalog)
   }
 
+  // MARK: - Arrange
+
+  /// Applies a Layout preset to every Pane of the Tab. Only the split tree
+  /// changes: no Pane is created or closed, so every surface stays alive.
+  /// Zoom is cleared. Persists.
+  func arrangeTab(
+    _ tabID: TabID,
+    in worktreeID: WorktreeID,
+    in projectID: ProjectID,
+    preset: LayoutPreset,
+    focus: PaneID?
+  ) throws {
+    guard
+      let (projectIndex, worktreeIndex) = findWorktreeIndices(
+        worktreeID: worktreeID,
+        projectID: projectID
+      )
+    else {
+      throw HierarchyError.notFound("Worktree \(worktreeID)")
+    }
+    guard
+      let tabIndex = catalog.projects[projectIndex]
+        .worktrees[worktreeIndex].tabs.firstIndex(where: { $0.id == tabID })
+    else {
+      throw HierarchyError.notFound("Tab \(tabID)")
+    }
+    var tab = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex]
+    tab.splitTree = try tab.splitTree.arranged(preset, focus: focus)
+    try tab.validateInvariants()
+    catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex] = tab
+    store.scheduleSave(catalog)
+  }
+
   private static func balancingRatios(
     in node: SplitTree<PaneID>.Node
   ) -> SplitTree<PaneID>.Node {

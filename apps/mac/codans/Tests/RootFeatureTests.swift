@@ -983,6 +983,325 @@ struct RootFeatureTests {
     #expect(closedTab.value == nil)
   }
 
+  /// `⌘⌥N` menu chord: focuses Pane N of the active tab; a number with no
+  /// Pane leaves focus alone.
+  @Test
+  func focusPaneInCurrentTabFocusesExistingPaneNumberOnly() async throws {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let tabID = TabID()
+    let leftPane = PaneID()
+    let rightPane = PaneID()
+    let tab = Tab(
+      id: tabID, name: "t",
+      splitTree: try SplitTree(leaf: leftPane).inserting(
+        rightPane, at: leftPane, direction: .right
+      ),
+      panes: [
+        Pane(id: leftPane, workingDirectory: "/tmp", initialCommand: nil),
+        Pane(id: rightPane, workingDirectory: "/tmp", initialCommand: nil),
+      ]
+    )
+    let worktree = Worktree(
+      id: worktreeID, name: "main", path: "/tmp", branch: "main",
+      tabs: [tab], selectedTabID: tabID
+    )
+    let project = Project(
+      id: projectID, name: "p", rootPath: "/tmp",
+      worktrees: [worktree], selectedWorktreeID: worktreeID
+    )
+    let catalog = Catalog(projects: [project])
+
+    var initial = RootFeature.State()
+    initial.selection = HierarchySelection(projectID: projectID, worktreeID: worktreeID)
+
+    let focused = LockIsolated<[PaneID]>([])
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+      $0.hierarchyClient.lastFocusedPane = { _ in leftPane }
+      $0.hierarchyClient.addressOf = { paneID in
+        PaneAddress(projectID: projectID, worktreeID: worktreeID, tabID: tabID, paneID: paneID)
+      }
+      $0.hierarchyClient.focusPane = { id, _, _, _ in focused.withValue { $0.append(id) } }
+      $0.hierarchyClient.focusSurfaceView = { _ in }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.focusPaneInCurrentTabRequested(number: 2))
+    await store.finish()
+    #expect(focused.value == [rightPane])
+
+    await store.send(.focusPaneInCurrentTabRequested(number: 3))
+    await store.finish()
+    #expect(focused.value == [rightPane])
+  }
+
+  /// One Tab with `paneIDs` side by side (`columns` preset when even),
+  /// selected, plus a store whose focused Pane is `focused`.
+  /// `selectedTab`, when set, receives the live selected-Tab id: assign a
+  /// new id to it to simulate selecting another Tab. `otherWorktreeSelected`,
+  /// when set to `true`, makes the catalog select a second Worktree of the
+  /// Project while `state.selection` still names the first one, as after a
+  /// sidebar click whose selection-stream event has not reached Root yet.
+  private static func layoutPickerStore(
+    paneIDs: [PaneID], focused: PaneID,
+    surfaceFocus: LockIsolated<[PaneID]>, arranged: LockIsolated<[LayoutPreset]>,
+    selectedTab: LockIsolated<TabID?>? = nil,
+    otherWorktreeSelected: LockIsolated<Bool>? = nil
+  ) throws -> TestStoreOf<RootFeature> {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let tabID = TabID()
+    var tree = SplitTree(leaf: paneIDs[0])
+    for index in paneIDs.indices.dropFirst() {
+      tree = try tree.inserting(paneIDs[index], at: paneIDs[index - 1], direction: .right)
+    }
+    let tab = Tab(
+      id: tabID, name: "t", splitTree: tree,
+      panes: paneIDs.map { Pane(id: $0, workingDirectory: "/tmp", initialCommand: nil) }
+    )
+    let worktree = Worktree(
+      id: worktreeID, name: "main", path: "/tmp", branch: "main",
+      tabs: [tab], selectedTabID: tabID
+    )
+    let otherWorktree = Worktree(name: "other", path: "/tmp/other", tabs: [Tab()])
+    let project = Project(
+      id: projectID, name: "p", rootPath: "/tmp",
+      worktrees: [worktree, otherWorktree], selectedWorktreeID: worktreeID
+    )
+    let catalog = Catalog(projects: [project])
+    selectedTab?.setValue(tabID)
+    var initial = RootFeature.State()
+    initial.selection = HierarchySelection(projectID: projectID, worktreeID: worktreeID)
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = {
+        var live = catalog
+        if let selectedTab {
+          live.projects[0].worktrees[0].selectedTabID = selectedTab.value
+        }
+        if otherWorktreeSelected?.value == true {
+          live.projects[0].selectedWorktreeID = otherWorktree.id
+        }
+        return live
+      }
+      $0.hierarchyClient.lastFocusedPane = { _ in focused }
+      $0.hierarchyClient.addressOf = { paneID in
+        PaneAddress(projectID: projectID, worktreeID: worktreeID, tabID: tabID, paneID: paneID)
+      }
+      $0.hierarchyClient.arrangeTab = { _, _, _, preset, _ in arranged.withValue { $0.append(preset) } }
+      $0.hierarchyClient.focusSurfaceView = { id in surfaceFocus.withValue { $0.append(id) } }
+    }
+    return store
+  }
+
+  /// `⌘⌥L`: opens the picker for the focused Pane's Tab with the current
+  /// preset marked; a digit applies through the router and gives focus back
+  /// to the Pane.
+  @Test
+  func layoutPickerOpensForCurrentTabAndAppliesDigit() async throws {
+    let panes = [PaneID(), PaneID()]
+    let surfaceFocus = LockIsolated<[PaneID]>([])
+    let arranged = LockIsolated<[LayoutPreset]>([])
+    let store = try Self.layoutPickerStore(
+      paneIDs: panes, focused: panes[1], surfaceFocus: surfaceFocus, arranged: arranged)
+    store.exhaustivity = .off
+
+    await store.send(.layoutPickerToggle(nil))
+    let picker = try #require(store.state.layoutPicker)
+    #expect(picker.paneID == panes[1])
+    #expect(picker.currentPreset == .columns)
+
+    await store.send(.layoutPicker(.presented(.digitPressed(4))))
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(store.state.layoutPicker == nil)
+    #expect(arranged.value == [picker.presets[3]])
+    #expect(surfaceFocus.value == [panes[1]])
+  }
+
+  @Test
+  func layoutPickerAppliesSelectionOnReturn() async throws {
+    let panes = [PaneID(), PaneID(), PaneID()]
+    let surfaceFocus = LockIsolated<[PaneID]>([])
+    let arranged = LockIsolated<[LayoutPreset]>([])
+    let store = try Self.layoutPickerStore(
+      paneIDs: panes, focused: panes[0], surfaceFocus: surfaceFocus, arranged: arranged)
+    store.exhaustivity = .off
+
+    await store.send(.layoutPickerToggle(nil))
+    let presets = try #require(store.state.layoutPicker?.presets)
+    await store.send(.layoutPicker(.presented(.selectionMoved(.down))))
+    await store.send(.layoutPicker(.presented(.selectionMoved(.right))))
+    await store.send(.layoutPicker(.presented(.selectionCommitted)))
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(store.state.layoutPicker == nil)
+    #expect(arranged.value == [presets[4]])
+    #expect(surfaceFocus.value == [panes[0]])
+  }
+
+  /// Esc closes with no change and gives key focus back to the Pane.
+  @Test
+  func layoutPickerEscapeChangesNothingAndRefocusesPane() async throws {
+    let panes = [PaneID(), PaneID()]
+    let surfaceFocus = LockIsolated<[PaneID]>([])
+    let arranged = LockIsolated<[LayoutPreset]>([])
+    let store = try Self.layoutPickerStore(
+      paneIDs: panes, focused: panes[0], surfaceFocus: surfaceFocus, arranged: arranged)
+    store.exhaustivity = .off
+
+    await store.send(.layoutPickerToggle(nil))
+    #expect(store.state.layoutPicker != nil)
+    store.exhaustivity = .on
+    await store.send(.layoutPicker(.presented(.cancelled)))
+    await store.receive(\.layoutPicker.presented.delegate.cancel) {
+      $0.layoutPicker = nil
+    }
+    await store.finish()
+    #expect(store.state.layoutPicker == nil)
+    #expect(arranged.value.isEmpty)
+    #expect(surfaceFocus.value == [panes[0]])
+  }
+
+  /// A second `⌘⌥L` closes the open picker with no change.
+  @Test
+  func layoutPickerToggleClosesOpenPicker() async throws {
+    let panes = [PaneID(), PaneID()]
+    let surfaceFocus = LockIsolated<[PaneID]>([])
+    let arranged = LockIsolated<[LayoutPreset]>([])
+    let store = try Self.layoutPickerStore(
+      paneIDs: panes, focused: panes[0], surfaceFocus: surfaceFocus, arranged: arranged)
+    store.exhaustivity = .off
+
+    await store.send(.layoutPickerToggle(nil))
+    await store.send(.layoutPickerToggle(nil))
+    await store.finish()
+    #expect(store.state.layoutPicker == nil)
+    #expect(arranged.value.isEmpty)
+    #expect(surfaceFocus.value == [panes[0]])
+  }
+
+  /// The Pane context menu opens the picker for the clicked Pane.
+  @Test
+  func layoutPickerOpensForExplicitPane() async throws {
+    let panes = [PaneID(), PaneID(), PaneID()]
+    let store = try Self.layoutPickerStore(
+      paneIDs: panes, focused: panes[0], surfaceFocus: .init([]), arranged: .init([]))
+    store.exhaustivity = .off
+
+    await store.send(.layoutPickerToggle(panes[2]))
+    #expect(store.state.layoutPicker?.paneID == panes[2])
+    #expect(store.state.layoutPicker?.focusedPaneNumber == 3)
+  }
+
+  /// The user selects another Tab while the picker is open: applying the
+  /// preset must not arrange the hidden Tab or move focus into it.
+  @Test
+  func layoutPickerChangesNothingAfterAnotherTabIsSelected() async throws {
+    let panes = [PaneID(), PaneID()]
+    let surfaceFocus = LockIsolated<[PaneID]>([])
+    let arranged = LockIsolated<[LayoutPreset]>([])
+    let selectedTab = LockIsolated<TabID?>(nil)
+    let store = try Self.layoutPickerStore(
+      paneIDs: panes, focused: panes[0], surfaceFocus: surfaceFocus, arranged: arranged,
+      selectedTab: selectedTab)
+    store.exhaustivity = .off
+
+    await store.send(.layoutPickerToggle(nil))
+    #expect(store.state.layoutPicker?.tabID == selectedTab.value)
+    selectedTab.setValue(TabID())
+
+    await store.send(.layoutPicker(.presented(.digitPressed(4))))
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(store.state.layoutPicker == nil)
+    #expect(arranged.value.isEmpty)
+    #expect(surfaceFocus.value.isEmpty)
+  }
+
+  /// A sidebar click selects another Worktree in the catalog before Root's
+  /// `state.selection` follows: applying the preset in that interval must not
+  /// arrange the Tab of the Worktree the user left.
+  @Test
+  func layoutPickerChangesNothingAfterAnotherWorktreeIsSelectedInTheCatalog() async throws {
+    let panes = [PaneID(), PaneID()]
+    let surfaceFocus = LockIsolated<[PaneID]>([])
+    let arranged = LockIsolated<[LayoutPreset]>([])
+    let otherWorktreeSelected = LockIsolated(false)
+    let store = try Self.layoutPickerStore(
+      paneIDs: panes, focused: panes[0], surfaceFocus: surfaceFocus, arranged: arranged,
+      otherWorktreeSelected: otherWorktreeSelected)
+    store.exhaustivity = .off
+
+    await store.send(.layoutPickerToggle(nil))
+    #expect(store.state.layoutPicker != nil)
+    let selectionBefore = store.state.selection
+    otherWorktreeSelected.setValue(true)
+
+    await store.send(.layoutPicker(.presented(.digitPressed(4))))
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(store.state.selection == selectionBefore)
+    #expect(store.state.layoutPicker == nil)
+    #expect(arranged.value.isEmpty)
+    #expect(surfaceFocus.value.isEmpty)
+  }
+
+  /// The view cancels a picker whose Tab is no longer shown; focus stays in
+  /// the newly shown Tab.
+  @Test
+  func layoutPickerCancelAfterAnotherTabIsSelectedLeavesFocus() async throws {
+    let panes = [PaneID(), PaneID()]
+    let surfaceFocus = LockIsolated<[PaneID]>([])
+    let selectedTab = LockIsolated<TabID?>(nil)
+    let store = try Self.layoutPickerStore(
+      paneIDs: panes, focused: panes[0], surfaceFocus: surfaceFocus, arranged: .init([]),
+      selectedTab: selectedTab)
+    store.exhaustivity = .off
+
+    await store.send(.layoutPickerToggle(nil))
+    selectedTab.setValue(TabID())
+    await store.send(.layoutPicker(.presented(.cancelled)))
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(store.state.layoutPicker == nil)
+    #expect(surfaceFocus.value.isEmpty)
+  }
+
+  /// `⌘⌥L` with a picker left over from a Tab that is no longer shown drops
+  /// it without moving focus into the hidden Tab.
+  @Test
+  func layoutPickerToggleDropsAStalePickerWithoutRefocus() async throws {
+    let panes = [PaneID(), PaneID()]
+    let surfaceFocus = LockIsolated<[PaneID]>([])
+    let selectedTab = LockIsolated<TabID?>(nil)
+    let store = try Self.layoutPickerStore(
+      paneIDs: panes, focused: panes[0], surfaceFocus: surfaceFocus, arranged: .init([]),
+      selectedTab: selectedTab)
+    store.exhaustivity = .off
+
+    await store.send(.layoutPickerToggle(nil))
+    #expect(store.state.layoutPicker != nil)
+    selectedTab.setValue(TabID())
+    await store.send(.layoutPickerToggle(nil))
+    await store.finish()
+    #expect(surfaceFocus.value.isEmpty)
+  }
+
+  @Test
+  func layoutPickerDoesNotOpenForOnePaneTab() async throws {
+    let pane = PaneID()
+    let store = try Self.layoutPickerStore(
+      paneIDs: [pane], focused: pane, surfaceFocus: .init([]), arranged: .init([]))
+
+    await store.send(.layoutPickerToggle(nil))
+    #expect(store.state.layoutPicker == nil)
+  }
+
   @Test
   func paneLifecycleExitedClosesTabWhenLastPaneInTab() async {
     // ⌘W routed via Ghostty's `close_surface` lands here. With one pane in

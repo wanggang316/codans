@@ -152,6 +152,17 @@ struct ShortcutSchemaAuditTests {
   }
 
   @Test
+  func focusPaneCoversPaneNumbersOneThroughNine() {
+    let expected: [CommandID] = [
+      .focusPane1, .focusPane2, .focusPane3, .focusPane4, .focusPane5,
+      .focusPane6, .focusPane7, .focusPane8, .focusPane9,
+    ]
+    #expect((1...9).map { CommandID.focusPane(number: $0) } == expected)
+    #expect(CommandID.focusPane(number: 0) == nil)
+    #expect(CommandID.focusPane(number: 10) == nil)
+  }
+
+  @Test
   func sidebarFiltersMapToDistinctCommandsInBarOrder() {
     let ids = SidebarFilter.allCases.map(CommandID.selectSidebarFilter)
     #expect(
@@ -187,6 +198,16 @@ struct ShortcutSchemaAuditTests {
     (.focusSplitRight, (0x7C, [.command, .option])),  // ⌘⌥→
     (.focusSplitUp, (0x7E, [.command, .option])),  // ⌘⌥↑
     (.focusSplitDown, (0x7D, [.command, .option])),  // ⌘⌥↓
+    (.focusPane1, (0x12, [.command, .option])),  // ⌘⌥1
+    (.focusPane2, (0x13, [.command, .option])),  // ⌘⌥2
+    (.focusPane3, (0x14, [.command, .option])),  // ⌘⌥3
+    (.focusPane4, (0x15, [.command, .option])),  // ⌘⌥4
+    (.focusPane5, (0x17, [.command, .option])),  // ⌘⌥5
+    (.focusPane6, (0x16, [.command, .option])),  // ⌘⌥6
+    (.focusPane7, (0x1A, [.command, .option])),  // ⌘⌥7
+    (.focusPane8, (0x1C, [.command, .option])),  // ⌘⌥8
+    (.focusPane9, (0x19, [.command, .option])),  // ⌘⌥9
+    (.arrangeLayout, (0x25, [.command, .option])),  // ⌘⌥L
     (.revealCurrentWorktreeInFinder, (0x1F, [.command, .option])),  // ⌥O
     (.archiveCurrentWorktree, (0x33, [.command, .control])),  // ⌃⌘⌫
     (.deleteCurrentWorktree, (0x33, [.command, .control, .shift])),  // ⌃⌘⇧⌫

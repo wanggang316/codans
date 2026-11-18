@@ -18,8 +18,15 @@ public nonisolated enum PaneActionRequest: Sendable, Equatable {
   /// sibling reclaims focus.
   case closePane
   case gotoSplit(direction: FocusDirection)
+  /// Focus the Pane with Pane number `number` (1–9, the position in the Pane order) in the
+  /// source pane's Tab. A number with no Pane is a no-op.
+  case focusPane(number: Int)
   case resizeSplit(direction: ResizeDirection, amount: Double)
   case equalizeSplits
+  /// Applies a Layout preset to every Pane of the source pane's Tab. Main
+  /// presets put the source pane in the main area, so the sender must pass
+  /// the focused pane.
+  case arrange(preset: LayoutPreset)
   case toggleSplitZoom
   /// Move the source pane into a region of its Tab (GLOSSARY: Place).
   /// Raised by the menus and the Command Palette; libghostty has no

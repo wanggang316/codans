@@ -179,4 +179,64 @@ struct PaneContextMenuTests {
 
     #expect(model.isMuted == false)
   }
+
+  // MARK: - Layout ▸ Focus Pane N
+
+  @Test
+  func focusPaneNumberTargetsThePaneOfThisTabInPaneOrder() throws {
+    let first = PaneID()
+    let second = PaneID()
+    let tab = Tab(
+      splitTree: try SplitTree(leaf: first).inserting(second, at: first, direction: .right),
+      panes: [
+        Pane(id: first, workingDirectory: "/tmp"),
+        Pane(id: second, workingDirectory: "/tmp"),
+      ])
+    let catalog = Catalog(projects: [
+      Project(
+        name: "fixture", rootPath: "/tmp",
+        worktrees: [Worktree(name: "fixture", path: "/tmp", tabs: [tab])])
+    ])
+    var focused: [PaneID] = []
+    let model = PaneContextMenuModel(
+      paneID: second,
+      snapshot: { catalog },
+      setLabel: { _, _, _ in },
+      focusPane: { focused.append($0) }
+    )
+
+    #expect(model.pane(number: 1) == first)
+    #expect(model.pane(number: 3) == nil)
+    model.focusPane(number: 1)
+    model.focusPane(number: 3)
+    #expect(focused == [first])
+  }
+
+  // MARK: - Layout ▸ Arrange…
+
+  @Test
+  func arrangeIsAvailableOnlyForTabsWithTwoOrMorePanes() throws {
+    let first = PaneID()
+    let second = PaneID()
+    let split = Tab(
+      splitTree: try SplitTree(leaf: first).inserting(second, at: first, direction: .right),
+      panes: [Pane(id: first, workingDirectory: "/tmp"), Pane(id: second, workingDirectory: "/tmp")])
+    let lone = PaneID()
+    let single = Tab(splitTree: SplitTree(leaf: lone), panes: [Pane(id: lone, workingDirectory: "/tmp")])
+    let catalog = Catalog(projects: [
+      Project(
+        name: "fixture", rootPath: "/tmp",
+        worktrees: [Worktree(name: "fixture", path: "/tmp", tabs: [split, single])])
+    ])
+    var opened = 0
+    let model = PaneContextMenuModel(
+      paneID: second, snapshot: { catalog }, setLabel: { _, _, _ in },
+      arrangeLayout: { opened += 1 })
+    let loneModel = PaneContextMenuModel(paneID: lone, snapshot: { catalog }, setLabel: { _, _, _ in })
+
+    #expect(model.canArrange)
+    #expect(!loneModel.canArrange)
+    model.arrangeLayout()
+    #expect(opened == 1)
+  }
 }

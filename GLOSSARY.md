@@ -140,9 +140,14 @@ picker or the Command Palette.
 Pane count as numbered thumbnails. A digit applies the preset with that number.
 
 **Place**: To move the focused Pane into one region of the Tab (a half, a
-third, or two thirds). The other Panes keep their relative structure in the
-remaining area. Maximize is the existing zoom, not a Place region.
+third, or two thirds), from the Place picker or the Command Palette. The other
+Panes keep their relative structure in the remaining area. Maximize is the
+existing zoom, not a Place region.
 _Avoid_: snap, tile.
+
+**Place picker**: The overlay that shows the Place regions as thumbnails with
+fixed keys (`1`–`9`, then `A`, `B`, …). A key places the focused Pane in that
+region. It is separate from the Layout picker.
 
 **Pane number**: The position 1–9 of a Pane in the Pane order. `⌘⌥N` focuses
 Pane N; holding `⌘⌥` shows each number over its Pane. Panes after the ninth

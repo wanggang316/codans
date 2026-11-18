@@ -18,18 +18,6 @@ extension Catalog {
     return nil
   }
 
-  /// The tab that holds the pane `id`, by the same walk as `pane(_:)`.
-  public func tab(containing id: PaneID) -> Tab? {
-    for project in projects {
-      for worktree in project.worktrees {
-        if let tab = worktree.tabs.first(where: { $0.panes.contains { $0.id == id } }) {
-          return tab
-        }
-      }
-    }
-    return nil
-  }
-
   /// The project the sidebar shows as selected: `selectedProjectID` once
   /// the user has picked a row, otherwise (right after launch) the first
   /// project that remembers a selected worktree.

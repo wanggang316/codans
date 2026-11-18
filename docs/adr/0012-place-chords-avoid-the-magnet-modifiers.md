@@ -1,6 +1,6 @@
 # 0012. The Place chords do not use the Magnet modifiers
 
-Status: Accepted
+Status: Superseded by [0013](0013-place-opens-a-picker-with-no-region-chords.md)
 
 ## Context
 
