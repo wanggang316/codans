@@ -45,6 +45,13 @@ struct PlacePickerFeature {
 
     var selectedRegion: PlaceRegion { items[selectedIndex].region }
 
+    /// The keys the view passes to `keyPressed`: the keys of the shown
+    /// regions, letters in both cases. Every other key stays with the view.
+    var acceptedKeys: CharacterSet {
+      let keys = items.map { String($0.key) }.joined()
+      return CharacterSet(charactersIn: keys.lowercased() + keys)
+    }
+
     /// The Tab after placing the Pane in `region`, one slot per Pane in the
     /// unit square, labelled with the Pane number it has now. Uses the same
     /// Place code as the Tab.
@@ -107,8 +114,10 @@ struct PlacePickerFeature {
     Reduce { state, action in
       switch action {
       case .keyPressed(let key):
-        let key = Character(key.uppercased())
-        guard let index = state.items.firstIndex(where: { $0.key == key }) else { return .none }
+        // Compare as strings: the uppercase form of a key can be more than
+        // one character (`ß` → `SS`), which `Character(_:)` traps on.
+        let typed = key.uppercased()
+        guard let index = state.items.firstIndex(where: { String($0.key) == typed }) else { return .none }
         state.selectedIndex = index
         return .send(.delegate(.apply(state.selectedRegion)))
 

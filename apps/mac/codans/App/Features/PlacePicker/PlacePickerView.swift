@@ -14,7 +14,7 @@ struct PlacePickerView: View {
       title: "Place Pane",
       hint: "\(keyRange) to place · Esc to cancel",
       accessibilityLabel: "Place Picker",
-      keys: .alphanumerics,
+      keys: store.acceptedKeys,
       onKey: { store.send(.keyPressed($0)) },
       onMove: { store.send(.selectionMoved($0)) },
       onCommit: { store.send(.selectionCommitted) },

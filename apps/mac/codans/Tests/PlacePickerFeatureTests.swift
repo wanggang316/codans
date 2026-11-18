@@ -86,6 +86,29 @@ struct PlacePickerFeatureTests {
     await store.send(.keyPressed("Z"))
   }
 
+  /// A key whose uppercase form is more than one character (`ß` → `SS`) or
+  /// is not ASCII matches no region and does not trap.
+  @Test
+  func keyWithAMultiCharacterUppercaseDoesNothing() async throws {
+    let state = try Self.state(paneCount: 3)
+    let store = TestStore(initialState: state) { PlacePickerFeature() }
+    await store.send(.keyPressed("ß"))
+    await store.send(.keyPressed("ﬀ"))
+    await store.send(.keyPressed("é"))
+    await store.send(.keyPressed("١"))
+  }
+
+  /// The view sends only the keys of the shown regions, in either case.
+  @Test
+  func acceptedKeysAreTheShownKeysInBothCases() throws {
+    let two = try Self.state(paneCount: 2)
+    #expect(two.acceptedKeys.contains("a"))
+    #expect(two.acceptedKeys.contains("C"))
+    #expect(!two.acceptedKeys.contains("d"))
+    #expect(!two.acceptedKeys.contains("ß"))
+    #expect(!two.acceptedKeys.contains("0"))
+  }
+
   @Test
   func arrowsMoveSelectionInTheGridAndReturnApplies() async throws {
     // Three Panes: 14 regions in rows of four.
