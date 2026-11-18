@@ -1,0 +1,18 @@
+Left Half		enabled=true
+Right Half		enabled=true
+Top Half		enabled=true
+Bottom Half		enabled=true
+---
+Left Third		enabled=true
+Center Third		enabled=true
+Right Third		enabled=true
+---
+Top Third		enabled=true
+Middle Third		enabled=true
+Bottom Third		enabled=true
+---
+Left Two Thirds		enabled=true
+Right Two Thirds		enabled=true
+---
+Top Two Thirds		enabled=true
+Bottom Two Thirds		enabled=true

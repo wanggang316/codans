@@ -1,0 +1,30 @@
+Arrange…	⌥⌘L	enabled=true
+---
+Left Half		enabled=true
+Right Half		enabled=true
+Top Half		enabled=true
+Bottom Half		enabled=true
+---
+Left Third		enabled=true
+Center Third		enabled=true
+Right Third		enabled=true
+---
+Top Third		enabled=true
+Middle Third		enabled=true
+Bottom Third		enabled=true
+---
+Left Two Thirds		enabled=true
+Right Two Thirds		enabled=true
+---
+Top Two Thirds		enabled=true
+Bottom Two Thirds		enabled=true
+---
+Focus Pane 1	⌥⌘1	enabled=true
+Focus Pane 2	⌥⌘2	enabled=true
+Focus Pane 3	⌥⌘3	enabled=true
+Focus Pane 4	⌥⌘4	enabled=true
+Focus Pane 5	⌥⌘5	enabled=true
+Focus Pane 6	⌥⌘6	enabled=true
+Focus Pane 7	⌥⌘7	enabled=true
+Focus Pane 8	⌥⌘8	enabled=true
+Focus Pane 9	⌥⌘9	enabled=true

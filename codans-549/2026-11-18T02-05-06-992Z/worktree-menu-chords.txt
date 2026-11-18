@@ -1,0 +1,2 @@
+Select Previous Worktree	⌃⌘glyph104	enabled=true
+Select Next Worktree	⌃⌘glyph106	enabled=true
