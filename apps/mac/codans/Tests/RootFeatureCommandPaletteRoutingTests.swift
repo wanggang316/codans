@@ -40,6 +40,15 @@ struct RootFeatureCommandPaletteRoutingTests {
     await store.receive(\.diffInspectorToggledForCurrentWorktree)
   }
 
+  /// Place… opens the same picker as `⌘⌥K`, for the palette's source pane.
+  @Test
+  func activateOpenPlacePickerRoutesToThePlacePickerToggle() async {
+    let store = Self.stubbedStore()
+    await store.send(.commandPaletteToggle(nil))
+    await store.send(.commandPalette(.presented(.delegate(.activate(.openPlacePicker)))))
+    await store.receive(\.placePickerToggle)
+  }
+
   @Test
   func activateShowUnreadNotificationsRoutesToRoot() async {
     let store = Self.stubbedStore()

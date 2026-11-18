@@ -641,6 +641,21 @@ struct PaneActionRouterFeatureTests {
     await store.receive(.delegate(.presentTerminalRequested(f.paneID)))
   }
 
+  /// The terminal's Layout ▸ Place… lifts the source pane to the root,
+  /// which owns the Place picker.
+  @Test
+  func openPlacePickerEmitsDelegate() async {
+    let f = Fixture()
+    let store = TestStore(initialState: PaneActionRouterFeature.State()) {
+      PaneActionRouterFeature()
+    } withDependencies: {
+      $0.hierarchyClient = HierarchyClient.testValue
+    }
+
+    await store.send(.requested(f.paneID, .openPlacePicker))
+    await store.receive(.delegate(.placePickerRequested(f.paneID)))
+  }
+
   @Test
   func toggleCommandPaletteEmitsDelegate() async {
     let f = Fixture()

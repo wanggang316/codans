@@ -149,6 +149,8 @@ struct CommandPaletteItem: Equatable, Identifiable {
     // Hand the focused pane's task to another agent. The source pane is
     // resolved at activation from the palette's focused pane.
     case handOff
+    // Open the Place picker for the focused pane's Tab.
+    case openPlacePicker
 
     // Agent Workflows — one Kind per definition visible to the selected
     // Worktree, identified by workflow id (stable across launches, unlike

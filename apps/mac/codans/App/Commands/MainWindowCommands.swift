@@ -263,16 +263,21 @@ struct MainWindowCommands: Commands {
     }
 
     // MARK: Window — Layout submenu
-    // Pane layout commands for the current Tab: Arrange…, Place (GLOSSARY:
-    // Place) and Focus Pane 1…9. The items live in the menu bar so their
+    // Pane layout commands for the current Tab: Arrange…, Place… and the
+    // Place regions (GLOSSARY: Place), and Focus Pane 1…9. The items live in the menu bar so their
     // chords fire while a terminal Pane holds first responder (see the note
-    // on this type). A one-Pane Tab ignores Place.
+    // on this type). A one-Pane Tab ignores Place and opens no picker.
     CommandGroup(before: .windowArrangement) {
       Menu("Layout") {
         Button("Arrange…") {
           store()?.send(.layoutPickerToggle(nil))
         }
         .appKeyboardShortcut(.arrangeLayout, in: shortcuts)
+        .disabled(!hasActiveWorktree)
+        Button("Place…") {
+          store()?.send(.placePickerToggle(nil))
+        }
+        .appKeyboardShortcut(.placePane, in: shortcuts)
         .disabled(!hasActiveWorktree)
         ForEach(PlaceRegion.groups, id: \.self) { group in
           Divider()

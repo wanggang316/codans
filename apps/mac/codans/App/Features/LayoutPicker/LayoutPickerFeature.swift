@@ -62,7 +62,7 @@ struct LayoutPickerFeature {
     case cancelled
     case delegate(Delegate)
 
-    enum Direction: Equatable { case left, right, up, down }
+    typealias Direction = PickerGrid.Direction
 
     @CasePathable
     enum Delegate: Equatable {
@@ -102,26 +102,10 @@ struct LayoutPickerFeature {
     }
   }
 
-  /// The thumbnail that an arrow key moves to in a grid of `count` items,
-  /// `columnCount` per row, or `nil` at an edge. There is no wrap: Left and
-  /// Right stay in the row, Up and Down stay in the column, so a held arrow
-  /// key settles on an edge.
+  /// The thumbnail that an arrow key moves to, or `nil` at an edge
+  /// (`PickerGrid`).
   static func index(moving direction: Action.Direction, from index: Int, count: Int) -> Int? {
-    let column = index % columnCount
-    let target: Int
-    switch direction {
-    case .left:
-      guard column > 0 else { return nil }
-      target = index - 1
-    case .right:
-      guard column < columnCount - 1 else { return nil }
-      target = index + 1
-    case .up:
-      target = index - columnCount
-    case .down:
-      target = index + columnCount
-    }
-    return (0..<count).contains(target) ? target : nil
+    PickerGrid.index(moving: direction, from: index, count: count, columns: columnCount)
   }
 
   /// The regions of `preset` in the unit square, each labelled with the

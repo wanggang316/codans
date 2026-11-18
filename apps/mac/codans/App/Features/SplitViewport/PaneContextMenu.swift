@@ -20,6 +20,8 @@ struct PaneContextMenuModel {
   var arrangeLayout: () -> Void = {}
   /// Moves a pane into a region of its Tab (Place) and keeps it focused.
   var placePane: (PaneID, PlaceRegion) -> Void = { _, _ in }
+  /// Opens the Place picker for this pane.
+  var openPlacePicker: () -> Void = {}
 
   var isMuted: Bool {
     snapshot().pane(paneID)?.isNotificationsMuted ?? false
@@ -58,6 +60,12 @@ struct PaneContextMenuModel {
     placePane(paneID, region)
   }
 
+  /// Opens the Place picker for this pane (the one right-clicked).
+  func placeWithPicker() {
+    guard canPlace else { return }
+    openPlacePicker()
+  }
+
   func focusPane(number: Int) {
     guard let target = pane(number: number) else { return }
     focusPane(target)
@@ -65,8 +73,8 @@ struct PaneContextMenuModel {
 }
 
 /// Right-click menu for a pane. Hosts the "Mute notifications" toggle,
-/// the Layout submenu (Arrange…, Place this pane, and Focus Pane 1…9 of
-/// this pane's Tab),
+/// the Layout submenu (Arrange…, Place…, Place this pane, and Focus Pane
+/// 1…9 of this pane's Tab),
 /// and a "Close" item that tears the pane down; future menu items can be
 /// added here without churning `LazyPaneHost`.
 ///
@@ -82,6 +90,7 @@ struct PaneContextMenu: View {
   let projectID: ProjectID
   @Dependency(HierarchyClient.self) private var hierarchy
   @Environment(\.openLayoutPicker) private var openLayoutPicker
+  @Environment(\.openPlacePicker) private var openPlacePicker
 
   private var model: PaneContextMenuModel {
     PaneContextMenuModel(
@@ -103,7 +112,8 @@ struct PaneContextMenu: View {
       placePane: { target, region in
         try? hierarchy.placePane(target, region)
         hierarchy.focusSurfaceView(target)
-      }
+      },
+      openPlacePicker: { [openPlacePicker, paneID] in openPlacePicker(paneID) }
     )
   }
 
@@ -124,6 +134,11 @@ struct PaneContextMenu: View {
       }
       .appKeyboardShortcut(.arrangeLayout)
       .disabled(!model.canArrange)
+      Button("Place…") {
+        model.placeWithPicker()
+      }
+      .appKeyboardShortcut(.placePane)
+      .disabled(!model.canPlace)
       ForEach(PlaceRegion.groups, id: \.self) { group in
         Divider()
         ForEach(group, id: \.self) { region in

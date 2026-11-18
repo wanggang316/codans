@@ -85,6 +85,7 @@ enum CommandPaletteItems {
         // Place moves the focused pane, so it needs exact focus, and a
         // one-pane Tab has nothing to place it against.
         if paneCount(of: focusedPaneID, in: catalog) > 1 {
+          items.append(placePickerItem())
           items.append(contentsOf: placeItems())
         }
         items.append(contentsOf: focusPaneNumberItems(focusedPaneID: focusedPaneID, catalog: catalog))
@@ -820,6 +821,18 @@ enum CommandPaletteItems {
         kind: .paneAction(.closePane)
       ),
     ]
+  }
+
+  /// "Place…": opens the Place picker, like `⌘⌥K`.
+  private static func placePickerItem() -> CommandPaletteItem {
+    CommandPaletteItem(
+      id: "pane.placePicker",
+      title: "Place…",
+      searchText: "pane place layout picker region",
+      icon: "rectangle.lefthalf.inset.filled",
+      commandID: .placePane,
+      kind: .openPlacePicker
+    )
   }
 
   /// One Place item per region (GLOSSARY: Place), keyed on the region's

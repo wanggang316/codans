@@ -40,6 +40,7 @@ struct PaneActionRouterFeature {
       case presentTerminalRequested(PaneID)
       case commandPaletteToggleRequested(PaneID)
       case openLinkRequested(PaneID, raw: String, workingDirectory: String?)
+      case placePickerRequested(PaneID)
     }
   }
 
@@ -259,6 +260,9 @@ struct PaneActionRouterFeature {
 
     case .presentTerminal:
       return .send(.delegate(.presentTerminalRequested(paneID)))
+
+    case .openPlacePicker:
+      return .send(.delegate(.placePickerRequested(paneID)))
 
     case .toggleCommandPalette:
       return .send(.delegate(.commandPaletteToggleRequested(paneID)))
