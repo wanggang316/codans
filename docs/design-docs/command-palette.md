@@ -131,7 +131,7 @@ apps/mac/codans/App/Features/CommandPalette/
 
 **精确聚焦的区分是耐久不变量。** 依赖"哪个 split 聚焦"的 pane 动作（split / focus 导航 / zoom / Place）**仅当 pane 经 Ghostty 键绑定管线带入（精确聚焦）时才发出**；菜单触发的打开会略去它们，使用户绝不会看到一个"Focus Pane Left"从错误的 pane 静默导航。Focus Pane N（⌘⌥N）也只在精确聚焦时发出，且只列聚焦 Pane 所在 Tab 已有的前九个 Pane。Tab 域动作（New Tab / Close Tab / Equalize）与 Window 域动作只需当前 tab 里任一 leaf 即可解析（同 tab 每个 leaf 映射到同一 NSWindow），故 fallback 解析的 paneID 足矣，无论聚焦是否精确都安全。
 
-Place 项（每个 `PlaceRegion` 一条，ID `pane.place.<region>`，经 `commandID` 显示生效和弦）还要求聚焦 Pane 所在 Tab 有两个及以上 Pane；单 Pane Tab 不列出它们（见 [Pane Layout](pane-layout.md)）。
+Place 项（每个 `PlaceRegion` 一条，ID `pane.place.<region>`，经 `commandID` 显示生效和弦）还要求聚焦 Pane 所在 Tab 有两个及以上 Pane；单 Pane Tab 不列出它们（见 [Pane Layout](pane-layout.md)）。"Place…"（ID `pane.placePicker`，`commandID` 为 `placePane`，显示 ⌘⌥K）打开 Place picker，出现条件与 Place 项相同。
 
 `hiddenWhenQueryEmpty` 把破坏性命令（Delete Worktree / Close Tab / Close Window / Quit）挡在静息列表外——只有当用户键入命中它们的非空 query 时才出现，绝不在"刚打开面板"的默认列表里露面。
 
