@@ -133,22 +133,23 @@ struct ShortcutSchemaAuditTests {
     }
   }
 
-  /// Every Place region is its own command, and only the halves have a default chord
-  /// (ADR 0012).
+  /// Every Place region is its own command with no default chord, and Select Previous /
+  /// Next Worktree keep ⌃⌘↑ / ⌃⌘↓ (ADR 0013).
   @Test
-  func everyPlaceRegionHasADistinctCommandAndOnlyHalvesHaveDefaults() {
+  func placeRegionsHaveNoDefaultChordAndTheWorktreeStepsKeepTheirs() throws {
     let ids = PlaceRegion.allCases.map(CommandID.place)
     #expect(Set(ids).count == PlaceRegion.allCases.count)
     for region in PlaceRegion.allCases {
-      let entry = ShortcutSchema.app.entry(for: .place(region))
-      #expect(entry?.title == "Place in \(region.title)")
-      #expect(entry?.category == .terminal)
-      if region.span == .half {
-        #expect(entry?.defaultBinding != nil, "\(region) must have a default chord.")
-      } else {
-        #expect(entry?.defaultBinding == nil, "\(region) must have no default chord.")
-      }
+      let entry = try #require(ShortcutSchema.app.entry(for: .place(region)))
+      #expect(entry.title == "Place in \(region.title)")
+      #expect(entry.category == .terminal)
+      #expect(entry.scope == .configurable)
+      #expect(entry.defaultBinding == nil, "\(region) must have no default chord.")
     }
+    let previous = try #require(ShortcutSchema.app.entry(for: .selectPreviousWorktree)?.defaultBinding)
+    let next = try #require(ShortcutSchema.app.entry(for: .selectNextWorktree)?.defaultBinding)
+    #expect(previous.keyCode == 0x7E && previous.modifiers == [.command, .control])  // ⌃⌘↑
+    #expect(next.keyCode == 0x7D && next.modifiers == [.command, .control])  // ⌃⌘↓
   }
 
   @Test
@@ -215,10 +216,8 @@ struct ShortcutSchemaAuditTests {
     (.copyCurrentWorktreePath, (0x08, [.command, .shift])),  // ⌘⇧C
     (.toggleCurrentWorktreePinned, (0x23, [.command, .option])),  // ⌘⌥P
     (.revealCurrentWorktreeInSidebar, (0x26, [.command, .shift])),  // ⌘⇧J
-    // ADR 0012: ⌃⌘↑ / ⌃⌘↓ went to the top and bottom halves; the Worktree steps moved to
-    // the bracket family next to ⌘[ / ⌘] (history) and ⌘⇧[ / ⌘⇧] (tabs).
-    (.selectPreviousWorktree, (0x21, [.command, .control])),  // ⌃⌘[
-    (.selectNextWorktree, (0x1E, [.command, .control])),  // ⌃⌘]
+    (.selectPreviousWorktree, (0x7E, [.command, .control])),  // ⌘⌃↑
+    (.selectNextWorktree, (0x7D, [.command, .control])),  // ⌘⌃↓
     (.worktreeHistoryBack, (0x21, [.command])),  // ⌘[
     (.worktreeHistoryForward, (0x1E, [.command])),  // ⌘]
     (.newTab, (0x11, [.command])),  // t
@@ -245,11 +244,11 @@ struct ShortcutSchemaAuditTests {
     (.selectWorktreeAt8, (0x1C, [.control])),
     (.selectWorktreeAt9, (0x19, [.control])),
     (.selectWorktreeAt10, (0x1D, [.control])),  // 0
-    // ADR 0012: ⌃⌘ + arrow for the four halves; the thirds and two thirds have no default.
-    (.placeLeftHalf, (0x7B, [.command, .control])),  // ⌃⌘←
-    (.placeRightHalf, (0x7C, [.command, .control])),  // ⌃⌘→
-    (.placeTopHalf, (0x7E, [.command, .control])),  // ⌃⌘↑
-    (.placeBottomHalf, (0x7D, [.command, .control])),  // ⌃⌘↓
+    // ADR 0013: no Place region has a default chord; Place opens from the Place picker.
+    (.placeLeftHalf, nil),
+    (.placeRightHalf, nil),
+    (.placeTopHalf, nil),
+    (.placeBottomHalf, nil),
     (.placeLeftThird, nil),
     (.placeCenterThird, nil),
     (.placeRightThird, nil),

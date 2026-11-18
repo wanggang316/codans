@@ -359,7 +359,7 @@ struct RootFeature {
     /// selected tab) and forwards `.gotoSplit(direction:)` through the same
     /// router that handles libghostty's built-in `goto_split` keybind.
     case focusAdjacentPaneInCurrentTabRequested(direction: FocusDirection)
-    /// Window ▸ Layout and the Place chords — moves the active tab's focused
+    /// Window ▸ Layout and user-bound Place chords — moves the active tab's focused
     /// pane into `region` (GLOSSARY: Place). Resolves the pane the same way
     /// as `focusAdjacentPaneInCurrentTabRequested` and forwards
     /// `.place(region)` through the pane action router.

@@ -10,30 +10,30 @@ import CodansCore
 struct ShortcutDisplayTests {
   // MARK: - Menu key equivalents
 
-  /// The Place menus show the effective chord: the default, a user rebinding, or
-  /// nothing for a region without a chord or with a disabled one.
+  /// The Place menus show the effective chord: nothing by default (ADR 0013), the user's
+  /// binding when there is one, and nothing for a disabled binding.
   @Test
   func menuKeyEquivalentFollowsTheResolvedChord() {
     let defaults = ShortcutResolver.resolve(overrides: ShortcutOverrideStore())
-    let left = ShortcutDisplay.menuKeyEquivalent(for: .placeLeftHalf, in: defaults)
-    let leftArrow = String(KeyEquivalent.leftArrow.character)
-    #expect(left == MenuKeyEquivalent(key: leftArrow, modifiers: [.command, .control]))
-    #expect(ShortcutDisplay.menuKeyEquivalent(for: .placeCenterThird, in: defaults) == nil)
+    for region in PlaceRegion.allCases {
+      #expect(ShortcutDisplay.menuKeyEquivalent(for: .place(region), in: defaults) == nil)
+    }
 
     let rebound: ResolvedShortcutMap = [
-      .placeCenterThird: ResolvedShortcut(
-        id: .placeCenterThird,
-        binding: ShortcutBinding(keyCode: UInt16(kVK_ANSI_C), modifiers: [.command, .shift]),
-        isEnabled: true, source: .userOverride),
       .placeLeftHalf: ResolvedShortcut(
         id: .placeLeftHalf,
         binding: ShortcutBinding(keyCode: UInt16(kVK_LeftArrow), modifiers: [.command, .control]),
+        isEnabled: true, source: .userOverride),
+      .placeCenterThird: ResolvedShortcut(
+        id: .placeCenterThird,
+        binding: ShortcutBinding(keyCode: UInt16(kVK_ANSI_C), modifiers: [.command, .shift]),
         isEnabled: false, source: .userOverride),
     ]
+    let leftArrow = String(KeyEquivalent.leftArrow.character)
     #expect(
-      ShortcutDisplay.menuKeyEquivalent(for: .placeCenterThird, in: rebound)
-        == MenuKeyEquivalent(key: "c", modifiers: [.command, .shift]))
-    #expect(ShortcutDisplay.menuKeyEquivalent(for: .placeLeftHalf, in: rebound) == nil)
+      ShortcutDisplay.menuKeyEquivalent(for: .placeLeftHalf, in: rebound)
+        == MenuKeyEquivalent(key: leftArrow, modifiers: [.command, .control]))
+    #expect(ShortcutDisplay.menuKeyEquivalent(for: .placeCenterThird, in: rebound) == nil)
   }
 
   // MARK: - Modifier glyphs

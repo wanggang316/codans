@@ -202,15 +202,14 @@ extension ShortcutSchema {
       title: "Select Previous Worktree",
       category: .projectAndWorktree,
       scope: .configurable,
-      // ⌃⌘[ / ⌃⌘]: ⌃⌘ + arrow belongs to the Place halves (ADR 0012).
-      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_LeftBracket), modifiers: [.command, .control])
+      defaultBinding: .init(keyCode: UInt16(kVK_UpArrow), modifiers: [.command, .control])
     ),
     .init(
       id: .selectNextWorktree,
       title: "Select Next Worktree",
       category: .projectAndWorktree,
       scope: .configurable,
-      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_RightBracket), modifiers: [.command, .control])
+      defaultBinding: .init(keyCode: UInt16(kVK_DownArrow), modifiers: [.command, .control])
     ),
     .init(
       id: .worktreeHistoryBack,
@@ -561,25 +560,15 @@ extension ShortcutSchema {
     ),
   ]
 
-  /// One entry per Place region. The four halves take `⌃⌘` + arrow; the thirds and two
-  /// thirds have no default chord. ADR 0012 keeps the Place chords off the `⌃⌥`
-  /// window-manager modifiers.
+  /// One entry per Place region, none with a default chord: Place opens from the Place
+  /// picker, and the user can bind any region in Settings → Shortcuts (ADR 0013).
   private static let placeEntries: [Entry] = PlaceRegion.allCases.map { region in
-    let arrow: Int? =
-      switch region {
-      case .leftHalf: kVK_LeftArrow
-      case .rightHalf: kVK_RightArrow
-      case .topHalf: kVK_UpArrow
-      case .bottomHalf: kVK_DownArrow
-      default: nil
-      }
-    let defaultBinding = arrow.map { ShortcutBinding(keyCode: UInt16($0), modifiers: [.command, .control]) }
-    return Entry(
+    Entry(
       id: .place(region),
       title: "Place in \(region.title)",
       category: .terminal,
       scope: .configurable,
-      defaultBinding: defaultBinding
+      defaultBinding: nil
     )
   }
 

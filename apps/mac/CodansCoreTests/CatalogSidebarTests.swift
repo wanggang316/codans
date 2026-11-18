@@ -4,7 +4,7 @@ import Testing
 @testable import CodansCore
 
 /// Which worktree a Project row stands for, which rows it lists under it, and
-/// the order the sidebar offers its selectable rows in (⌃1…⌃0, Select Previous / Next Worktree).
+/// the order the sidebar offers its selectable rows in (⌃1…⌃0, ⌘⌃↑/↓).
 struct CatalogSidebarTests {
   private let folderRoot = Worktree(name: "notes", path: "/notes")
   private static let defaultGroup = WorkspaceGroupID()
