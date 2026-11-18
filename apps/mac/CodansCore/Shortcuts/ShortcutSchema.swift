@@ -475,6 +475,13 @@ extension ShortcutSchema {
       defaultBinding: .init(keyCode: UInt16(kVK_ANSI_L), modifiers: [.command, .option])
     ),
     .init(
+      id: .placePane,
+      title: "Place Pane…",
+      category: .terminal,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_K), modifiers: [.command, .option])
+    ),
+    .init(
       id: .switchToTab1,
       title: "Switch to Tab 1",
       category: .terminal,

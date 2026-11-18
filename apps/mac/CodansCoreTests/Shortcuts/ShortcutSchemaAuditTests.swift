@@ -121,6 +121,21 @@ struct ShortcutSchemaAuditTests {
     #expect(CommandID.focusAgentAt(index: 10) == nil)
   }
 
+  /// ADR 0013: ⌘⌥K opens the Place picker. No other default claims it, AppKit does not
+  /// reserve it, and it sits next to ⌘⌥L (Arrange Layout…).
+  @Test
+  func placePaneDefaultClashesWithNothing() throws {
+    let entry = try #require(ShortcutSchema.app.entry(for: .placePane))
+    #expect(entry.scope == .configurable)
+    let binding = try #require(entry.defaultBinding)
+    let clashes = ShortcutSchema.app.entries.filter {
+      $0.id != .placePane && $0.defaultBinding?.keyCode == binding.keyCode
+        && $0.defaultBinding?.modifiers == binding.modifiers
+    }
+    #expect(clashes.isEmpty, "Place Pane default clashes with \(clashes.map(\.id)).")
+    #expect(!AppKitReservedDetector.isReserved(keyCode: binding.keyCode, modifiers: binding.modifiers))
+  }
+
   /// ADR 0012: no default chord uses `⌃⌥`, which window managers such as
   /// Magnet take as global hotkeys.
   @Test
@@ -209,6 +224,7 @@ struct ShortcutSchemaAuditTests {
     (.focusPane8, (0x1C, [.command, .option])),  // ⌘⌥8
     (.focusPane9, (0x19, [.command, .option])),  // ⌘⌥9
     (.arrangeLayout, (0x25, [.command, .option])),  // ⌘⌥L
+    (.placePane, (0x28, [.command, .option])),  // ⌘⌥K (ADR 0013)
     (.revealCurrentWorktreeInFinder, (0x1F, [.command, .option])),  // ⌥O
     (.archiveCurrentWorktree, (0x33, [.command, .control])),  // ⌃⌘⌫
     (.deleteCurrentWorktree, (0x33, [.command, .control, .shift])),  // ⌃⌘⇧⌫
