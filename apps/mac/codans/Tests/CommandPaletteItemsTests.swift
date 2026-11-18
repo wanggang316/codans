@@ -106,6 +106,26 @@ struct CommandPaletteItemsTests {
     #expect(Self.placeIDs(paneCount: 3, precise: false).isEmpty)
   }
 
+  /// "Place…" opens the Place picker; it has the same gate as the region
+  /// items and shows the ⌘⌥K chord through its command.
+  @Test
+  func placePickerItemFollowsThePlaceGate() throws {
+    func item(paneCount: Int, precise: Bool) -> CommandPaletteItem? {
+      let (catalog, selection, focused) = Self.placeFixture(paneCount: paneCount)
+      return Self.withEmptySettings {
+        CommandPaletteItems.build(
+          selection: selection, catalog: catalog, focusedPaneID: focused, paneFocusPrecise: precise)
+      }
+      .first { $0.id == "pane.placePicker" }
+    }
+    let place = try #require(item(paneCount: 2, precise: true))
+    #expect(place.title == "Place…")
+    #expect(place.commandID == .placePane)
+    #expect(place.kind == .openPlacePicker)
+    #expect(item(paneCount: 1, precise: true) == nil)
+    #expect(item(paneCount: 3, precise: false) == nil)
+  }
+
   // MARK: - Worktree context
 
   @Test

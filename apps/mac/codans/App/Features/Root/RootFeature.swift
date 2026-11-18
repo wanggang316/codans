@@ -3010,6 +3010,9 @@ struct RootFeature {
     case .handOff:
       return .send(.handoffRequested(sourcePaneID))
 
+    case .openPlacePicker:
+      return .send(.placePickerToggle(sourcePaneID))
+
     // Agent Workflows — open the start panel for the chosen definition in
     // the worktree that built the item.
     case .runWorkflow(let projectID, let worktreeID, let workflowID):

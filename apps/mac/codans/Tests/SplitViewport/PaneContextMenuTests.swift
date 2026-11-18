@@ -242,6 +242,35 @@ struct PaneContextMenuTests {
 
   // MARK: - Layout ▸ Place
 
+  /// Place… opens the Place picker for the clicked pane, and only in a Tab
+  /// with two or more panes.
+  @Test
+  func placePickerOpensOnlyForTabsWithTwoOrMorePanes() throws {
+    let first = PaneID()
+    let second = PaneID()
+    let split = Tab(
+      splitTree: try SplitTree(leaf: first).inserting(second, at: first, direction: .right),
+      panes: [Pane(id: first, workingDirectory: "/tmp"), Pane(id: second, workingDirectory: "/tmp")])
+    let lone = PaneID()
+    let single = Tab(splitTree: SplitTree(leaf: lone), panes: [Pane(id: lone, workingDirectory: "/tmp")])
+    let catalog = Catalog(projects: [
+      Project(
+        name: "fixture", rootPath: "/tmp",
+        worktrees: [Worktree(name: "fixture", path: "/tmp", tabs: [split, single])])
+    ])
+    var opened = 0
+    let model = PaneContextMenuModel(
+      paneID: second, snapshot: { catalog }, setLabel: { _, _, _ in },
+      openPlacePicker: { opened += 1 })
+    let loneModel = PaneContextMenuModel(
+      paneID: lone, snapshot: { catalog }, setLabel: { _, _, _ in },
+      openPlacePicker: { opened += 1 })
+
+    model.placeWithPicker()
+    loneModel.placeWithPicker()
+    #expect(opened == 1)
+  }
+
   /// Place acts on the clicked pane, and a one-pane Tab offers it disabled
   /// and ignores it.
   @Test
