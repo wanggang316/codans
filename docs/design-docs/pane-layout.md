@@ -1,12 +1,12 @@
 # Design Doc: Pane Layout
 
-**Availability:** Available (Place). Planned: Arrange and the Layout picker, Pane numbers, animated transitions (#547).
+**Availability:** Available (Place). Planned: the Place picker (`⌘⌥K`, ADR 0013) and animated transitions (#547). Arrange, the Layout picker, and Pane numbers are described in [Keyboard Shortcuts](keyboard-shortcuts.md).
 **Author:** superada2026
 **Implementation:** [`SplitTree.placing`](../../apps/mac/CodansCore/SplitTree.swift), [`PlaceRegion`](../../apps/mac/CodansCore/PlaceRegion.swift), [`HierarchyManager.placePane`](../../apps/mac/codans/Runtime/HierarchyManager.swift), [`PaneActionRouterFeature`](../../apps/mac/codans/App/Features/PaneActionRouter/PaneActionRouterFeature.swift)
 
 ## Context and Scope
 
-一个 Tab 的 Pane 排在一棵 split tree 里（`Tab.splitTree`）。此前用户只能一次改一个 split：先 split，再拖分隔条。Pane layout 给出窗口管理器式的操作，术语见 [GLOSSARY — Pane layout](../../GLOSSARY.md#pane-layout)。本文记录已实现的 **Place**；Arrange、Pane number 与过渡动画（[ADR 0011](../adr/0011-layout-transitions-resize-terminals-once.md)）在后续工单补充。
+一个 Tab 的 Pane 排在一棵 split tree 里（`Tab.splitTree`）。此前用户只能一次改一个 split：先 split，再拖分隔条。Pane layout 给出窗口管理器式的操作，术语见 [GLOSSARY — Pane layout](../../GLOSSARY.md#pane-layout)。本文记录已实现的 **Place**；Place picker（[ADR 0013](../adr/0013-place-opens-a-picker-with-no-region-chords.md)）与过渡动画（[ADR 0011](../adr/0011-layout-transitions-resize-terminals-once.md)）在后续工单补充。
 
 ## Goals and Non-Goals
 
@@ -42,12 +42,14 @@ Place 是 `CodansCore` 里的纯 split-tree 变换 `SplitTree.placing(_:in:)`，
 ### 路由
 
 ```
-⌃⌘← / Window ▸ Layout ─→ RootFeature.placeFocusedPaneInCurrentTabRequested(region)
-Command Palette ─────────→ RootFeature.route(.paneAction(.place(region)))
-Pane Layout 子菜单 ─────→ GhosttySurfaceView.onPaneAction(.place(region))
+Window ▸ Layout / 用户绑定的和弦 ─→ RootFeature.placeFocusedPaneInCurrentTabRequested(region)
+Command Palette ─────────────────→ RootFeature.route(.paneAction(.place(region)))
+终端右键 / Header 操作菜单 ──────→ GhosttySurfaceView.onPaneAction(.place(region))
                                       │
                                       ▼
             PaneActionRouterFeature: .place(region)  (Pane < 2 → no-op)
+                                      │
+Pane 右键菜单 Layout 子菜单 ──→ PaneContextMenuModel.place(in:)  (Pane < 2 → disabled)
                                       │
                   HierarchyClient.placePane → HierarchyManager.placePane
                                       │
@@ -58,9 +60,12 @@ Pane Layout 子菜单 ─────→ GhosttySurfaceView.onPaneAction(.place(
 
 ### 快捷键
 
-每个区域一个 `CommandID`（`CommandID.place(_:)`），Settings → Shortcuts 中标题为 "Place in <区域>"。四个半区的默认和弦是 `⌃⌘←` / `⌃⌘→` / `⌃⌘↑` / `⌃⌘↓`；三分之一与三分之二没有默认和弦（[ADR 0012](../adr/0012-place-chords-avoid-the-magnet-modifiers.md)）。Select Previous / Next Worktree 原先的 `⌃⌘↑` / `⌃⌘↓` 因此移到 `⌃⌘[` / `⌃⌘]`。菜单栏 key equivalent 先于终端匹配，因此 `⌃⌘` 加方向键取代 Ghostty 在 macOS 上默认的 `resize_split` 同名和弦。
+每个区域一个 `CommandID`（`CommandID.place(_:)`），Settings → Shortcuts 中标题为 "Place in <区域>"，都没有默认和弦（[ADR 0013](../adr/0013-place-opens-a-picker-with-no-region-chords.md)，取代 ADR 0012）：Place 从 Place picker、Command Palette 与 Layout 菜单打开，用户可为常用区域自行绑定。Select Previous / Next Worktree 保持 `⌃⌘↑` / `⌃⌘↓`。
 
-Pane 的 Layout 子菜单由 Runtime 构建（`GhosttySurfaceView.addPaneActionItems`），右键菜单与 Pane 卡片 Header 的操作菜单共用。它显示的和弦来自 app 注入的 `TerminalEngine.menuKeyEquivalent`（读 `ShortcutsStore.resolved`），Runtime 不直接读快捷键注册表。
+Layout 子菜单有两处：
+
+- Window ▸ Layout 与 Pane 右键菜单（`PaneContextMenu`）的 Layout 子菜单，依次列出 Arrange…、全部 Place 区域、Focus Pane 1…9，并显示生效和弦。右键菜单作用于所点的 Pane；单 Pane 的 Tab 中 Place 项禁用。
+- 终端 surface 的右键菜单与 Pane 卡片 Header 的操作菜单（`GhosttySurfaceView.addPaneActionItems`）在拆分项后有一个只含 Place 区域的 Layout 子菜单。它由 Runtime 构建，显示的和弦来自 app 注入的 `TerminalEngine.menuKeyEquivalent`（读 `ShortcutsStore.resolved`），Runtime 不直接读快捷键注册表。
 
 ### Data Storage
 
@@ -68,4 +73,4 @@ Pane 的 Layout 子菜单由 Runtime 构建（`GhosttySurfaceView.addPaneActionI
 
 ## Cross-Cutting Concerns
 
-- **测试。** `SplitTreePlaceTests`：每个区域 × 三种起始形状 × 每个聚焦 Pane，leaf 集合、相对结构、只改 ratio、清除 zoom、单 Pane 不变。`PaneActionRouterFeatureTests` 覆盖路由与单 Pane 忽略；`HierarchyManagerTests` 覆盖持久化；`ShortcutSchemaAuditTests` 覆盖默认和弦（无重复、无 `⌃⌥`）；`CommandPaletteItemsTests` 覆盖 Palette 的出现条件。
+- **测试。** `SplitTreePlaceTests`：每个区域 × 三种起始形状 × 每个聚焦 Pane，leaf 集合、相对结构、只改 ratio、清除 zoom、单 Pane 不变。`PaneActionRouterFeatureTests` 覆盖路由与单 Pane 忽略；`HierarchyManagerTests` 覆盖持久化；`ShortcutSchemaAuditTests` 覆盖默认和弦（Place 无默认、无重复、无 `⌃⌥`、Worktree 前后切换仍为 `⌃⌘↑/↓`）；`PaneContextMenuTests` 覆盖右键菜单的 Place；`ShortcutDisplayTests` 覆盖菜单显示的生效和弦；`CommandPaletteItemsTests` 覆盖 Palette 的出现条件。

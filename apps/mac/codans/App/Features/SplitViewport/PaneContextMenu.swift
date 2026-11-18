@@ -18,6 +18,8 @@ struct PaneContextMenuModel {
   var focusPane: (PaneID) -> Void = { _ in }
   /// Opens the Layout picker for this pane's Tab.
   var arrangeLayout: () -> Void = {}
+  /// Moves a pane into a region of its Tab (Place) and keeps it focused.
+  var placePane: (PaneID, PlaceRegion) -> Void = { _, _ in }
 
   var isMuted: Bool {
     snapshot().pane(paneID)?.isNotificationsMuted ?? false
@@ -46,6 +48,16 @@ struct PaneContextMenuModel {
     pane(number: 2) != nil
   }
 
+  /// `true` when this pane's Tab has two or more Panes; a one-Pane Tab
+  /// ignores Place.
+  var canPlace: Bool { canArrange }
+
+  /// Places this pane (the one right-clicked) in `region`.
+  func place(in region: PlaceRegion) {
+    guard canPlace else { return }
+    placePane(paneID, region)
+  }
+
   func focusPane(number: Int) {
     guard let target = pane(number: number) else { return }
     focusPane(target)
@@ -53,7 +65,8 @@ struct PaneContextMenuModel {
 }
 
 /// Right-click menu for a pane. Hosts the "Mute notifications" toggle,
-/// the Layout submenu (Arrange… and Focus Pane 1…9 of this pane's Tab),
+/// the Layout submenu (Arrange…, Place this pane, and Focus Pane 1…9 of
+/// this pane's Tab),
 /// and a "Close" item that tears the pane down; future menu items can be
 /// added here without churning `LazyPaneHost`.
 ///
@@ -84,7 +97,13 @@ struct PaneContextMenu: View {
         try? hierarchy.focusPane(target, tabID, worktreeID, projectID)
         hierarchy.focusSurfaceView(target)
       },
-      arrangeLayout: { [openLayoutPicker, paneID] in openLayoutPicker(paneID) }
+      arrangeLayout: { [openLayoutPicker, paneID] in openLayoutPicker(paneID) },
+      // Same effect as `PaneActionRouterFeature`'s `.place`: reshape, then
+      // give input back to the placed pane.
+      placePane: { target, region in
+        try? hierarchy.placePane(target, region)
+        hierarchy.focusSurfaceView(target)
+      }
     )
   }
 
@@ -98,13 +117,23 @@ struct PaneContextMenu: View {
       )
     }
     Divider()
-    // The Layout submenu. Later layout commands (Place) join it.
+    // The Layout submenu, in the order of Window ▸ Layout.
     Menu("Layout") {
       Button("Arrange…") {
         model.arrangeLayout()
       }
       .appKeyboardShortcut(.arrangeLayout)
       .disabled(!model.canArrange)
+      ForEach(PlaceRegion.groups, id: \.self) { group in
+        Divider()
+        ForEach(group, id: \.self) { region in
+          Button(region.title) {
+            model.place(in: region)
+          }
+          .appKeyboardShortcut(.place(region))
+          .disabled(!model.canPlace)
+        }
+      }
       Divider()
       ForEach(Array(SplitTree<PaneID>.paneNumbers), id: \.self) { number in
         if let id = CommandID.focusPane(number: number) {
