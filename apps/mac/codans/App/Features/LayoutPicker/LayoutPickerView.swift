@@ -21,10 +21,9 @@ struct LayoutPickerView: View {
       },
       onMove: { store.send(.selectionMoved($0)) },
       onCommit: { store.send(.selectionCommitted) },
-      onCancel: { store.send(.cancelled) }
-    ) {
-      grid
-    }
+      onCancel: { store.send(.cancelled) },
+      content: { grid }
+    )
   }
 
   private var grid: some View {
@@ -47,10 +46,9 @@ struct LayoutPickerView: View {
       isSelected: isSelected,
       isCurrent: isCurrent,
       accessibilityLabel: isCurrent ? "\(number), \(title), current layout" : "\(number), \(title)",
-      action: { store.send(.presetTapped(preset)) }
-    ) {
-      PickerThumbnail(slots: slots(preset))
-    }
+      action: { store.send(.presetTapped(preset)) },
+      thumbnail: { PickerThumbnail(slots: slots(preset)) }
+    )
   }
 
   /// The preset's regions; the focused Pane's region is tinted so main

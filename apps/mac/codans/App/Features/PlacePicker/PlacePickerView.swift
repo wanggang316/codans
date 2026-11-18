@@ -18,10 +18,9 @@ struct PlacePickerView: View {
       onKey: { store.send(.keyPressed($0)) },
       onMove: { store.send(.selectionMoved($0)) },
       onCommit: { store.send(.selectionCommitted) },
-      onCancel: { store.send(.cancelled) }
-    ) {
-      grid
-    }
+      onCancel: { store.send(.cancelled) },
+      content: { grid }
+    )
   }
 
   private var keyRange: String {
@@ -40,10 +39,9 @@ struct PlacePickerView: View {
           title: item.region.title,
           isSelected: index == store.selectedIndex,
           accessibilityLabel: "\(item.key), \(item.region.title)",
-          action: { store.send(.regionTapped(item.region)) }
-        ) {
-          PickerThumbnail(slots: store.state.thumbnail(item.region))
-        }
+          action: { store.send(.regionTapped(item.region)) },
+          thumbnail: { PickerThumbnail(slots: store.state.thumbnail(item.region)) }
+        )
       }
     }
   }
