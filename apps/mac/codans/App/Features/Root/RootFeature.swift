@@ -107,6 +107,11 @@ struct RootFeature {
     /// applies a preset or cancels.
     @Presents var layoutPicker: LayoutPickerFeature.State?
 
+    /// Place picker over the split viewport of the current Tab. `nil` =
+    /// hidden. Opened by `placePickerToggle`; cleared when the user places
+    /// the Pane or cancels. At most one of the two pickers is open.
+    @Presents var placePicker: PlacePickerFeature.State?
+
     /// Tag CRUD sheet. `nil` = hidden; non-nil hosts `TagManagerSheet`.
     /// Opened from the sidebar via `.sidebar(.delegate(.openTagManager))`.
     @Presents var tagManagerSheet: TagManagerFeature.State?
@@ -478,6 +483,12 @@ struct RootFeature {
     /// Tab does not open it.
     case layoutPickerToggle(PaneID?)
     case layoutPicker(PresentationAction<LayoutPickerFeature.Action>)
+    /// Toggle the Place picker. Sources: the `⌘⌥K` / Window ▸ Layout ▸
+    /// Place… menu item (payload `nil`: the current Tab's focused Pane), the
+    /// Command Palette, and the Pane context menu (payload: the clicked
+    /// Pane). A one-Pane Tab does not open it.
+    case placePickerToggle(PaneID?)
+    case placePicker(PresentationAction<PlacePickerFeature.Action>)
     /// Open the Hand Off panel for `paneID`, or for the selected worktree's
     /// focused pane when nil. Refused with a status toast when no agent is
     /// detected in that pane — a handoff needs an agent to ask.
@@ -633,6 +644,7 @@ struct RootFeature {
     diffBindings
     newAgentReducer
     layoutPickerReducer
+    placePickerReducer
     coreReducer
   }
 
@@ -678,6 +690,24 @@ struct RootFeature {
     }
     .ifLet(\.$layoutPicker, action: \.layoutPicker) {
       LayoutPickerFeature()
+    }
+  }
+
+  /// The Place picker's presentation and outcomes, beside
+  /// `layoutPickerReducer` for the same type-inference reason.
+  private var placePickerReducer: some Reducer<State, Action> {
+    Reduce { state, action in
+      switch action {
+      case .placePickerToggle(let sourcePaneID):
+        return togglePlacePicker(&state, sourcePaneID: sourcePaneID)
+      case .placePicker(.presented(.delegate(let delegate))):
+        return closePlacePicker(&state, delegate: delegate)
+      default:
+        return .none
+      }
+    }
+    .ifLet(\.$placePicker, action: \.placePicker) {
+      PlacePickerFeature()
     }
   }
 
@@ -2134,6 +2164,10 @@ struct RootFeature {
         // Handled by `layoutPickerReducer`.
         return .none
 
+      case .placePickerToggle, .placePicker:
+        // Handled by `placePickerReducer`.
+        return .none
+
       case .commandQueueToggle(let sourcePaneID):
         guard let paneID = sourcePaneID ?? focusedPaneID(state: state) else {
           // No pane to attach a queue to (empty worktree, no tab). Silently
@@ -2617,9 +2651,51 @@ struct RootFeature {
       let address = hierarchyClient.addressOf(paneID),
       let tab = findTab(address, in: hierarchyClient.snapshot())
     else { return .none }
+    // One picker at a time: the new one takes the keyboard.
+    state.placePicker = nil
     state.layoutPicker = LayoutPickerFeature.State(
       tabID: tab.id, splitTree: tab.splitTree, focusedPaneID: paneID)
     return .none
+  }
+
+  /// Opens the Place picker for the Tab of `sourcePaneID` (the current Tab's
+  /// focused Pane when nil), or closes an open one with no change. Same
+  /// rules as `toggleLayoutPicker`.
+  private func togglePlacePicker(_ state: inout State, sourcePaneID: PaneID?) -> Effect<Action> {
+    if let picker = state.placePicker {
+      state.placePicker = nil
+      if isShown(picker.tabID) {
+        return refocusSurface(picker.paneID)
+      }
+    }
+    guard
+      let paneID = sourcePaneID ?? focusedPaneID(state: state),
+      let address = hierarchyClient.addressOf(paneID),
+      let tab = findTab(address, in: hierarchyClient.snapshot())
+    else { return .none }
+    state.layoutPicker = nil
+    state.placePicker = PlacePickerFeature.State(
+      tabID: tab.id, splitTree: tab.splitTree, focusedPaneID: paneID)
+    return .none
+  }
+
+  /// Closes the Place picker. Apply goes through the router, which places
+  /// the Pane and makes it first responder again; cancel only gives focus
+  /// back. A picker whose Tab is no longer shown closes with no change, as
+  /// in `closeLayoutPicker`.
+  private func closePlacePicker(
+    _ state: inout State, delegate: PlacePickerFeature.Action.Delegate
+  ) -> Effect<Action> {
+    guard let picker = state.placePicker else { return .none }
+    state.placePicker = nil
+    guard isShown(picker.tabID) else { return .none }
+    let paneID = picker.paneID
+    switch delegate {
+    case .apply(let region):
+      return .send(.paneActionRouter(.requested(paneID, .place(region))))
+    case .cancel:
+      return refocusSurface(paneID)
+    }
   }
 
   /// Closes the Layout picker. Apply goes through the router, which arranges

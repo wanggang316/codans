@@ -1049,7 +1049,8 @@ struct RootFeatureTests {
     paneIDs: [PaneID], focused: PaneID,
     surfaceFocus: LockIsolated<[PaneID]>, arranged: LockIsolated<[LayoutPreset]>,
     selectedTab: LockIsolated<TabID?>? = nil,
-    otherWorktreeSelected: LockIsolated<Bool>? = nil
+    otherWorktreeSelected: LockIsolated<Bool>? = nil,
+    placed: LockIsolated<[PlaceRegion]>? = nil
   ) throws -> TestStoreOf<RootFeature> {
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
@@ -1093,6 +1094,7 @@ struct RootFeatureTests {
         PaneAddress(projectID: projectID, worktreeID: worktreeID, tabID: tabID, paneID: paneID)
       }
       $0.hierarchyClient.arrangeTab = { _, _, _, preset, _ in arranged.withValue { $0.append(preset) } }
+      $0.hierarchyClient.placePane = { _, region in placed?.withValue { $0.append(region) } }
       $0.hierarchyClient.focusSurfaceView = { id in surfaceFocus.withValue { $0.append(id) } }
     }
     return store
@@ -1300,6 +1302,137 @@ struct RootFeatureTests {
 
     await store.send(.layoutPickerToggle(nil))
     #expect(store.state.layoutPicker == nil)
+  }
+
+  /// `⌘⌥K`: opens the Place picker for the focused Pane's Tab; a key places
+  /// that Pane through the router and gives focus back to it.
+  @Test
+  func placePickerOpensForCurrentTabAndAppliesKey() async throws {
+    let panes = [PaneID(), PaneID(), PaneID()]
+    let surfaceFocus = LockIsolated<[PaneID]>([])
+    let placed = LockIsolated<[PlaceRegion]>([])
+    let store = try Self.layoutPickerStore(
+      paneIDs: panes, focused: panes[1], surfaceFocus: surfaceFocus, arranged: .init([]), placed: placed)
+    store.exhaustivity = .off
+
+    await store.send(.placePickerToggle(nil))
+    let picker = try #require(store.state.placePicker)
+    #expect(picker.paneID == panes[1])
+    #expect(picker.items.contains { $0.key == "D" })
+
+    await store.send(.placePicker(.presented(.keyPressed("d"))))
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(store.state.placePicker == nil)
+    #expect(placed.value == [.centerThird])
+    #expect(surfaceFocus.value == [panes[1]])
+  }
+
+  @Test
+  func placePickerAppliesSelectionOnReturn() async throws {
+    let panes = [PaneID(), PaneID()]
+    let surfaceFocus = LockIsolated<[PaneID]>([])
+    let placed = LockIsolated<[PlaceRegion]>([])
+    let store = try Self.layoutPickerStore(
+      paneIDs: panes, focused: panes[0], surfaceFocus: surfaceFocus, arranged: .init([]), placed: placed)
+    store.exhaustivity = .off
+
+    await store.send(.placePickerToggle(nil))
+    await store.send(.placePicker(.presented(.selectionMoved(.down))))
+    await store.send(.placePicker(.presented(.selectionMoved(.right))))
+    await store.send(.placePicker(.presented(.selectionCommitted)))
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(store.state.placePicker == nil)
+    #expect(placed.value == [.rightTwoThirds])
+    #expect(surfaceFocus.value == [panes[0]])
+  }
+
+  @Test
+  func placePickerEscapeChangesNothingAndRefocusesPane() async throws {
+    let panes = [PaneID(), PaneID()]
+    let surfaceFocus = LockIsolated<[PaneID]>([])
+    let placed = LockIsolated<[PlaceRegion]>([])
+    let store = try Self.layoutPickerStore(
+      paneIDs: panes, focused: panes[1], surfaceFocus: surfaceFocus, arranged: .init([]), placed: placed)
+    store.exhaustivity = .off
+
+    await store.send(.placePickerToggle(nil))
+    #expect(store.state.placePicker != nil)
+    store.exhaustivity = .on
+    await store.send(.placePicker(.presented(.cancelled)))
+    await store.receive(\.placePicker.presented.delegate.cancel) {
+      $0.placePicker = nil
+    }
+    await store.finish()
+    #expect(placed.value.isEmpty)
+    #expect(surfaceFocus.value == [panes[1]])
+  }
+
+  /// A second `⌘⌥K` closes the open picker with no change.
+  @Test
+  func placePickerToggleClosesOpenPicker() async throws {
+    let panes = [PaneID(), PaneID()]
+    let surfaceFocus = LockIsolated<[PaneID]>([])
+    let placed = LockIsolated<[PlaceRegion]>([])
+    let store = try Self.layoutPickerStore(
+      paneIDs: panes, focused: panes[0], surfaceFocus: surfaceFocus, arranged: .init([]), placed: placed)
+    store.exhaustivity = .off
+
+    await store.send(.placePickerToggle(nil))
+    await store.send(.placePickerToggle(nil))
+    await store.finish()
+    #expect(store.state.placePicker == nil)
+    #expect(placed.value.isEmpty)
+    #expect(surfaceFocus.value == [panes[0]])
+  }
+
+  /// Only one picker is open at a time: each toggle replaces the other.
+  @Test
+  func placeAndLayoutPickersReplaceEachOther() async throws {
+    let panes = [PaneID(), PaneID()]
+    let store = try Self.layoutPickerStore(
+      paneIDs: panes, focused: panes[0], surfaceFocus: .init([]), arranged: .init([]))
+    store.exhaustivity = .off
+
+    await store.send(.layoutPickerToggle(nil))
+    await store.send(.placePickerToggle(nil))
+    #expect(store.state.layoutPicker == nil)
+    #expect(store.state.placePicker != nil)
+    await store.send(.layoutPickerToggle(nil))
+    #expect(store.state.layoutPicker != nil)
+    #expect(store.state.placePicker == nil)
+  }
+
+  @Test
+  func placePickerChangesNothingAfterAnotherTabIsSelected() async throws {
+    let panes = [PaneID(), PaneID()]
+    let surfaceFocus = LockIsolated<[PaneID]>([])
+    let placed = LockIsolated<[PlaceRegion]>([])
+    let selectedTab = LockIsolated<TabID?>(nil)
+    let store = try Self.layoutPickerStore(
+      paneIDs: panes, focused: panes[0], surfaceFocus: surfaceFocus, arranged: .init([]),
+      selectedTab: selectedTab, placed: placed)
+    store.exhaustivity = .off
+
+    await store.send(.placePickerToggle(nil))
+    selectedTab.setValue(TabID())
+    await store.send(.placePicker(.presented(.keyPressed("1"))))
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(store.state.placePicker == nil)
+    #expect(placed.value.isEmpty)
+    #expect(surfaceFocus.value.isEmpty)
+  }
+
+  @Test
+  func placePickerDoesNotOpenForOnePaneTab() async throws {
+    let pane = PaneID()
+    let store = try Self.layoutPickerStore(
+      paneIDs: [pane], focused: pane, surfaceFocus: .init([]), arranged: .init([]))
+
+    await store.send(.placePickerToggle(nil))
+    #expect(store.state.placePicker == nil)
   }
 
   @Test
