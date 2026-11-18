@@ -887,27 +887,45 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
     }
   }
 
-  /// "Layout" submenu: every Place region, grouped as in Window ▸ Layout and
-  /// showing the effective chord of each. A pop-up menu item answers its key
-  /// equivalent only while the menu is open; the main menu's item does the
-  /// work otherwise. A one-pane Tab ignores Place, so the items need no gate.
   private func layoutMenuItem() -> NSMenuItem {
+    Self.makeLayoutMenuItem(
+      target: self,
+      placePickerAction: #selector(placePickerMenuItemSelected(_:)),
+      placeAction: #selector(placeMenuItemSelected(_:)),
+      keyEquivalent: { [menuKeyEquivalent] in menuKeyEquivalent?($0) })
+  }
+
+  /// "Layout" submenu: Place… (opens the Place picker), then every Place
+  /// region grouped as in Window ▸ Layout, each showing its effective chord.
+  /// A pop-up menu item answers its key equivalent only while the menu is
+  /// open; the main menu's item does the work otherwise. A one-pane Tab
+  /// ignores Place and opens no picker, so the items need no gate.
+  static func makeLayoutMenuItem(
+    target: AnyObject,
+    placePickerAction: Selector,
+    placeAction: Selector,
+    keyEquivalent: (CommandID) -> MenuKeyEquivalent?
+  ) -> NSMenuItem {
+    func makeItem(_ title: String, action: Selector, command: CommandID, identifier: String) -> NSMenuItem {
+      let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+      item.target = target
+      if let chord = keyEquivalent(command) {
+        item.keyEquivalent = chord.key
+        item.keyEquivalentModifierMask = chord.modifiers
+      }
+      item.setAccessibilityIdentifier(identifier)
+      return item
+    }
     let submenu = NSMenu(title: "Layout")
+    submenu.addItem(
+      makeItem("Place…", action: placePickerAction, command: .placePane, identifier: "pane_hud.place_picker"))
     for group in PlaceRegion.groups {
-      if submenu.numberOfItems > 0 { submenu.addItem(.separator()) }
+      submenu.addItem(.separator())
       for region in group {
-        let item = NSMenuItem(
-          title: region.title,
-          action: #selector(placeMenuItemSelected(_:)),
-          keyEquivalent: ""
-        )
-        item.target = self
+        let item = makeItem(
+          region.title, action: placeAction, command: .place(region),
+          identifier: "pane_hud.place_\(region.rawValue)")
         item.representedObject = region
-        if let chord = menuKeyEquivalent?(.place(region)) {
-          item.keyEquivalent = chord.key
-          item.keyEquivalentModifierMask = chord.modifiers
-        }
-        item.setAccessibilityIdentifier("pane_hud.place_\(region.rawValue)")
         submenu.addItem(item)
       }
     }
@@ -916,6 +934,10 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
     item.setAccessibilityIdentifier("pane_hud.layout")
     item.submenu = submenu
     return item
+  }
+
+  @objc private func placePickerMenuItemSelected(_ sender: NSMenuItem) {
+    onPaneAction?(.openPlacePicker)
   }
 
   @objc private func placeMenuItemSelected(_ sender: NSMenuItem) {

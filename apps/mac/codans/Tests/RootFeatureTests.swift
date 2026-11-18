@@ -1425,6 +1425,20 @@ struct RootFeatureTests {
     #expect(surfaceFocus.value.isEmpty)
   }
 
+  /// The terminal's right-click Layout ▸ Place… (a router delegate) opens
+  /// the picker for the clicked pane.
+  @Test
+  func paneActionOpenPlacePickerOpensThePickerForThatPane() async throws {
+    let panes = [PaneID(), PaneID(), PaneID()]
+    let store = try Self.layoutPickerStore(
+      paneIDs: panes, focused: panes[0], surfaceFocus: .init([]), arranged: .init([]))
+    store.exhaustivity = .off
+
+    await store.send(.paneActionRouter(.requested(panes[2], .openPlacePicker)))
+    await store.skipReceivedActions()
+    #expect(store.state.placePicker?.paneID == panes[2])
+  }
+
   @Test
   func placePickerDoesNotOpenForOnePaneTab() async throws {
     let pane = PaneID()

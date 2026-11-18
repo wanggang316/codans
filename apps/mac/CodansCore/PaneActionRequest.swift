@@ -32,6 +32,9 @@ public nonisolated enum PaneActionRequest: Sendable, Equatable {
   /// Raised by the menus and the Command Palette; libghostty has no
   /// matching action.
   case place(PlaceRegion)
+  /// Open the Place picker for the source pane. Raised by the terminal's
+  /// Layout submenu; libghostty has no matching action.
+  case openPlacePicker
   case presentTerminal
   case toggleCommandPalette
   /// ⌘-click on a link in terminal output. `raw` is the matched text as

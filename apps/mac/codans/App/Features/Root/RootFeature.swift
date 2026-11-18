@@ -1933,6 +1933,8 @@ struct RootFeature {
         return .send(.commandPaletteToggle(paneID))
       case .paneActionRouter(.delegate(.presentTerminalRequested)):
         return .none
+      case .paneActionRouter(.delegate(.placePickerRequested(let paneID))):
+        return .send(.placePickerToggle(paneID))
       case .paneActionRouter(
         .delegate(.openLinkRequested(let paneID, let raw, let workingDirectory))):
         return .run { [terminalLinkClient] send in

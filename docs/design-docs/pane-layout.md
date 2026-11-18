@@ -66,9 +66,9 @@ Pane 右键菜单 Layout 子菜单 ──→ PaneContextMenuModel.place(in:)  (P
 - **区域与按键。** 每个区域一个缩略图，键固定：`1` 左半、`2` 右半、`3` 上半、`4` 下半、`5` 左三分之二、`6` 右三分之二、`7` 上三分之二、`8` 下三分之二、`9` 左三分之一、`A` 右三分之一、`B` 上三分之一、`C` 下三分之一、`D` 中三分之一（列）、`E` 中三分之一（行）。字母不分大小写。每行四个。
 - **中三分之一。** `D` / `E` 需要三个及以上 Pane（中间区域两侧各要有 Pane），两个 Pane 时不显示；其他区域的键不变（`PlacePickerFeature.canFill`）。
 - **缩略图。** 画出 Place 之后的 Tab：用 `SplitTree.placing` 作用于打开时的 split tree，聚焦 Pane 的区域着色，各区域标出 Pane 编号。picker 不含布局逻辑。
-- **按键。** 区域键立即放置并关闭；方向键移动选中项（←→ 只在本行、↑↓ 只在本列，不回绕），Return 应用选中项；Esc、点击卡片外或再按一次 `⌘⌥K` 关闭且不改变布局。
+- **按键。** 卡片只接收已显示区域的键（`State.acceptedKeys`，字母含大小写），其他键不处理。区域键立即放置并关闭；方向键移动选中项（←→ 只在本行、↑↓ 只在本列，不回绕），Return 应用选中项；Esc、点击卡片外或再按一次 `⌘⌥K` 关闭且不改变布局。
 - **焦点与 Tab。** 卡片打开时持有键盘焦点，关闭后焦点回到聚焦 Pane 的 surface。picker 绑定打开它的 Tab，规则同 Layout picker：切到其他 Tab 或 Worktree 时关闭且不改变布局。只有一个 Pane 的 Tab 不打开，也不报错。
-- **路由。** `RootFeature.placePickerToggle(PaneID?)` 打开 `PlacePickerFeature`，来源为 `nil`（主菜单）时取当前 Tab 的聚焦 Pane；应用时经 `PaneActionRouterFeature` 的 `.place(region)`。入口：Window ▸ Layout 与 Pane 右键菜单（`PaneContextMenu`）Layout 子菜单中 Arrange… 之后的 "Place…"（显示生效和弦，单 Pane Tab 中禁用），以及 Command Palette 的 "Place…"（`CommandPaletteItem.Kind.openPlacePicker`，出现条件同 Place 项）。
+- **路由。** `RootFeature.placePickerToggle(PaneID?)` 打开 `PlacePickerFeature`，来源为 `nil`（主菜单）时取当前 Tab 的聚焦 Pane；应用时经 `PaneActionRouterFeature` 的 `.place(region)`。入口：Window ▸ Layout 与 Pane 右键菜单（`PaneContextMenu`）Layout 子菜单中 Arrange… 之后的 "Place…"（显示生效和弦，单 Pane Tab 中禁用），终端右键菜单与 Pane Header 操作菜单 Layout 子菜单顶部的 "Place…"（`PaneActionRequest.openPlacePicker`），以及 Command Palette 的 "Place…"（`CommandPaletteItem.Kind.openPlacePicker`，出现条件同 Place 项）。
 
 ### 快捷键
 
@@ -77,7 +77,7 @@ Pane 右键菜单 Layout 子菜单 ──→ PaneContextMenuModel.place(in:)  (P
 Layout 子菜单有两处：
 
 - Window ▸ Layout 与 Pane 右键菜单（`PaneContextMenu`）的 Layout 子菜单，依次列出 Arrange…、Place…、全部 Place 区域、Focus Pane 1…9，并显示生效和弦。右键菜单作用于所点的 Pane；单 Pane 的 Tab 中 Place 项禁用。
-- 终端 surface 的右键菜单与 Pane 卡片 Header 的操作菜单（`GhosttySurfaceView.addPaneActionItems`）在拆分项后有一个只含 Place 区域的 Layout 子菜单。它由 Runtime 构建，显示的和弦来自 app 注入的 `TerminalEngine.menuKeyEquivalent`（读 `ShortcutsStore.resolved`），Runtime 不直接读快捷键注册表。
+- 终端 surface 的右键菜单与 Pane 卡片 Header 的操作菜单（`GhosttySurfaceView.addPaneActionItems`）在拆分项后有一个 Layout 子菜单：先是 Place…（`PaneActionRequest.openPlacePicker`，经 router 的 `placePickerRequested` delegate 打开所点 Pane 的 Place picker），再是全部 Place 区域。它由 Runtime 构建，显示的和弦来自 app 注入的 `TerminalEngine.menuKeyEquivalent`（读 `ShortcutsStore.resolved`），Runtime 不直接读快捷键注册表。
 
 ### Data Storage
 
