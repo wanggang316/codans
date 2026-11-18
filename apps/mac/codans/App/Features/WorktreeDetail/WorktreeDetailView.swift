@@ -39,6 +39,8 @@ struct WorktreeDetailView: View {
   /// Layout picker, scoped by `ContentView` from `RootFeature.layoutPicker`.
   /// Non-nil while the picker is open; drawn over the split viewport.
   var layoutPickerStore: StoreOf<LayoutPickerFeature>?
+  /// Place picker, scoped by `ContentView` from `RootFeature.placePicker`.
+  var placePickerStore: StoreOf<PlacePickerFeature>?
   /// Invoked from the empty-state Add Project button. Wired by `ContentView`
   /// so the detail view doesn't need to hold the sidebar's TCA scope just
   /// to fire `toolbarAddProjectTapped` — same pattern as the editor toast
@@ -90,12 +92,16 @@ struct WorktreeDetailView: View {
 
   var body: some View {
     detailBody
-      // The Layout picker arranges one Tab. Selecting another Tab or
-      // Worktree while it is open (Tab bar click, CLI, closing the Tab)
+      // The Layout and Place pickers act on one Tab. Selecting another Tab
+      // or Worktree while one is open (Tab bar click, CLI, closing the Tab)
       // closes it; `RootFeature` then changes nothing.
       .onChange(of: resolveAddress()?.activeTab) { _, shownTabID in
-        guard let layoutPickerStore, layoutPickerStore.tabID != shownTabID else { return }
-        layoutPickerStore.send(.cancelled)
+        if let layoutPickerStore, layoutPickerStore.tabID != shownTabID {
+          layoutPickerStore.send(.cancelled)
+        }
+        if let placePickerStore, placePickerStore.tabID != shownTabID {
+          placePickerStore.send(.cancelled)
+        }
       }
       // Paint a low-alpha Ghostty-terminal-background band into the
       // detail's leading safe-area inset. The macOS 26 floating-sidebar
@@ -290,6 +296,8 @@ struct WorktreeDetailView: View {
           // is no longer shown.
           if let layoutPickerStore, layoutPickerStore.tabID == tabID {
             LayoutPickerView(store: layoutPickerStore)
+          } else if let placePickerStore, placePickerStore.tabID == tabID {
+            PlacePickerView(store: placePickerStore)
           }
         }
       } else {

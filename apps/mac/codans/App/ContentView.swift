@@ -138,6 +138,7 @@ struct ContentView: View {
         gitPlatformStore: store.scope(state: \.gitPlatform, action: \.gitPlatform),
         branchSwitcherStore: store.scope(state: \.branchSwitcher, action: \.branchSwitcher),
         layoutPickerStore: store.scope(state: \.layoutPicker, action: \.layoutPicker.presented),
+        placePickerStore: store.scope(state: \.placePicker, action: \.placePicker.presented),
         onAddProject: { store.send(.sidebar(.toolbarAddProjectTapped)) },
         onNewAgent: { store.send(.newAgentRequested) },
         // Resolve the root-level focus id to its sidebar row each render. The
@@ -182,6 +183,10 @@ struct ContentView: View {
     .environment(
       \.openLayoutPicker,
       OpenLayoutPickerAction { paneID in store.send(.layoutPickerToggle(paneID)) }
+    )
+    .environment(
+      \.openPlacePicker,
+      OpenPlacePickerAction { paneID in store.send(.placePickerToggle(paneID)) }
     )
     .environment(settingsStore)
     .environment(UpdatesEnvironment.model)

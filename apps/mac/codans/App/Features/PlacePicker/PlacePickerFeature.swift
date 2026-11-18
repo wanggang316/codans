@@ -48,19 +48,13 @@ struct PlacePickerFeature {
     /// The Tab after placing the Pane in `region`, one slot per Pane in the
     /// unit square, labelled with the Pane number it has now. Uses the same
     /// Place code as the Tab.
-    func thumbnail(_ region: PlaceRegion) -> [ThumbnailSlot] {
+    func thumbnail(_ region: PlaceRegion) -> [PickerSlot] {
       guard let placed = try? splitTree.placing(paneID, in: region) else { return [] }
       return placed.spatialSlots().compactMap { slot in
         guard let number = splitTree.paneNumber(of: slot.leaf) else { return nil }
-        return ThumbnailSlot(paneNumber: number, bounds: slot.bounds, isFocused: slot.leaf == paneID)
+        return PickerSlot(paneNumber: number, bounds: slot.bounds, isFocused: slot.leaf == paneID)
       }
     }
-  }
-
-  struct ThumbnailSlot: Equatable {
-    let paneNumber: Int
-    let bounds: CGRect
-    let isFocused: Bool
   }
 
   /// Thumbnails per row; the arrow keys move in this grid. Four puts the

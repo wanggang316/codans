@@ -1,3 +1,5 @@
+import Foundation
+
 /// Arrow-key movement in the thumbnail grid that the Layout picker and the
 /// Place picker share. Items fill rows of `columns` from the top left.
 enum PickerGrid {
@@ -24,4 +26,12 @@ enum PickerGrid {
     }
     return (0..<count).contains(target) ? target : nil
   }
+}
+
+/// One Pane region of a picker thumbnail, in the unit square, labelled with
+/// its Pane number. The focused Pane's region is tinted.
+struct PickerSlot: Equatable {
+  let paneNumber: Int
+  let bounds: CGRect
+  let isFocused: Bool
 }
