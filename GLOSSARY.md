@@ -150,5 +150,5 @@ fixed keys (`1`–`9`, then `A`, `B`, …). A key places the focused Pane in tha
 region. It is separate from the Layout picker.
 
 **Pane number**: The position 1–9 of a Pane in the Pane order. `⌘⌥N` focuses
-Pane N; holding `⌘⌥` shows each number over its Pane. Panes after the ninth
+Pane N; holding `⌘⌥` shows each number in its Pane header, in place of the Pane icon. Panes after the ninth
 have no number.
