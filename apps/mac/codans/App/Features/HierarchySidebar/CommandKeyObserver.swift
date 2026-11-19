@@ -16,7 +16,7 @@ import SwiftUI
 /// pause before the second key, not the whole chord. Releases hide the hints immediately.
 ///
 /// **Hold of ⌘⌥.** `isCommandOptionHeld` follows the same rules for a hold of exactly ⌘ and ⌥
-/// (in either order). It drives the Pane number overlay of the split viewport. A held ⌘⌥ is a
+/// (in either order). It drives the Pane number hint of the pane card header. A held ⌘⌥ is a
 /// chord for the ⌘ hold, so the ⌘ hints stay hidden while the Pane numbers show.
 ///
 /// **Active-state coupling.** When a chord like ⌘O fires a menu action that opens an

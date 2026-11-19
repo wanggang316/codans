@@ -77,7 +77,7 @@ struct CommandHoldGestureTests {
     #expect(gesture.isHolding)
   }
 
-  // MARK: - Hold of ⌘⌥ (Pane number overlay)
+  // MARK: - Hold of ⌘⌥ (Pane number hint)
 
   @Test(arguments: [
     [NSEvent.ModifierFlags.command, [.command, .option]],

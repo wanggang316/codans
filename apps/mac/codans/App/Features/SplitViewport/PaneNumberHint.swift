@@ -1,15 +1,20 @@
 import SwiftUI
 
-/// The Pane number of one Pane, drawn over its center while the user holds exactly ⌘⌥ in the
-/// main window (`CommandKeyObserver.isCommandOptionHeld`). `⌘⌥N` focuses Pane N, so the
-/// overlay shows which chord reaches which Pane. The caller passes `nil` for a Pane with no
-/// number (after the ninth) and for a one-Pane Tab.
+/// The leading glyph of a pane card header, which shows the Pane number in its place while the
+/// user holds exactly ⌘⌥ in the main window (`CommandKeyObserver.isCommandOptionHeld`). `⌘⌥N`
+/// focuses Pane N, so the header shows which chord reaches which Pane, in the slot the eye
+/// already reads first. The caller passes `nil` for a Pane with no number (after the ninth)
+/// and for a one-Pane Tab; the glyph then stays.
 ///
 /// Reads both observers itself, like the ⌘ hints (`ShortcutHintLabel`), so only this view
 /// re-renders when a modifier changes. The main-window check keeps the numbers off while
 /// ⌘⌥ is held in Settings or the Diff window, whose key events the same app monitor sees.
-struct PaneNumberOverlay: View {
+struct PaneNumberHint<Glyph: View>: View {
   let number: Int?
+  /// The number takes the title's emphasis: primary on the focused pane, secondary elsewhere.
+  let isFocused: Bool
+  @ViewBuilder let glyph: () -> Glyph
+
   @Environment(CommandKeyObserver.self) private var commandKeyObserver: CommandKeyObserver?
   @Environment(MainWindowKeyObserver.self) private var mainWindowKey: MainWindowKeyObserver?
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -21,22 +26,16 @@ struct PaneNumberOverlay: View {
     ZStack {
       if isShown, let number {
         Text(verbatim: "\(number)")
-          .font(.system(size: 44, weight: .semibold, design: .rounded))
+          .font(.system(size: PaneCardMetrics.headerTitleFontSize, weight: .medium))
           .monospacedDigit()
-          .foregroundStyle(.primary)
-          .frame(minWidth: 76, minHeight: 76)
-          .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-          .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-              .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
-          }
-          .shadow(color: .black.opacity(0.2), radius: 8, y: 2)
+          .foregroundStyle(isFocused ? .primary : .secondary)
           .transition(.opacity)
           .accessibilityLabel("Pane \(number)")
+      } else {
+        glyph()
+          .transition(.opacity)
       }
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .allowsHitTesting(false)
     .animation(reduceMotion ? nil : .shortcutHint, value: isShown)
   }
 }

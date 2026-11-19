@@ -364,6 +364,7 @@ private struct LeafView: View {
         tabID: tabID,
         isSplit: isSplit,
         isFocused: isFocusedCard,
+        paneNumber: paneNumber,
         showsActions: showsActions,
         onFocus: focus,
         onSplit: split,
@@ -413,11 +414,6 @@ private struct LeafView: View {
     .opacity(isMoving ? PaneCardMetrics.movingOpacity : isFocusedCard ? 1 : PaneCardMetrics.unfocusedOpacity)
     .animation(.easeInOut(duration: 0.12), value: isFocused)
     .animation(.easeInOut(duration: 0.12), value: isMoving)
-    // Pane number while ⌘⌥ is held. After the card opacity so an
-    // unfocused card's number is not dimmed. A one-Pane Tab shows none.
-    .overlay {
-      PaneNumberOverlay(number: isSplit ? paneNumber : nil)
-    }
     .background {
       GeometryReader { geo in
         Color.clear.preference(

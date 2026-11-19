@@ -21,6 +21,9 @@ struct PaneCardHeader: View {
   /// next to.
   let isSplit: Bool
   let isFocused: Bool
+  /// Position 1–9 in the Tab's Pane order, shown in place of the glyph
+  /// while ⌘⌥ is held. `nil` after the ninth Pane.
+  let paneNumber: Int?
   let showsActions: Bool
   let onFocus: () -> Void
   let onSplit: (SplitTree<PaneID>.NewDirection) -> Void
@@ -70,7 +73,9 @@ struct PaneCardHeader: View {
   private var titleChip: some View {
     let showsMoveAffordance = isSplit && (isHoveringTitle || moveSession.source == paneID)
     return HStack(spacing: PaneCardMetrics.titleChipSpacing) {
-      Group {
+      // The Pane number wins over the move mark: holding ⌘⌥ asks for the
+      // numbers, wherever the pointer rests.
+      PaneNumberHint(number: isSplit ? paneNumber : nil, isFocused: isFocused) {
         if showsMoveAffordance {
           Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
             .font(.system(size: PaneCardMetrics.moveGlyphSize, weight: .medium))
